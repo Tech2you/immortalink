@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'screens/create_vault_screen.dart';
+import 'screens/sign_in_screen.dart';
+
 
 void main() {
   runApp(const MyApp());
@@ -28,7 +31,8 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+
       ),
       home: const MyHomePage(title: 'Immortalink'),
     );
@@ -57,34 +61,40 @@ class MyHomePage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'ImmortaLink',
+                  'Immortalink',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineLarge,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Preserve memories, then ask questions and get answers grounded in what they shared.',
+                  'Preserve your legacy and memories, ask questions and get answers grounded in what your lineage shared.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
                 const SizedBox(height: 32),
                 ElevatedButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Create Vault (coming next)')),
-                    );
-                  },
-                  child: const Text('Create Vault'),
-                ),
+  onPressed: () {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const CreateVaultScreen(),
+      ),
+    );
+  },
+  child: const Text('Create Vault'),
+),
+
                 const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Sign In (coming next)')),
-                    );
-                  },
-                  child: const Text('Sign In'),
-                ),
+               OutlinedButton(
+  onPressed: () {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const SignInScreen(),
+      ),
+    );
+  },
+  child: const Text('Sign In'),
+),
+
               ],
             ),
           ),
