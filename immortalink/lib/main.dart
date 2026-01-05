@@ -9,6 +9,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await dotenv.load(fileName: ".env");
+debugPrint('SUPABASE_URL = ${dotenv.env['SUPABASE_URL']}');
 
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
