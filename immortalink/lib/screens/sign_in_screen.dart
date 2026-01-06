@@ -17,34 +17,6 @@ class _SignInScreenState extends State<SignInScreen> {
 
   SupabaseClient get _supabase => Supabase.instance.client;
 
-  Future<void> _signUp() async {
-    setState(() {
-      _isLoading = true;
-      _message = null;
-    });
-
-    try {
-      final email = _emailController.text.trim();
-      final password = _passwordController.text;
-
-      await _supabase.auth.signUp(
-        email: email,
-        password: password,
-      );
-
-      setState(() {
-        _message =
-            "Account created. If email confirmation is ON, check your inbox to confirm before signing in.";
-      });
-    } on AuthException catch (e) {
-      setState(() => _message = e.message);
-    } catch (e) {
-      setState(() => _message = "Unexpected error: $e");
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
   Future<void> _signIn() async {
     setState(() {
       _isLoading = true;
@@ -55,13 +27,51 @@ class _SignInScreenState extends State<SignInScreen> {
       final email = _emailController.text.trim();
       final password = _passwordController.text;
 
+      if (email.isEmpty || password.isEmpty) {
+        setState(() => _message = "Please enter email and password.");
+        return;
+      }
+
       await _supabase.auth.signInWithPassword(
         email: email,
         password: password,
       );
 
-      if (!mounted) return;
-      Navigator.of(context).pop(); // go back to home for now
+      // IMPORTANT: DO NOT NAVIGATE.
+      // AuthGate will detect the session change and switch screens.
+      debugPrint("SIGNED IN user = ${_supabase.auth.currentSession?.user.id}");
+    } on AuthException catch (e) {
+      setState(() => _message = e.message);
+    } catch (e) {
+      setState(() => _message = "Unexpected error: $e");
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _signUp() async {
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
+
+    try {
+      final email = _emailController.text.trim();
+      final password = _passwordController.text;
+
+      if (email.isEmpty || password.isEmpty) {
+        setState(() => _message = "Please enter email and password.");
+        return;
+      }
+
+      await _supabase.auth.signUp(
+        email: email,
+        password: password,
+      );
+
+      setState(() {
+        _message = "Account created. Check your email to confirm, then sign in.";
+      });
     } on AuthException catch (e) {
       setState(() => _message = e.message);
     } catch (e) {
@@ -81,9 +91,7 @@ class _SignInScreenState extends State<SignInScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Sign In"),
-      ),
+      appBar: AppBar(title: const Text("Sign In")),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
@@ -104,8 +112,7 @@ class _SignInScreenState extends State<SignInScreen> {
                   obscureText: true,
                   decoration: const InputDecoration(labelText: "Password"),
                 ),
-                const SizedBox(height: 20),
-
+                const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: _isLoading ? null : _signIn,
                   child: _isLoading
@@ -116,19 +123,18 @@ class _SignInScreenState extends State<SignInScreen> {
                         )
                       : const Text("Sign In"),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 OutlinedButton(
                   onPressed: _isLoading ? null : _signUp,
                   child: const Text("Create Account"),
                 ),
-
                 if (_message != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
                   Text(
                     _message!,
                     textAlign: TextAlign.center,
                   ),
-                ],
+                ]
               ],
             ),
           ),
