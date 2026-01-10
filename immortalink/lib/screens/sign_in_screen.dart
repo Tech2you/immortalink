@@ -36,10 +36,7 @@ class _SignInScreenState extends State<SignInScreen> {
         email: email,
         password: password,
       );
-
-      // IMPORTANT: DO NOT NAVIGATE.
-      // AuthGate will detect the session change and switch screens.
-      debugPrint("SIGNED IN user = ${_supabase.auth.currentSession?.user.id}");
+      // AuthGate will switch screens.
     } on AuthException catch (e) {
       setState(() => _message = e.message);
     } catch (e) {
@@ -130,10 +127,7 @@ class _SignInScreenState extends State<SignInScreen> {
                 ),
                 if (_message != null) ...[
                   const SizedBox(height: 20),
-                  Text(
-                    _message!,
-                    textAlign: TextAlign.center,
-                  ),
+                  Text(_message!, textAlign: TextAlign.center),
                 ]
               ],
             ),
