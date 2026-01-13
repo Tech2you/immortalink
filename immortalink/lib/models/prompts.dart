@@ -1,30 +1,80 @@
 class MemoryPrompt {
-  final String lifeStage; // early | mid | late
-  final String key; // early_01
+  final String id; // stable key
+  final String lifeStage; // 'early' | 'mid' | 'late'
   final String text;
 
-  const MemoryPrompt(this.lifeStage, this.key, this.text);
+  const MemoryPrompt({
+    required this.id,
+    required this.lifeStage,
+    required this.text,
+  });
 }
 
-const memoryPrompts = <MemoryPrompt>[
+// 3–7 prompts per stage (we can expand later)
+const List<MemoryPrompt> memoryPrompts = [
   // EARLY LIFE
-  MemoryPrompt('early', 'early_01', 'What is your earliest clear memory?'),
-  MemoryPrompt('early', 'early_02', 'Describe your home and family life growing up.'),
-  MemoryPrompt('early', 'early_03', 'What did you fear or love most as a child?'),
-  MemoryPrompt('early', 'early_04', 'A lesson you learned young that stayed with you.'),
-  MemoryPrompt('early', 'early_05', 'A moment you felt proud as a kid/teen.'),
+  MemoryPrompt(
+    id: 'early_1',
+    lifeStage: 'early',
+    text: 'Tell a story from your childhood that shaped you.',
+  ),
+  MemoryPrompt(
+    id: 'early_2',
+    lifeStage: 'early',
+    text: 'What did your parents/guardians teach you (good or bad)?',
+  ),
+  MemoryPrompt(
+    id: 'early_3',
+    lifeStage: 'early',
+    text: 'What were you most afraid of growing up, and why?',
+  ),
+  MemoryPrompt(
+    id: 'early_4',
+    lifeStage: 'early',
+    text: 'Who was your first real friend and what do you remember?',
+  ),
 
   // MID LIFE
-  MemoryPrompt('mid', 'mid_01', 'What period of your life shaped you the most?'),
-  MemoryPrompt('mid', 'mid_02', 'What relationships mattered most and why?'),
-  MemoryPrompt('mid', 'mid_03', 'Hardest season you went through and how you survived it.'),
-  MemoryPrompt('mid', 'mid_04', 'Biggest regret (and what you learned from it).'),
-  MemoryPrompt('mid', 'mid_05', 'Your best advice about work/money/purpose.'),
+  MemoryPrompt(
+    id: 'mid_1',
+    lifeStage: 'mid',
+    text: 'Describe a turning point in your life and what changed after.',
+  ),
+  MemoryPrompt(
+    id: 'mid_2',
+    lifeStage: 'mid',
+    text: 'What mistake taught you the biggest lesson?',
+  ),
+  MemoryPrompt(
+    id: 'mid_3',
+    lifeStage: 'mid',
+    text: 'What are you most proud of building or achieving?',
+  ),
+  MemoryPrompt(
+    id: 'mid_4',
+    lifeStage: 'mid',
+    text: 'What did you learn about love, family, or friendship?',
+  ),
 
   // LATE LIFE
-  MemoryPrompt('late', 'late_01', 'What do you wish your family remembers about you?'),
-  MemoryPrompt('late', 'late_02', 'What are you most grateful for?'),
-  MemoryPrompt('late', 'late_03', 'What do you want to say to your future grandkids?'),
-  MemoryPrompt('late', 'late_04', 'Your rules for a good life (simple and honest).'),
-  MemoryPrompt('late', 'late_05', 'Stories you never want to be forgotten.'),
+  MemoryPrompt(
+    id: 'late_1',
+    lifeStage: 'late',
+    text: 'What do you wish you understood earlier in life?',
+  ),
+  MemoryPrompt(
+    id: 'late_2',
+    lifeStage: 'late',
+    text: 'What values should our family never compromise on?',
+  ),
+  MemoryPrompt(
+    id: 'late_3',
+    lifeStage: 'late',
+    text: 'What advice would you give your grandchildren?',
+  ),
+  MemoryPrompt(
+    id: 'late_4',
+    lifeStage: 'late',
+    text: 'If you could leave one message for the future, what is it?',
+  ),
 ];

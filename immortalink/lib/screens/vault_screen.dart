@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'create_vault_screen.dart';
@@ -83,6 +83,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       ),
     );
 
+    // When you come back, refresh (in case memories changed etc.)
     await _loadVaults();
   }
 
@@ -94,7 +95,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Delete vault?'),
-        content: Text('Delete "$vaultName"? This cannot be undone.'),
+        content: Text(
+          'Delete "$vaultName"?\n\nThis permanently removes this vault (and its memories if cascade is enabled).',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
