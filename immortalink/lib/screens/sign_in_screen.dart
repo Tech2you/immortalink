@@ -9,127 +9,153 @@ class SignInScreen extends StatefulWidget {
 }
 
 class _SignInScreenState extends State<SignInScreen> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
 
-  bool _isLoading = false;
-  String? _message;
-
-  SupabaseClient get _supabase => Supabase.instance.client;
-
-  Future<void> _signIn() async {
-    setState(() {
-      _isLoading = true;
-      _message = null;
-    });
-
-    try {
-      final email = _emailController.text.trim();
-      final password = _passwordController.text;
-
-      if (email.isEmpty || password.isEmpty) {
-        setState(() => _message = "Please enter email and password.");
-        return;
-      }
-
-      await _supabase.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
-      // AuthGate will switch screens.
-    } on AuthException catch (e) {
-      setState(() => _message = e.message);
-    } catch (e) {
-      setState(() => _message = "Unexpected error: $e");
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _signUp() async {
-    setState(() {
-      _isLoading = true;
-      _message = null;
-    });
-
-    try {
-      final email = _emailController.text.trim();
-      final password = _passwordController.text;
-
-      if (email.isEmpty || password.isEmpty) {
-        setState(() => _message = "Please enter email and password.");
-        return;
-      }
-
-      await _supabase.auth.signUp(
-        email: email,
-        password: password,
-      );
-
-      setState(() {
-        _message = "Account created. Check your email to confirm, then sign in.";
-      });
-    } on AuthException catch (e) {
-      setState(() => _message = e.message);
-    } catch (e) {
-      setState(() => _message = "Unexpected error: $e");
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
+  bool _isLogin = true;
+  bool _loading = false;
+  String? _error;
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
+    _email.dispose();
+    _password.dispose();
     super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    final email = _email.text.trim();
+    final password = _password.text;
+
+    if (email.isEmpty || password.isEmpty) {
+      setState(() {
+        _loading = false;
+        _error = 'Email and password are required.';
+      });
+      return;
+    }
+
+    try {
+      final client = Supabase.instance.client;
+      if (_isLogin) {
+        await client.auth.signInWithPassword(email: email, password: password);
+      } else {
+        await client.auth.signUp(email: email, password: password);
+      }
+    } on AuthException catch (e) {
+      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Sign In")),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(labelText: "Email"),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Card(
+                elevation: 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // ✅ same box size, logo shifted DOWN slightly
+                      Padding(
+                        padding: const EdgeInsets.only(top: 18),
+                        child: SizedBox(
+                          height: 230,
+                          child: Center(
+                            child: Transform.scale(
+                              scale: 2.5,
+                              child: Image.asset(
+                                'assets/images/immortalink_logo.png',
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 6),
+
+                      // ✅ updated headline text
+                      Text(
+                        'Keep your family connected - now and always.',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                        textAlign: TextAlign.center,
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      TextField(
+                        controller: _email,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      TextField(
+                        controller: _password,
+                        obscureText: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Password',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+
+                      if (_error != null) ...[
+                        Text(
+                          _error!,
+                          style: const TextStyle(color: Colors.red),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _loading ? null : _submit,
+                          child: Text(
+                            _loading
+                                ? 'Please wait...'
+                                : (_isLogin ? 'Sign in' : 'Sign up'),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      TextButton(
+                        onPressed: _loading
+                            ? null
+                            : () => setState(() => _isLogin = !_isLogin),
+                        child: Text(
+                          _isLogin
+                              ? "Don't have an account? Sign up"
+                              : 'Already have an account? Sign in',
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: "Password"),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _signIn,
-                  child: _isLoading
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text("Sign In"),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: _isLoading ? null : _signUp,
-                  child: const Text("Create Account"),
-                ),
-                if (_message != null) ...[
-                  const SizedBox(height: 20),
-                  Text(_message!, textAlign: TextAlign.center),
-                ]
-              ],
+              ),
             ),
           ),
         ),

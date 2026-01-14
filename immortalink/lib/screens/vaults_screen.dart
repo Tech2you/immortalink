@@ -61,11 +61,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
     if (created == true) {
       await _loadVaults();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Vault created.')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vault created.')),
+      );
     }
   }
 
@@ -112,12 +111,11 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
     try {
       await _client.from('vaults').delete().eq('id', vaultId);
-
       if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Deleted "$vaultName".')),
       );
-
       await _loadVaults();
     } on PostgrestException catch (e) {
       if (!mounted) return;
@@ -134,6 +132,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tileBg = Theme.of(context).colorScheme.surface.withOpacity(0.72);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Your Vaults'),
@@ -148,57 +148,84 @@ class _VaultsScreenState extends State<VaultsScreen> {
         onPressed: _openCreateVault,
         child: const Icon(Icons.add),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? Center(
-                    child: Text(
-                      'Load failed: $_error',
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                : _vaults.isEmpty
+      body: Stack(
+        children: [
+          // ✅ watermark same feel as vault memories screen
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Center(
+                child: Opacity(
+                  opacity: 0.06,
+                  child: Image.asset(
+                    'assets/images/immortalink_logo.png',
+                    width: 760,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
                     ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('No vaults yet.'),
-                            const SizedBox(height: 12),
-                            ElevatedButton(
-                              onPressed: _openCreateVault,
-                              child: const Text('Create your first vault'),
-                            ),
-                          ],
+                        child: Text(
+                          'Load failed: $_error',
+                          textAlign: TextAlign.center,
                         ),
                       )
-                    : ListView.separated(
-                        itemCount: _vaults.length,
-                        separatorBuilder: (_, __) => const Divider(),
-                        itemBuilder: (context, index) {
-                          final v = _vaults[index];
-                          final name = (v['name'] ?? 'Vault').toString();
-                          final createdAt = (v['created_at'] ?? '').toString();
-
-                          return ListTile(
-                            title: Text(name),
-                            subtitle: Text(createdAt.isEmpty ? '' : 'Created: $createdAt'),
-                            onTap: () => _openVault(v),
-                            trailing: Row(
+                    : _vaults.isEmpty
+                        ? Center(
+                            child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                IconButton(
-                                  tooltip: 'Delete vault',
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () => _deleteVault(v),
+                                const Text('No vaults yet.'),
+                                const SizedBox(height: 12),
+                                ElevatedButton(
+                                  onPressed: _openCreateVault,
+                                  child: const Text('Create your first vault'),
                                 ),
-                                const Icon(Icons.chevron_right),
                               ],
                             ),
-                          );
-                        },
-                      ),
+                          )
+                        : ListView.separated(
+                            itemCount: _vaults.length,
+                            separatorBuilder: (_, __) => const Divider(),
+                            itemBuilder: (context, index) {
+                              final v = _vaults[index];
+                              final name = (v['name'] ?? 'Vault').toString();
+                              final createdAt =
+                                  (v['created_at'] ?? '').toString();
+
+                              return ListTile(
+                                tileColor: tileBg,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                title: Text(name),
+                                subtitle: Text(
+                                  createdAt.isEmpty ? '' : 'Created: $createdAt',
+                                ),
+                                onTap: () => _openVault(v),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Delete vault',
+                                      icon: const Icon(Icons.delete_outline),
+                                      onPressed: () => _deleteVault(v),
+                                    ),
+                                    const Icon(Icons.chevron_right),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+          ),
+        ],
       ),
     );
   }

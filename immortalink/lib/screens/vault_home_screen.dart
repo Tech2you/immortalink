@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../widgets/logo_watermark.dart';
 import 'create_memory_screen.dart';
 
 class VaultHomeScreen extends StatefulWidget {
@@ -24,7 +25,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   String? _error;
 
   List<Map<String, dynamic>> _memories = [];
-
   String _vaultName = '';
 
   @override
@@ -35,6 +35,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   void _toast(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -81,7 +82,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
     if (saved == true) {
       await _loadMemories();
-      if (mounted) _toast('Branch saved.');
+      _toast('Memory saved.');
     }
   }
 
@@ -101,7 +102,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
             child: const Text('Save'),
@@ -123,8 +127,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  // Edit BOTH the prompt question AND the answer body
-  Future<void> _editBranch(Map<String, dynamic> m) async {
+  Future<void> _editMemory(Map<String, dynamic> m) async {
     final memoryId = (m['id'] ?? '').toString();
 
     final promptController =
@@ -135,7 +138,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final result = await showDialog<Map<String, String>>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Edit branch'),
+        title: const Text('Edit memory'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -195,7 +198,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       }).eq('id', memoryId);
 
       await _loadMemories();
-      _toast('Branch updated.');
+      _toast('Memory updated.');
     } on PostgrestException catch (e) {
       _toast('Update failed: ${e.message}');
     } catch (e) {
@@ -203,19 +206,24 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  // ✅ Delete button flow for a branch (memory)
-  Future<void> _deleteBranch(Map<String, dynamic> m) async {
+  Future<void> _deleteMemory(Map<String, dynamic> m) async {
     final memoryId = (m['id'] ?? '').toString();
     final prompt = (m['prompt_text'] ?? '').toString();
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Delete branch?'),
-        content: Text('Delete this branch permanently?\n\n$prompt'),
+        title: const Text('Delete memory?'),
+        content: Text('Delete this memory permanently?\n\n$prompt'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -225,7 +233,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     try {
       await _client.from('memories').delete().eq('id', memoryId);
       await _loadMemories();
-      _toast('Branch deleted.');
+      _toast('Memory deleted.');
     } on PostgrestException catch (e) {
       _toast('Delete failed: ${e.message}');
     } catch (e) {
@@ -248,6 +256,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tileBg = Theme.of(context).colorScheme.surface.withOpacity(0.72);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_vaultName),
@@ -268,56 +278,62 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         onPressed: () => _openAddMemory(initialLifeStage: 'early'),
         child: const Icon(Icons.add),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-                ? Center(child: Text('Load failed: $_error'))
-                : _memories.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('No branches yet.'),
-                            const SizedBox(height: 12),
-                            ElevatedButton(
-                              onPressed: () => _openAddMemory(initialLifeStage: 'early'),
-                              child: const Text('Add your first branch'),
-                            ),
-                          ],
+      body: LogoWatermark(
+        opacity: 0.03,
+        size: 760,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+                  ? Center(child: Text('Load failed: $_error'))
+                  : _memories.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text('No memories yet.'),
+                              const SizedBox(height: 12),
+                              ElevatedButton(
+                                onPressed: () =>
+                                    _openAddMemory(initialLifeStage: 'early'),
+                                child: const Text('Add your first memory'),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          itemCount: _memories.length,
+                          separatorBuilder: (_, __) => const Divider(),
+                          itemBuilder: (context, i) {
+                            final m = _memories[i];
+                            final stage = (m['life_stage'] ?? '').toString();
+                            final prompt = (m['prompt_text'] ?? '').toString();
+                            final body = (m['body'] ?? '').toString();
+
+                            return ListTile(
+                              tileColor: tileBg,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              leading: Chip(label: Text(_prettyStage(stage))),
+                              title:
+                                  Text(prompt.isEmpty ? '(No prompt)' : prompt),
+                              subtitle: Text(
+                                body,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onTap: () => _editMemory(m),
+                              trailing: IconButton(
+                                tooltip: 'Delete memory',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => _deleteMemory(m),
+                              ),
+                            );
+                          },
                         ),
-                      )
-                    : ListView.separated(
-                        itemCount: _memories.length,
-                        separatorBuilder: (_, __) => const Divider(),
-                        itemBuilder: (context, i) {
-                          final m = _memories[i];
-                          final stage = (m['life_stage'] ?? '').toString();
-                          final prompt = (m['prompt_text'] ?? '').toString();
-                          final body = (m['body'] ?? '').toString();
-
-                          return ListTile(
-                            leading: Chip(label: Text(_prettyStage(stage))),
-                            title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
-                            subtitle: Text(
-                              body,
-                              maxLines: 3,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-
-                            // Tap = edit
-                            onTap: () => _editBranch(m),
-
-                            // Trailing delete button = delete
-                            trailing: IconButton(
-                              tooltip: 'Delete branch',
-                              icon: const Icon(Icons.delete_outline),
-                              onPressed: () => _deleteBranch(m),
-                            ),
-                          );
-                        },
-                      ),
+        ),
       ),
     );
   }
