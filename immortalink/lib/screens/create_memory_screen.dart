@@ -5,7 +5,7 @@ import '../models/prompts.dart';
 
 class CreateMemoryScreen extends StatefulWidget {
   final String vaultId;
-  final String? initialLifeStage; // 'early' | 'mid' | 'late'
+  final String? initialLifeStage;
 
   const CreateMemoryScreen({
     super.key,
@@ -18,72 +18,98 @@ class CreateMemoryScreen extends StatefulWidget {
 }
 
 class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
-  final _bodyController = TextEditingController();
-  bool _saving = false;
+  final _client = Supabase.instance.client;
 
-  late String _lifeStage; // 'early' | 'mid' | 'late'
+  final _bodyController = TextEditingController();
+  final _customPromptController = TextEditingController();
+
+  bool _saving = false;
+  String? _error;
+
+  String _lifeStage = 'early';
   MemoryPrompt? _prompt;
+
+  bool _useCustomPrompt = false;
 
   @override
   void initState() {
     super.initState();
-
-    const allowed = {'early', 'mid', 'late'};
-    final incoming = widget.initialLifeStage;
-    _lifeStage = (incoming != null && allowed.contains(incoming)) ? incoming : 'early';
+    _lifeStage = widget.initialLifeStage ?? 'early';
   }
 
   @override
   void dispose() {
     _bodyController.dispose();
+    _customPromptController.dispose();
     super.dispose();
   }
 
   List<MemoryPrompt> get _stagePrompts =>
       memoryPrompts.where((p) => p.lifeStage == _lifeStage).toList();
 
-  void _toast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
+  Future<void> _save() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
 
-  Future<void> _saveMemory() async {
     final body = _bodyController.text.trim();
-
-    if (_prompt == null) {
-      _toast('Pick a prompt first.');
-      return;
-    }
     if (body.isEmpty) {
-      _toast('Write something before saving.');
+      setState(() {
+        _saving = false;
+        _error = 'Please write something for your memory.';
+      });
       return;
     }
 
-    setState(() => _saving = true);
+    // Determine prompt_key + prompt_text based on selection
+    String promptKey;
+    String promptText;
+
+    if (_useCustomPrompt) {
+      promptText = _customPromptController.text.trim();
+      if (promptText.isEmpty) {
+        setState(() {
+          _saving = false;
+          _error = 'Please enter your custom prompt/title.';
+        });
+        return;
+      }
+      // stable enough for MVP; keeps NOT NULL satisfied
+      promptKey = 'custom_${DateTime.now().millisecondsSinceEpoch}';
+    } else {
+      if (_prompt == null) {
+        setState(() {
+          _saving = false;
+          _error = 'Please choose a prompt.';
+        });
+        return;
+      }
+      promptKey = _prompt!.id;      // ✅ correct: id
+      promptText = _prompt!.text;   // ✅ correct: text
+    }
 
     try {
-      final client = Supabase.instance.client;
-
-      // ✅ Must include every NOT NULL column in your table
-      // ✅ prompt_key must be _prompt!.id (stable key)
-      final payload = <String, dynamic>{
+      await _client.from('memories').insert({
         'vault_id': widget.vaultId,
         'life_stage': _lifeStage,
-        'prompt_key': _prompt!.id,
-        'prompt_text': _prompt!.text,
+        'prompt_key': promptKey,
+        'prompt_text': promptText,
         'body': body,
-      };
-
-      await client.from('memories').insert(payload);
+      });
 
       if (!mounted) return;
-      Navigator.pop(context, true); // true = saved OK
+      Navigator.pop(context, true);
     } on PostgrestException catch (e) {
-      // This will show RLS issues, NOT NULL issues, etc.
-      _toast('Save failed: ${e.message}');
+      setState(() {
+        _error = e.message;
+        _saving = false;
+      });
     } catch (e) {
-      _toast('Save failed: $e');
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      setState(() {
+        _error = e.toString();
+        _saving = false;
+      });
     }
   }
 
@@ -95,92 +121,119 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
       appBar: AppBar(
         title: const Text('Add Memory'),
       ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Life stage selector
-              Row(
-                children: [
-                  const Text('Life stage:'),
-                  const SizedBox(width: 12),
-                  DropdownButton<String>(
-                    value: _lifeStage,
-                    items: const [
-                      DropdownMenuItem(value: 'early', child: Text('Early')),
-                      DropdownMenuItem(value: 'mid', child: Text('Mid')),
-                      DropdownMenuItem(value: 'late', child: Text('Late')),
-                    ],
-                    onChanged: (v) {
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: ListView(
+          children: [
+            // Life stage selector
+            DropdownButtonFormField<String>(
+              value: _lifeStage,
+              decoration: const InputDecoration(
+                labelText: 'Life stage',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'early', child: Text('Early')),
+                DropdownMenuItem(value: 'mid', child: Text('Mid')),
+                DropdownMenuItem(value: 'late', child: Text('Late')),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (v) {
                       if (v == null) return;
                       setState(() {
                         _lifeStage = v;
-                        _prompt = null; // reset prompt when stage changes
+                        _prompt = null;
+                        _useCustomPrompt = false;
+                        _customPromptController.clear();
                       });
                     },
-                  ),
-                ],
+            ),
+            const SizedBox(height: 14),
+
+            // Prompt selector + custom option
+            DropdownButtonFormField<String>(
+              value: _useCustomPrompt
+                  ? '__custom__'
+                  : (_prompt?.id), // store id
+              decoration: const InputDecoration(
+                labelText: 'Prompt',
+                border: OutlineInputBorder(),
               ),
+              items: [
+                ...prompts.map(
+                  (p) => DropdownMenuItem(
+                    value: p.id,
+                    child: Text(
+                      p.text,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                const DropdownMenuItem(
+                  value: '__custom__',
+                  child: Text('✍️ Write your own memory (custom prompt)'),
+                ),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      setState(() {
+                        if (value == '__custom__') {
+                          _useCustomPrompt = true;
+                          _prompt = null;
+                        } else {
+                          _useCustomPrompt = false;
+                          _prompt = prompts.firstWhere(
+                            (p) => p.id == value,
+                            orElse: () => prompts.first,
+                          );
+                        }
+                      });
+                    },
+            ),
+            const SizedBox(height: 12),
 
-              const SizedBox(height: 12),
-
-              // Prompt selector
-              DropdownButtonFormField<String>(
-                value: _prompt?.id,
-                items: prompts
-                    .map((p) => DropdownMenuItem<String>(
-                          value: p.id,
-                          child: Text(
-                            p.text,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ))
-                    .toList(),
+            if (_useCustomPrompt) ...[
+              TextField(
+                controller: _customPromptController,
+                maxLines: 2,
                 decoration: const InputDecoration(
-                  labelText: 'Prompt',
+                  labelText: 'Custom prompt / title',
+                  hintText: 'e.g. “My biggest lesson at university”',
                   border: OutlineInputBorder(),
                 ),
-                onChanged: (id) {
-                  if (id == null) return;
-                  setState(() {
-                    _prompt = prompts.firstWhere((p) => p.id == id);
-                  });
-                },
               ),
-
               const SizedBox(height: 12),
-
-              // Body
-              Expanded(
-                child: TextField(
-                  controller: _bodyController,
-                  expands: true,
-                  maxLines: null,
-                  textAlignVertical: TextAlignVertical.top,
-                  decoration: const InputDecoration(
-                    labelText: 'Your memory',
-                    alignLabelWithHint: true,
-                    border: OutlineInputBorder(),
-                    hintText: 'Write the memory here…',
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // Save button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _saving ? null : _saveMemory,
-                  child: Text(_saving ? 'Saving…' : 'Save Memory'),
-                ),
-              ),
             ],
-          ),
+
+            TextField(
+              controller: _bodyController,
+              maxLines: 8,
+              decoration: const InputDecoration(
+                labelText: 'Your memory',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            if (_error != null) ...[
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.red),
+              ),
+              const SizedBox(height: 10),
+            ],
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _saving ? null : _save,
+                child: Text(_saving ? 'Saving...' : 'Save Memory'),
+              ),
+            ),
+          ],
         ),
       ),
     );
