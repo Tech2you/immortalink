@@ -4,8 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'vault_home_screen.dart';
 import 'family_tree_screen.dart';
 
-
-
 class VaultsScreen extends StatefulWidget {
   const VaultsScreen({super.key});
 
@@ -145,10 +143,21 @@ class _VaultsScreenState extends State<VaultsScreen> {
     final name = controller.text.trim();
     if (name.isEmpty) return;
 
-    // IMPORTANT: this assumes your DB already enforces 1 vault/user
-    // If it doesn't, it still works but you'll have multiple rows.
     await _supabase.from('vaults').insert({'name': name});
     await _loadVault();
+  }
+
+  void _openVaultHome() {
+    if (_vault == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VaultHomeScreen(
+          vaultId: _vault!['id'],
+          vaultName: _vault!['name'],
+        ),
+      ),
+    );
   }
 
   Future<void> _ensureFamilyAndOpenTree() async {
@@ -204,7 +213,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (ok != true) return;
     if (_vault == null) return;
 
-    final familyName = controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
+    final familyName = controller.text.trim().isEmpty
+        ? 'My Family'
+        : controller.text.trim();
     final vaultId = _vault!['id'] as String;
 
     // 1) create family group
@@ -225,7 +236,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
     });
 
     // 3) attach vault to family
-    await _supabase.from('vaults').update({'family_id': newFamilyId}).eq('id', vaultId);
+    await _supabase
+        .from('vaults')
+        .update({'family_id': newFamilyId})
+        .eq('id', vaultId);
 
     await _loadVault();
 
@@ -246,7 +260,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF7F0F7),
       appBar: AppBar(
-        title: Text(_vault == null ? 'Your Vault' : 'Your Vault'),
+        title: const Text('Your Vault'),
         backgroundColor: const Color(0xFFF7F0F7),
         elevation: 0,
         actions: [
@@ -259,7 +273,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       ),
       body: Stack(
         children: [
-          // Background watermark (same vibe as memories screen)
+          // Background watermark (same vibe)
           Positioned.fill(
             child: IgnorePointer(
               child: Center(
@@ -304,18 +318,23 @@ class _VaultsScreenState extends State<VaultsScreen> {
                             width: double.infinity,
                             child: OutlinedButton.icon(
                               onPressed: _ensureFamilyAndOpenTree,
-                              icon: Icon(inFamily ? Icons.account_tree : Icons.group_add),
-                              label: Text(inFamily ? 'View your family tree' : 'Invite your family'),
+                              icon: Icon(inFamily
+                                  ? Icons.account_tree
+                                  : Icons.group_add),
+                              label: Text(inFamily
+                                  ? 'View your family tree'
+                                  : 'Invite your family'),
                             ),
                           ),
                           const SizedBox(height: 12),
 
-                          // Vault card
+                          // Vault card (NOW opens on tap anywhere)
                           Card(
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: ListTile(
+                              onTap: _openVaultHome, // ✅ whole bar tappable
                               title: Text(_vault!['name'] ?? ''),
                               subtitle: Text('Created: ${_vault!['created_at']}'),
                               trailing: Row(
@@ -323,7 +342,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                 children: [
                                   IconButton(
                                     tooltip: 'Rename',
-                                    onPressed: () => _renameVault(_vault!['id'], _vault!['name']),
+                                    onPressed: () => _renameVault(
+                                        _vault!['id'], _vault!['name']),
                                     icon: const Icon(Icons.edit),
                                   ),
                                   IconButton(
@@ -333,17 +353,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                   ),
                                   IconButton(
                                     tooltip: 'Open',
-                                    onPressed: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => VaultHomeScreen(
-                                            vaultId: _vault!['id'],
-                                            vaultName: _vault!['name'],
-                                          ),
-                                        ),
-                                      );
-                                    },
+                                    onPressed: _openVaultHome,
                                     icon: const Icon(Icons.chevron_right),
                                   ),
                                 ],

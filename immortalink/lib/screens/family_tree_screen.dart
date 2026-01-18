@@ -55,12 +55,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
           return Stack(
             children: [
-              // Background watermark (restored, not tiny)
+              // Background watermark (match Vaults page vibe)
               Positioned.fill(
                 child: IgnorePointer(
                   child: Center(
                     child: Opacity(
-                      opacity: 0.10,
+                      opacity: 0.08,
                       child: Image.asset(
                         logoPath,
                         width: 520,
@@ -73,20 +73,22 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
               // Foreground content
               ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 children: [
-                  // Bring logo DOWN (less empty space, less scroll)
-                  const SizedBox(height: 18),
+                  // Less empty space up top
+                  const SizedBox(height: 8),
 
+                  // Top logo: 2x bigger + placed lower (no unnecessary scroll)
                   Center(
                     child: Image.asset(
                       logoPath,
-                      width: 110, // bigger than the tiny one, but not huge
+                      width: 220, // 2x from 110
                       fit: BoxFit.contain,
                     ),
                   ),
 
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
 
                   const Center(
                     child: Text(
@@ -104,7 +106,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                   Center(
                     child: Text(
                       'Family ID: ${widget.familyId}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 14,
                         color: Colors.black54,
                       ),
@@ -118,36 +120,42 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                   Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 820),
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: _TreeLinesPainter(),
+                      child: SizedBox(
+                        // Fixed heights so painter math stays correct
+                        height: 70 + 34 + 90 + 34 + 70,
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: CustomPaint(
+                                painter: _TreeLinesPainter(),
+                              ),
                             ),
-                          ),
-                          Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: const [
-                                  _TreeSlotCard(text: 'Parent vault (slot)'),
-                                  _TreeSlotCard(text: 'Parent vault (slot)'),
-                                ],
-                              ),
-                              const SizedBox(height: 34),
-                              _TreeMainCard(text: yourVaultName),
-                              const SizedBox(height: 34),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: const [
-                                  _TreeSlotCard(text: 'Child vault (slot)'),
-                                  _TreeSlotCard(text: 'Child vault (slot)'),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: const [
+                                    _TreeSlotCard(text: 'Parent vault (slot)'),
+                                    _TreeSlotCard(text: 'Parent vault (slot)'),
+                                  ],
+                                ),
+                                const SizedBox(height: 34),
+                                _TreeMainCard(text: yourVaultName),
+                                const SizedBox(height: 34),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: const [
+                                    _TreeSlotCard(text: 'Child vault (slot)'),
+                                    _TreeSlotCard(text: 'Child vault (slot)'),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -193,20 +201,24 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 10),
-                        if (snapshot.connectionState == ConnectionState.waiting)
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting)
                           const Text('Loading...')
                         else if (vaults.isEmpty)
                           const Text('No vaults found for this family yet.')
                         else
                           ...vaults.map((v) {
-                            final name = (v['name'] as String?) ?? 'Unnamed';
-                            final isYou = userId != null && v['owner_id'] == userId;
+                            final name =
+                                (v['name'] as String?) ?? 'Unnamed';
+                            final isYou =
+                                userId != null && v['owner_id'] == userId;
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 8),
                               child: Row(
                                 children: [
                                   Icon(Icons.person,
-                                      size: 18, color: Colors.black.withOpacity(0.6)),
+                                      size: 18,
+                                      color: Colors.black.withOpacity(0.6)),
                                   const SizedBox(width: 10),
                                   Text(isYou ? '$name (you)' : name),
                                 ],
@@ -295,38 +307,103 @@ class _TreeLinesPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
+    // These must match the layout constants above
+    const slotW = 320.0;
+    const slotH = 70.0;
+    const mainH = 90.0;
+    const gap = 34.0;
+
     final midX = size.width / 2;
+    final leftX = slotW / 2;
+    final rightX = size.width - (slotW / 2);
 
-    // Stop lines BEFORE the boxes so they don’t enter them
-    final parentY = 35.0;
-    final mainY = 35.0 + 34.0 + 45.0; // approx center of main card
-    final childY = 35.0 + 34.0 + 90.0 + 34.0 + 35.0;
+    // Y positions (within the tree stack)
+    final parentTop = 0.0;
+    final parentBottom = parentTop + slotH;
 
-    // Parent bracket curve
-    final parentPath = Path()
-      ..moveTo(135, parentY + 55)
-      ..quadraticBezierTo(midX, parentY + 105, size.width - 135, parentY + 55);
-    canvas.drawPath(parentPath, paint);
+    final mainTop = parentBottom + gap;
+    final mainBottom = mainTop + mainH;
 
-    // Connector down (ends above main card)
+    final childTop = mainBottom + gap;
+    // final childBottom = childTop + slotH; // not needed
+
+    // Anchor offsets so lines NEVER enter boxes
+    const padFromBox = 10.0;
+
+    final parentAnchorY = parentBottom + padFromBox; // below parent cards
+    final mainTopAnchorY = mainTop - padFromBox; // above main card
+    final mainBottomAnchorY = mainBottom + padFromBox; // below main card
+    final childAnchorY = childTop - padFromBox; // above child cards
+
+    // Merge point between parents -> main
+    final mergeY = (parentAnchorY + mainTopAnchorY) / 2;
+
+    // Left parent to merge
+    final pLeft = Path()
+      ..moveTo(leftX, parentAnchorY)
+      ..cubicTo(
+        leftX,
+        mergeY,
+        midX - 60,
+        mergeY,
+        midX,
+        mergeY,
+      );
+    canvas.drawPath(pLeft, paint);
+
+    // Right parent to merge
+    final pRight = Path()
+      ..moveTo(rightX, parentAnchorY)
+      ..cubicTo(
+        rightX,
+        mergeY,
+        midX + 60,
+        mergeY,
+        midX,
+        mergeY,
+      );
+    canvas.drawPath(pRight, paint);
+
+    // Merge down to just above main card
     canvas.drawLine(
-      Offset(midX, parentY + 105),
-      Offset(midX, mainY - 32),
+      Offset(midX, mergeY),
+      Offset(midX, mainTopAnchorY),
       paint,
     );
 
-    // Child bracket curve
-    final childPath = Path()
-      ..moveTo(185, childY + 5)
-      ..quadraticBezierTo(midX, childY - 28, size.width - 185, childY + 5);
-    canvas.drawPath(childPath, paint);
-
-    // Connector from main down (starts below main card)
+    // From below main card down to split
+    final splitY = (mainBottomAnchorY + childAnchorY) / 2;
     canvas.drawLine(
-      Offset(midX, mainY + 32),
-      Offset(midX, childY - 28),
+      Offset(midX, mainBottomAnchorY),
+      Offset(midX, splitY),
       paint,
     );
+
+    // Split to left child
+    final cLeft = Path()
+      ..moveTo(midX, splitY)
+      ..cubicTo(
+        midX - 60,
+        splitY,
+        leftX,
+        splitY,
+        leftX,
+        childAnchorY,
+      );
+    canvas.drawPath(cLeft, paint);
+
+    // Split to right child
+    final cRight = Path()
+      ..moveTo(midX, splitY)
+      ..cubicTo(
+        midX + 60,
+        splitY,
+        rightX,
+        splitY,
+        rightX,
+        childAnchorY,
+      );
+    canvas.drawPath(cRight, paint);
   }
 
   @override
@@ -353,13 +430,17 @@ class _BottomVinesPainter extends CustomPainter {
 
     final path1 = Path()
       ..moveTo(0, y1)
-      ..cubicTo(size.width * 0.22, y1 - 10, size.width * 0.38, y1 + 14, size.width * 0.52, y1)
-      ..cubicTo(size.width * 0.70, y1 - 16, size.width * 0.84, y1 + 10, size.width, y1);
+      ..cubicTo(size.width * 0.22, y1 - 10, size.width * 0.38, y1 + 14,
+          size.width * 0.52, y1)
+      ..cubicTo(size.width * 0.70, y1 - 16, size.width * 0.84, y1 + 10,
+          size.width, y1);
 
     final path2 = Path()
       ..moveTo(0, y2)
-      ..cubicTo(size.width * 0.18, y2 + 8, size.width * 0.42, y2 - 12, size.width * 0.60, y2)
-      ..cubicTo(size.width * 0.78, y2 + 14, size.width * 0.92, y2 - 6, size.width, y2);
+      ..cubicTo(size.width * 0.18, y2 + 8, size.width * 0.42, y2 - 12,
+          size.width * 0.60, y2)
+      ..cubicTo(size.width * 0.78, y2 + 14, size.width * 0.92, y2 - 6,
+          size.width, y2);
 
     canvas.drawPath(path1, p1);
     canvas.drawPath(path2, p2);
