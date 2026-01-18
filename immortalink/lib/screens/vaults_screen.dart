@@ -48,6 +48,19 @@ class _VaultsScreenState extends State<VaultsScreen> {
     });
   }
 
+  void _openVaultHome() {
+    if (_vault == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VaultHomeScreen(
+          vaultId: _vault!['id'],
+          vaultName: _vault!['name'],
+        ),
+      ),
+    );
+  }
+
   Future<void> _renameVault(String vaultId, String currentName) async {
     final controller = TextEditingController(text: currentName);
 
@@ -58,9 +71,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Vault name',
-          ),
+          decoration: const InputDecoration(labelText: 'Vault name'),
         ),
         actions: [
           TextButton(
@@ -76,7 +87,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
     );
 
     if (ok != true) return;
-
     final newName = controller.text.trim();
     if (newName.isEmpty) return;
 
@@ -89,9 +99,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete vault?'),
-        content: const Text(
-          'This will permanently delete the vault and its memories.',
-        ),
+        content: const Text('This will permanently delete the vault and its memories.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -121,9 +129,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Vault name',
-          ),
+          decoration: const InputDecoration(labelText: 'Vault name'),
         ),
         actions: [
           TextButton(
@@ -139,7 +145,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
     );
 
     if (ok != true) return;
-
     final name = controller.text.trim();
     if (name.isEmpty) return;
 
@@ -147,34 +152,82 @@ class _VaultsScreenState extends State<VaultsScreen> {
     await _loadVault();
   }
 
-  void _openVaultHome() {
+  Future<void> _joinFamilyWithCode() async {
     if (_vault == null) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => VaultHomeScreen(
-          vaultId: _vault!['id'],
-          vaultName: _vault!['name'],
+
+    final controller = TextEditingController();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Join a family'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Paste the invite code you received.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Invite code',
+              ),
+            ),
+          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Join'),
+          ),
+        ],
       ),
     );
+
+    if (ok != true) return;
+
+    final code = controller.text.trim();
+    if (code.isEmpty) return;
+
+    try {
+      await _supabase.rpc('accept_family_invite', params: {
+        'p_code': code,
+        'p_vault_id': _vault!['id'],
+      });
+
+      await _loadVault();
+
+      if (!mounted) return;
+      final familyId = _vault?['family_id'] as String?;
+      if (familyId != null && familyId.isNotEmpty) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: familyId)),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Join failed: $e')),
+      );
+    }
   }
 
   Future<void> _ensureFamilyAndOpenTree() async {
-    // If already in a family, just open tree
     final familyId = _vault?['family_id'] as String?;
     if (familyId != null && familyId.isNotEmpty) {
       if (!mounted) return;
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => FamilyTreeScreen(familyId: familyId),
-        ),
+        MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: familyId)),
       );
       return;
     }
 
-    // Otherwise: create a family group + add yourself + attach your vault
     final controller = TextEditingController(text: 'My Family');
 
     final ok = await showDialog<bool>(
@@ -184,16 +237,12 @@ class _VaultsScreenState extends State<VaultsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Create your family group first. Later we’ll add WhatsApp invites + paywall.',
-            ),
+            const Text('Create your family group first. Next we’ll do slot invites.'),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
               autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Family name',
-              ),
+              decoration: const InputDecoration(labelText: 'Family name'),
             ),
           ],
         ),
@@ -213,12 +262,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (ok != true) return;
     if (_vault == null) return;
 
-    final familyName = controller.text.trim().isEmpty
-        ? 'My Family'
-        : controller.text.trim();
+    final familyName = controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
     final vaultId = _vault!['id'] as String;
 
-    // 1) create family group
     final family = await _supabase
         .from('family_groups')
         .insert({'name': familyName})
@@ -227,28 +273,21 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
     final newFamilyId = family['id'] as String;
 
-    // 2) add yourself as owner
     final userId = _supabase.auth.currentUser!.id;
     await _supabase.from('family_members').insert({
       'family_id': newFamilyId,
       'user_id': userId,
       'role': 'owner',
+      'slot_key': null,
     });
 
-    // 3) attach vault to family
-    await _supabase
-        .from('vaults')
-        .update({'family_id': newFamilyId})
-        .eq('id', vaultId);
-
+    await _supabase.from('vaults').update({'family_id': newFamilyId}).eq('id', vaultId);
     await _loadVault();
 
     if (!mounted) return;
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => FamilyTreeScreen(familyId: newFamilyId),
-      ),
+      MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: newFamilyId)),
     );
   }
 
@@ -273,7 +312,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
       ),
       body: Stack(
         children: [
-          // Background watermark (same vibe)
           Positioned.fill(
             child: IgnorePointer(
               child: Center(
@@ -298,10 +336,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Text(
-                              'No vault yet',
-                              style: TextStyle(fontSize: 18),
-                            ),
+                            const Text('No vault yet', style: TextStyle(fontSize: 18)),
                             const SizedBox(height: 12),
                             ElevatedButton.icon(
                               onPressed: _createVault,
@@ -313,28 +348,35 @@ class _VaultsScreenState extends State<VaultsScreen> {
                       )
                     : Column(
                         children: [
-                          // Invite / View family button
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
                               onPressed: _ensureFamilyAndOpenTree,
-                              icon: Icon(inFamily
-                                  ? Icons.account_tree
-                                  : Icons.group_add),
-                              label: Text(inFamily
-                                  ? 'View your family tree'
-                                  : 'Invite your family'),
+                              icon: Icon(inFamily ? Icons.account_tree : Icons.group_add),
+                              label: Text(inFamily ? 'View your family tree' : 'Invite your family'),
                             ),
                           ),
+
+                          if (!inFamily) ...[
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: _joinFamilyWithCode,
+                                icon: const Icon(Icons.vpn_key),
+                                label: const Text('Join with invite code'),
+                              ),
+                            ),
+                          ],
+
                           const SizedBox(height: 12),
 
-                          // Vault card (NOW opens on tap anywhere)
                           Card(
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: ListTile(
-                              onTap: _openVaultHome, // ✅ whole bar tappable
+                              onTap: _openVaultHome, // ✅ tap anywhere
                               title: Text(_vault!['name'] ?? ''),
                               subtitle: Text('Created: ${_vault!['created_at']}'),
                               trailing: Row(
@@ -342,8 +384,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                 children: [
                                   IconButton(
                                     tooltip: 'Rename',
-                                    onPressed: () => _renameVault(
-                                        _vault!['id'], _vault!['name']),
+                                    onPressed: () => _renameVault(_vault!['id'], _vault!['name']),
                                     icon: const Icon(Icons.edit),
                                   ),
                                   IconButton(
