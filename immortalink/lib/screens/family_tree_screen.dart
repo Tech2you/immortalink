@@ -27,7 +27,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     return (res as List).cast<Map<String, dynamic>>();
   }
 
-  String _randomToken([int length = 10]) {
+  String _randomCode([int length = 10]) {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // avoids 0/O/1/I confusion
     final r = Random.secure();
     return List.generate(length, (_) => chars[r.nextInt(chars.length)]).join();
@@ -37,21 +37,27 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     required String familyId,
     required String slotKey,
   }) async {
-    // MVP: only insert columns we KNOW you created: family_id, slot_key, token
-    final token = _randomToken(10);
+    final user = _supabase.auth.currentUser;
+    if (user == null) throw Exception('Not signed in');
 
+    final code = _randomCode(10);
+
+    // ✅ matches your DB: invite_code + created_by + family_id (+ slot_key if you added it)
     await _supabase.from('family_invites').insert({
       'family_id': familyId,
       'slot_key': slotKey,
-      'token': token,
+      'invite_code': code,
+      'created_by': user.id,
+      // If your table has expires_at, this is useful. If not, remove this line.
+      'expires_at': DateTime.now().add(const Duration(days: 7)).toIso8601String(),
     });
 
-    return token;
+    return code;
   }
 
   Future<void> _onSlotTap(String slotKey) async {
     try {
-      final token = await _createInvite(
+      final code = await _createInvite(
         familyId: widget.familyId,
         slotKey: slotKey,
       );
@@ -71,7 +77,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
               const Text('Invite code (copy & share):'),
               const SizedBox(height: 6),
               SelectableText(
-                token,
+                code,
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ],
@@ -94,7 +100,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Must match pubspec EXACTLY
     const logoPath = 'assets/images/immortalink_logo.png';
 
     return Scaffold(
@@ -121,7 +126,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
           return Stack(
             children: [
-              // Background watermark (match Vaults page vibe)
               Positioned.fill(
                 child: IgnorePointer(
                   child: Center(
@@ -137,15 +141,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                 ),
               ),
 
-              // Foreground content
               ListView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 children: [
-                  // Less empty space up top
                   const SizedBox(height: 8),
 
-                  // Top logo: bigger + placed lower (no unnecessary scroll)
                   Center(
                     child: Image.asset(
                       logoPath,
@@ -172,22 +172,17 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                   Center(
                     child: Text(
                       'Family ID: ${widget.familyId}',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.black54,
-                      ),
+                      style: const TextStyle(fontSize: 14, color: Colors.black54),
                       textAlign: TextAlign.center,
                     ),
                   ),
 
                   const SizedBox(height: 22),
 
-                  // Tree layout
                   Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 820),
                       child: SizedBox(
-                        // Fixed heights so painter math stays correct
                         height: 70 + 34 + 90 + 34 + 70,
                         child: Stack(
                           children: [
@@ -200,8 +195,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     _TreeSlotCard(
                                       text: 'Parent vault (tap to invite)',
@@ -217,8 +211,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 _TreeMainCard(text: yourVaultName),
                                 const SizedBox(height: 34),
                                 Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     _TreeSlotCard(
                                       text: 'Child vault (tap to invite)',
@@ -240,7 +233,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
                   const SizedBox(height: 14),
 
-                  // Bottom vines
                   SizedBox(
                     height: 54,
                     child: CustomPaint(
@@ -263,7 +255,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
                   const SizedBox(height: 18),
 
-                  // Debug list
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -279,8 +270,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 10),
-                        if (snapshot.connectionState ==
-                            ConnectionState.waiting)
+                        if (snapshot.connectionState == ConnectionState.waiting)
                           const Text('Loading...')
                         else if (snapshot.hasError)
                           Text('Error: ${snapshot.error}')
@@ -289,15 +279,13 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                         else
                           ...vaults.map((v) {
                             final name = (v['name'] as String?) ?? 'Unnamed';
-                            final isYou =
-                                userId != null && v['owner_id'] == userId;
+                            final isYou = userId != null && v['owner_id'] == userId;
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 8),
                               child: Row(
                                 children: [
                                   Icon(Icons.person,
-                                      size: 18,
-                                      color: Colors.black.withOpacity(0.6)),
+                                      size: 18, color: Colors.black.withOpacity(0.6)),
                                   const SizedBox(width: 10),
                                   Text(isYou ? '$name (you)' : name),
                                 ],
@@ -344,10 +332,7 @@ class _TreeSlotCard extends StatelessWidget {
             child: Center(
               child: Text(
                 text,
-                style: TextStyle(
-                  fontSize: 15,
-                  color: Colors.black.withOpacity(0.75),
-                ),
+                style: TextStyle(fontSize: 15, color: Colors.black.withOpacity(0.75)),
               ),
             ),
           ),
@@ -375,10 +360,7 @@ class _TreeMainCard extends StatelessWidget {
         child: Center(
           child: Text(
             text,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-            ),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
         ),
       ),
@@ -395,7 +377,6 @@ class _TreeLinesPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
-    // These must match the layout constants above
     const slotW = 320.0;
     const slotH = 70.0;
     const mainH = 90.0;
@@ -405,91 +386,45 @@ class _TreeLinesPainter extends CustomPainter {
     final leftX = slotW / 2;
     final rightX = size.width - (slotW / 2);
 
-    // Y positions (within the tree stack)
-    final parentTop = 0.0;
-    final parentBottom = parentTop + slotH;
+    final parentBottom = slotH;
 
     final mainTop = parentBottom + gap;
     final mainBottom = mainTop + mainH;
 
     final childTop = mainBottom + gap;
 
-    // Anchor offsets so lines NEVER enter boxes
     const padFromBox = 10.0;
 
-    final parentAnchorY = parentBottom + padFromBox; // below parent cards
-    final mainTopAnchorY = mainTop - padFromBox; // above main card
-    final mainBottomAnchorY = mainBottom + padFromBox; // below main card
-    final childAnchorY = childTop - padFromBox; // above child cards
+    final parentAnchorY = parentBottom + padFromBox;
+    final mainTopAnchorY = mainTop - padFromBox;
+    final mainBottomAnchorY = mainBottom + padFromBox;
+    final childAnchorY = childTop - padFromBox;
 
-    // Merge point between parents -> main
     final mergeY = (parentAnchorY + mainTopAnchorY) / 2;
 
-    // Left parent to merge
     final pLeft = Path()
       ..moveTo(leftX, parentAnchorY)
-      ..cubicTo(
-        leftX,
-        mergeY,
-        midX - 60,
-        mergeY,
-        midX,
-        mergeY,
-      );
+      ..cubicTo(leftX, mergeY, midX - 60, mergeY, midX, mergeY);
     canvas.drawPath(pLeft, paint);
 
-    // Right parent to merge
     final pRight = Path()
       ..moveTo(rightX, parentAnchorY)
-      ..cubicTo(
-        rightX,
-        mergeY,
-        midX + 60,
-        mergeY,
-        midX,
-        mergeY,
-      );
+      ..cubicTo(rightX, mergeY, midX + 60, mergeY, midX, mergeY);
     canvas.drawPath(pRight, paint);
 
-    // Merge down to just above main card
-    canvas.drawLine(
-      Offset(midX, mergeY),
-      Offset(midX, mainTopAnchorY),
-      paint,
-    );
+    canvas.drawLine(Offset(midX, mergeY), Offset(midX, mainTopAnchorY), paint);
 
-    // From below main card down to split
     final splitY = (mainBottomAnchorY + childAnchorY) / 2;
-    canvas.drawLine(
-      Offset(midX, mainBottomAnchorY),
-      Offset(midX, splitY),
-      paint,
-    );
+    canvas.drawLine(Offset(midX, mainBottomAnchorY), Offset(midX, splitY), paint);
 
-    // Split to left child
     final cLeft = Path()
       ..moveTo(midX, splitY)
-      ..cubicTo(
-        midX - 60,
-        splitY,
-        leftX,
-        splitY,
-        leftX,
-        childAnchorY,
-      );
+      ..cubicTo(midX - 60, splitY, leftX, splitY, leftX, childAnchorY);
     canvas.drawPath(cLeft, paint);
 
-    // Split to right child
     final cRight = Path()
       ..moveTo(midX, splitY)
-      ..cubicTo(
-        midX + 60,
-        splitY,
-        rightX,
-        splitY,
-        rightX,
-        childAnchorY,
-      );
+      ..cubicTo(midX + 60, splitY, rightX, splitY, rightX, childAnchorY);
     canvas.drawPath(cRight, paint);
   }
 

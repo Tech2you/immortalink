@@ -15,36 +15,38 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   bool _loading = false;
 
   Future<void> _join() async {
-    final token = _controller.text.trim();
-    if (token.isEmpty) return;
+    final code = _controller.text.trim();
+    if (code.isEmpty) return;
 
     setState(() => _loading = true);
 
     try {
       final user = _supabase.auth.currentUser;
-      if (user == null) {
-        throw Exception('Not signed in');
-      }
+      if (user == null) throw Exception('Not signed in');
 
-      // 1) Fetch invite by token
+      // 1) Fetch invite by invite_code (your real schema)
       final invite = await _supabase
           .from('family_invites')
-          .select('family_id, slot_key, used_at')
-          .eq('token', token)
+          .select('family_id, slot_key, used_at, expires_at')
+          .eq('invite_code', code)
           .maybeSingle();
 
       if (invite == null) throw Exception('Invite not found');
       if (invite['used_at'] != null) throw Exception('Invite already used');
 
+      final expiresAt = invite['expires_at'];
+      if (expiresAt != null) {
+        final exp = DateTime.tryParse(expiresAt.toString());
+        if (exp != null && DateTime.now().isAfter(exp)) {
+          throw Exception('Invite expired');
+        }
+      }
+
       final familyId = invite['family_id'] as String?;
       final slotKey = invite['slot_key'] as String?;
 
-      if (familyId == null || familyId.isEmpty) {
-        throw Exception('Invite missing family_id');
-      }
-      if (slotKey == null || slotKey.isEmpty) {
-        throw Exception('Invite missing slot_key');
-      }
+      if (familyId == null || familyId.isEmpty) throw Exception('Invite missing family_id');
+      if (slotKey == null || slotKey.isEmpty) throw Exception('Invite missing slot_key');
 
       // 2) Find your vault (MVP assumes 1 vault per user)
       final myVault = await _supabase
@@ -55,9 +57,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
 
       if (myVault == null) throw Exception('No vault found for your account');
 
-      // 3) Save membership with correct slot placement
-      // NOTE: If you don't have slot_key column in family_members yet,
-      // run the SQL from Step 2 earlier.
+      // 3) Add to family_members with correct slot placement
       await _supabase.from('family_members').upsert({
         'family_id': familyId,
         'user_id': user.id,
@@ -65,25 +65,23 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
         'slot_key': slotKey,
       }, onConflict: 'family_id,user_id');
 
-      // 4) Link your vault to the family
+      // 4) Link your vault to family
       await _supabase
           .from('vaults')
           .update({'family_id': familyId})
           .eq('id', myVault['id']);
 
-      // 5) Mark invite as used
+      // 5) Mark invite used
       await _supabase.from('family_invites').update({
         'used_at': DateTime.now().toIso8601String(),
-      }).eq('token', token);
+      }).eq('invite_code', code);
 
       if (!mounted) return;
 
-      // 6) Navigate straight to that family's tree
+      // 6) Go to tree
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (_) => FamilyTreeScreen(familyId: familyId),
-        ),
+        MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: familyId)),
       );
     } catch (e) {
       if (!mounted) return;
@@ -110,10 +108,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Paste the invite code you received.',
-              style: TextStyle(fontSize: 15),
-            ),
+            const Text('Paste the invite code you received.'),
             const SizedBox(height: 12),
             TextField(
               controller: _controller,
