@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -24,6 +25,71 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
         .order('created_at', ascending: false);
 
     return (res as List).cast<Map<String, dynamic>>();
+  }
+
+  String _randomToken([int length = 10]) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // avoids 0/O/1/I confusion
+    final r = Random.secure();
+    return List.generate(length, (_) => chars[r.nextInt(chars.length)]).join();
+  }
+
+  Future<String> _createInvite({
+    required String familyId,
+    required String slotKey,
+  }) async {
+    // MVP: only insert columns we KNOW you created: family_id, slot_key, token
+    final token = _randomToken(10);
+
+    await _supabase.from('family_invites').insert({
+      'family_id': familyId,
+      'slot_key': slotKey,
+      'token': token,
+    });
+
+    return token;
+  }
+
+  Future<void> _onSlotTap(String slotKey) async {
+    try {
+      final token = await _createInvite(
+        familyId: widget.familyId,
+        slotKey: slotKey,
+      );
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Invite created'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Slot: $slotKey'),
+              const SizedBox(height: 10),
+              const Text('Invite code (copy & share):'),
+              const SizedBox(height: 6),
+              SelectableText(
+                token,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Invite failed: $e')),
+      );
+    }
   }
 
   @override
@@ -79,11 +145,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                   // Less empty space up top
                   const SizedBox(height: 8),
 
-                  // Top logo: 2x bigger + placed lower (no unnecessary scroll)
+                  // Top logo: bigger + placed lower (no unnecessary scroll)
                   Center(
                     child: Image.asset(
                       logoPath,
-                      width: 220, // 2x from 110
+                      width: 220,
                       fit: BoxFit.contain,
                     ),
                   ),
@@ -136,9 +202,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
-                                  children: const [
-                                    _TreeSlotCard(text: 'Parent vault (slot)'),
-                                    _TreeSlotCard(text: 'Parent vault (slot)'),
+                                  children: [
+                                    _TreeSlotCard(
+                                      text: 'Parent vault (tap to invite)',
+                                      onTap: () => _onSlotTap('parent_left'),
+                                    ),
+                                    _TreeSlotCard(
+                                      text: 'Parent vault (tap to invite)',
+                                      onTap: () => _onSlotTap('parent_right'),
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 34),
@@ -147,9 +219,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 Row(
                                   mainAxisAlignment:
                                       MainAxisAlignment.spaceBetween,
-                                  children: const [
-                                    _TreeSlotCard(text: 'Child vault (slot)'),
-                                    _TreeSlotCard(text: 'Child vault (slot)'),
+                                  children: [
+                                    _TreeSlotCard(
+                                      text: 'Child vault (tap to invite)',
+                                      onTap: () => _onSlotTap('child_left'),
+                                    ),
+                                    _TreeSlotCard(
+                                      text: 'Child vault (tap to invite)',
+                                      onTap: () => _onSlotTap('child_right'),
+                                    ),
                                   ],
                                 ),
                               ],
@@ -204,12 +282,13 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                         if (snapshot.connectionState ==
                             ConnectionState.waiting)
                           const Text('Loading...')
+                        else if (snapshot.hasError)
+                          Text('Error: ${snapshot.error}')
                         else if (vaults.isEmpty)
                           const Text('No vaults found for this family yet.')
                         else
                           ...vaults.map((v) {
-                            final name =
-                                (v['name'] as String?) ?? 'Unnamed';
+                            final name = (v['name'] as String?) ?? 'Unnamed';
                             final isYou =
                                 userId != null && v['owner_id'] == userId;
                             return Padding(
@@ -242,25 +321,34 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
 class _TreeSlotCard extends StatelessWidget {
   final String text;
-  const _TreeSlotCard({required this.text});
+  final VoidCallback? onTap;
+
+  const _TreeSlotCard({required this.text, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: 320,
       height: 70,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.black.withOpacity(0.10)),
-          color: Colors.white.withOpacity(0.35),
-        ),
-        child: Center(
-          child: Text(
-            text,
-            style: TextStyle(
-              fontSize: 15,
-              color: Colors.black.withOpacity(0.75),
+          onTap: onTap,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.black.withOpacity(0.10)),
+              color: Colors.white.withOpacity(0.35),
+            ),
+            child: Center(
+              child: Text(
+                text,
+                style: TextStyle(
+                  fontSize: 15,
+                  color: Colors.black.withOpacity(0.75),
+                ),
+              ),
             ),
           ),
         ),
@@ -325,7 +413,6 @@ class _TreeLinesPainter extends CustomPainter {
     final mainBottom = mainTop + mainH;
 
     final childTop = mainBottom + gap;
-    // final childBottom = childTop + slotH; // not needed
 
     // Anchor offsets so lines NEVER enter boxes
     const padFromBox = 10.0;

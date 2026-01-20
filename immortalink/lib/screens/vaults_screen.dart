@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'vault_home_screen.dart';
 import 'family_tree_screen.dart';
+import 'join_family_screen.dart'; // ✅ add this
 
 class VaultsScreen extends StatefulWidget {
   const VaultsScreen({super.key});
@@ -152,71 +153,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
     await _loadVault();
   }
 
-  Future<void> _joinFamilyWithCode() async {
-    if (_vault == null) return;
-
-    final controller = TextEditingController();
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Join a family'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Paste the invite code you received.'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'Invite code',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Join'),
-          ),
-        ],
-      ),
-    );
-
-    if (ok != true) return;
-
-    final code = controller.text.trim();
-    if (code.isEmpty) return;
-
-    try {
-      await _supabase.rpc('accept_family_invite', params: {
-        'p_code': code,
-        'p_vault_id': _vault!['id'],
-      });
-
-      await _loadVault();
-
-      if (!mounted) return;
-      final familyId = _vault?['family_id'] as String?;
-      if (familyId != null && familyId.isNotEmpty) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: familyId)),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Join failed: $e')),
-      );
-    }
-  }
-
   Future<void> _ensureFamilyAndOpenTree() async {
     final familyId = _vault?['family_id'] as String?;
     if (familyId != null && familyId.isNotEmpty) {
@@ -291,6 +227,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
     );
   }
 
+  void _openJoinFamilyScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const JoinFamilyScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final familyId = _vault?['family_id'] as String?;
@@ -307,6 +250,11 @@ class _VaultsScreenState extends State<VaultsScreen> {
             tooltip: 'Refresh',
             onPressed: _loadVault,
             icon: const Icon(Icons.refresh),
+          ),
+          IconButton(
+            tooltip: 'Join family',
+            onPressed: _openJoinFamilyScreen,
+            icon: const Icon(Icons.group_add),
           ),
         ],
       ),
@@ -357,12 +305,14 @@ class _VaultsScreenState extends State<VaultsScreen> {
                             ),
                           ),
 
+                          // ✅ keep your existing join button too (optional),
+                          // but now it opens the join screen instead of RPC.
                           if (!inFamily) ...[
                             const SizedBox(height: 10),
                             SizedBox(
                               width: double.infinity,
                               child: OutlinedButton.icon(
-                                onPressed: _joinFamilyWithCode,
+                                onPressed: _openJoinFamilyScreen,
                                 icon: const Icon(Icons.vpn_key),
                                 label: const Text('Join with invite code'),
                               ),
