@@ -1,3 +1,6 @@
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -27,16 +30,200 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   List<Map<String, dynamic>> _memories = [];
   String _vaultName = '';
 
+  // --- Avatar / display meta ---
+  String? _avatarUrl; // signed URL for display
+  String? _avatarPath; // stored in DB (vaults.avatar_path)
+  String? _displayName;
+  bool _savingAvatar = false;
+
   @override
   void initState() {
     super.initState();
     _vaultName = widget.vaultName;
+
+    _loadVaultMeta();
     _loadMemories();
   }
 
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  String _extFromName(String name) {
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.png')) return 'png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'jpg';
+    return 'png';
+  }
+
+  String _contentTypeFromExt(String ext) {
+    final e = ext.toLowerCase();
+    if (e == 'jpg' || e == 'jpeg') return 'image/jpeg';
+    return 'image/png';
+  }
+
+  Future<String?> _signedAvatarUrl(String path) async {
+    try {
+      // 1 hour signed URL
+      final signed =
+          await _client.storage.from('avatars').createSignedUrl(path, 60 * 60);
+
+      // cache-bust so Flutter web doesn't keep old image
+      return '$signed&t=${DateTime.now().millisecondsSinceEpoch}';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _loadVaultMeta() async {
+    try {
+      final res = await _client
+          .from('vaults')
+          .select('avatar_path, display_name, name')
+          .eq('id', widget.vaultId)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      final path = res?['avatar_path'] as String?;
+      final dn = (res?['display_name'] as String?) ??
+          (res?['name'] as String?) ??
+          _vaultName;
+
+      String? signedUrl;
+      if (path != null && path.trim().isNotEmpty) {
+        signedUrl = await _signedAvatarUrl(path.trim());
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _avatarPath = path;
+        _avatarUrl = signedUrl;
+        _displayName = (dn ?? _vaultName).trim().isEmpty ? _vaultName : dn;
+      });
+    } catch (_) {
+      // Silent fail for MVP (doesn't block memories page)
+    }
+  }
+
+  Future<void> _pickAndUploadAvatar() async {
+    try {
+      setState(() => _savingAvatar = true);
+
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true, // IMPORTANT for Flutter Web
+      );
+
+      if (picked == null || picked.files.isEmpty) return;
+
+      final file = picked.files.first;
+      final Uint8List? bytes = file.bytes;
+      if (bytes == null) throw Exception('No file bytes received.');
+
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) throw Exception('Not signed in');
+
+      final ext = _extFromName(file.name);
+      final path = '$userId/${widget.vaultId}/avatar.$ext';
+
+      // Upload into PRIVATE bucket "avatars"
+      await _client.storage.from('avatars').uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: true,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
+
+      // Store PATH in DB (not public URL)
+      await _client
+          .from('vaults')
+          .update({'avatar_path': path}).eq('id', widget.vaultId);
+
+      // Create signed URL for display
+      final signedUrl = await _signedAvatarUrl(path);
+
+      if (!mounted) return;
+
+      setState(() {
+        _avatarPath = path;
+        _avatarUrl = signedUrl;
+      });
+
+      _toast('Vault photo updated.');
+    } catch (e) {
+      _toast('Upload failed: $e');
+    } finally {
+      if (mounted) setState(() => _savingAvatar = false);
+    }
+  }
+
+  Widget _vaultAvatarHeader() {
+    final name = (_displayName ?? _vaultName).trim().isEmpty
+        ? 'Your vault'
+        : (_displayName ?? _vaultName).trim();
+
+    final hasAvatar = _avatarUrl != null && _avatarUrl!.trim().isNotEmpty;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        color: Colors.white.withOpacity(0.35),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 28,
+            backgroundColor: Colors.black.withOpacity(0.06),
+            backgroundImage: hasAvatar ? NetworkImage(_avatarUrl!) : null,
+            child: !hasAvatar
+                ? Icon(
+                    Icons.person,
+                    color: Colors.black.withOpacity(0.45),
+                    size: 28,
+                  )
+                : null,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Add your vault photo\nIt helps family recognize you on the tree',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: Colors.black.withOpacity(0.60),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            onPressed: _savingAvatar ? null : _pickAndUploadAvatar,
+            child: Text(
+              _savingAvatar ? 'Uploading…' : (hasAvatar ? 'Change' : 'Add'),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadMemories() async {
@@ -117,8 +304,17 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (newName == null || newName.isEmpty) return;
 
     try {
-      await _client.from('vaults').update({'name': newName}).eq('id', widget.vaultId);
+      await _client
+          .from('vaults')
+          .update({'name': newName}).eq('id', widget.vaultId);
+
       setState(() => _vaultName = newName);
+
+      // If display name wasn't set, keep header aligned
+      if ((_displayName == null || _displayName!.trim().isEmpty) && mounted) {
+        setState(() => _displayName = newName);
+      }
+
       _toast('Vault renamed.');
     } on PostgrestException catch (e) {
       _toast('Rename failed: ${e.message}');
@@ -270,7 +466,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
-            onPressed: _loadMemories,
+            onPressed: () async {
+              await _loadVaultMeta();
+              await _loadMemories();
+            },
           ),
         ],
       ),
@@ -287,52 +486,58 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               ? const Center(child: CircularProgressIndicator())
               : _error != null
                   ? Center(child: Text('Load failed: $_error'))
-                  : _memories.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text('No memories yet.'),
-                              const SizedBox(height: 12),
-                              ElevatedButton(
-                                onPressed: () =>
-                                    _openAddMemory(initialLifeStage: 'early'),
-                                child: const Text('Add your first memory'),
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.separated(
-                          itemCount: _memories.length,
-                          separatorBuilder: (_, __) => const Divider(),
-                          itemBuilder: (context, i) {
-                            final m = _memories[i];
-                            final stage = (m['life_stage'] ?? '').toString();
-                            final prompt = (m['prompt_text'] ?? '').toString();
-                            final body = (m['body'] ?? '').toString();
+                  : ListView.separated(
+                      itemCount: _memories.isEmpty ? 2 : _memories.length + 1,
+                      separatorBuilder: (_, __) => const Divider(),
+                      itemBuilder: (context, i) {
+                        if (i == 0) return _vaultAvatarHeader();
 
-                            return ListTile(
-                              tileColor: tileBg,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                        if (_memories.isEmpty && i == 1) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('No memories yet.'),
+                                  const SizedBox(height: 12),
+                                  ElevatedButton(
+                                    onPressed: () =>
+                                        _openAddMemory(initialLifeStage: 'early'),
+                                    child: const Text('Add your first memory'),
+                                  ),
+                                ],
                               ),
-                              leading: Chip(label: Text(_prettyStage(stage))),
-                              title:
-                                  Text(prompt.isEmpty ? '(No prompt)' : prompt),
-                              subtitle: Text(
-                                body,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onTap: () => _editMemory(m),
-                              trailing: IconButton(
-                                tooltip: 'Delete memory',
-                                icon: const Icon(Icons.delete_outline),
-                                onPressed: () => _deleteMemory(m),
-                              ),
-                            );
-                          },
-                        ),
+                            ),
+                          );
+                        }
+
+                        final m = _memories[i - 1];
+                        final stage = (m['life_stage'] ?? '').toString();
+                        final prompt = (m['prompt_text'] ?? '').toString();
+                        final body = (m['body'] ?? '').toString();
+
+                        return ListTile(
+                          tileColor: tileBg,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          leading: Chip(label: Text(_prettyStage(stage))),
+                          title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
+                          subtitle: Text(
+                            body,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => _editMemory(m),
+                          trailing: IconButton(
+                            tooltip: 'Delete memory',
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => _deleteMemory(m),
+                          ),
+                        );
+                      },
+                    ),
         ),
       ),
     );
