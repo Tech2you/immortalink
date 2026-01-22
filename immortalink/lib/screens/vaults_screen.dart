@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'vault_home_screen.dart';
 import 'family_tree_screen.dart';
-import 'join_family_screen.dart'; // ✅ add this
+import 'join_family_screen.dart';
 
 class VaultsScreen extends StatefulWidget {
   const VaultsScreen({super.key});
@@ -18,10 +18,22 @@ class _VaultsScreenState extends State<VaultsScreen> {
   bool _loading = true;
   Map<String, dynamic>? _vault; // single vault (1 user = 1 vault)
 
+  String? _vaultAvatarUrl; // signed url for display (private bucket)
+
   @override
   void initState() {
     super.initState();
     _loadVault();
+  }
+
+  Future<String?> _signedAvatarUrl(String path) async {
+    try {
+      final signed =
+          await _supabase.storage.from('avatars').createSignedUrl(path, 60 * 60);
+      return '$signed&t=${DateTime.now().millisecondsSinceEpoch}';
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _loadVault() async {
@@ -32,19 +44,28 @@ class _VaultsScreenState extends State<VaultsScreen> {
       setState(() {
         _loading = false;
         _vault = null;
+        _vaultAvatarUrl = null;
       });
       return;
     }
 
     final data = await _supabase
         .from('vaults')
-        .select('id, name, created_at, family_id')
+        .select('id, name, created_at, family_id, avatar_path')
         .eq('owner_id', user.id)
         .order('created_at', ascending: false)
         .maybeSingle();
 
+    String? signedUrl;
+    final path = (data?['avatar_path'] as String?)?.trim();
+    if (path != null && path.isNotEmpty) {
+      signedUrl = await _signedAvatarUrl(path);
+    }
+
+    if (!mounted) return;
     setState(() {
       _vault = data;
+      _vaultAvatarUrl = signedUrl;
       _loading = false;
     });
   }
@@ -59,7 +80,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
           vaultName: _vault!['name'],
         ),
       ),
-    );
+    ).then((_) => _loadVault()); // ✅ refresh after edits (name/avatar)
   }
 
   Future<void> _renameVault(String vaultId, String currentName) async {
@@ -100,7 +121,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete vault?'),
-        content: const Text('This will permanently delete the vault and its memories.'),
+        content:
+            const Text('This will permanently delete the vault and its memories.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -198,7 +220,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (ok != true) return;
     if (_vault == null) return;
 
-    final familyName = controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
+    final familyName =
+        controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
     final vaultId = _vault!['id'] as String;
 
     final family = await _supabase
@@ -218,6 +241,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
     });
 
     await _supabase.from('vaults').update({'family_id': newFamilyId}).eq('id', vaultId);
+
     await _loadVault();
 
     if (!mounted) return;
@@ -238,6 +262,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
   Widget build(BuildContext context) {
     final familyId = _vault?['family_id'] as String?;
     final inFamily = familyId != null && familyId.isNotEmpty;
+
+    final hasAvatar =
+        _vaultAvatarUrl != null && _vaultAvatarUrl!.trim().isNotEmpty;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F0F7),
@@ -274,7 +301,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
               ),
             ),
           ),
-
           Padding(
             padding: const EdgeInsets.all(16),
             child: _loading
@@ -304,9 +330,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
                               label: Text(inFamily ? 'View your family tree' : 'Invite your family'),
                             ),
                           ),
-
-                          // ✅ keep your existing join button too (optional),
-                          // but now it opens the join screen instead of RPC.
                           if (!inFamily) ...[
                             const SizedBox(height: 10),
                             SizedBox(
@@ -318,15 +341,21 @@ class _VaultsScreenState extends State<VaultsScreen> {
                               ),
                             ),
                           ],
-
                           const SizedBox(height: 12),
-
                           Card(
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: ListTile(
-                              onTap: _openVaultHome, // ✅ tap anywhere
+                              onTap: _openVaultHome,
+                              leading: CircleAvatar(
+                                radius: 18,
+                                backgroundColor: Colors.black.withOpacity(0.08),
+                                backgroundImage: hasAvatar ? NetworkImage(_vaultAvatarUrl!) : null,
+                                child: !hasAvatar
+                                    ? Icon(Icons.person, size: 18, color: Colors.black.withOpacity(0.6))
+                                    : null,
+                              ),
                               title: Text(_vault!['name'] ?? ''),
                               subtitle: Text('Created: ${_vault!['created_at']}'),
                               trailing: Row(
