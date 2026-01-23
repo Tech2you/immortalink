@@ -1,5 +1,4 @@
 import 'dart:math';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -62,7 +61,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       final signed =
           await _supabase.storage.from('avatars').createSignedUrl(path, 60 * 60);
       // cache-bust (Flutter web likes caching)
-      return '$signed&t=${DateTime.now().millisecondsSinceEpoch}';
+      final sep = signed.contains('?') ? '&' : '?';
+      return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (_) {
       return null;
     }
@@ -80,31 +80,40 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       );
     }
 
-    // 1) Vaults linked to THIS family
-    final familyVaultRes = await _supabase
-        .from('vaults')
-        .select('id, name, owner_id, family_id, created_at, avatar_path')
-        .eq('family_id', widget.familyId);
-
-    final List<Map<String, dynamic>> vaults =
-        (familyVaultRes as List).cast<Map<String, dynamic>>();
-
-    // 2) Always fetch YOUR vault (robust for cases where family_id is missing / stale)
-    final myVault = await _supabase
-        .from('vaults')
-        .select('id, name, owner_id, family_id, created_at, avatar_path')
-        .eq('owner_id', user.id)
-        .maybeSingle();
-
+    List<Map<String, dynamic>> vaults = [];
     Map<String, dynamic>? myVaultMap;
-    if (myVault != null) {
-      myVaultMap = Map<String, dynamic>.from(myVault);
-      final myId = (myVaultMap['id'] ?? '').toString();
-      final alreadyInList =
-          vaults.any((v) => (v['id'] ?? '').toString() == myId);
-      if (!alreadyInList) {
-        vaults.add(myVaultMap);
+
+    // 1) Vaults linked to THIS family (don’t let failure kill everything)
+    try {
+      final familyVaultRes = await _supabase
+          .from('vaults')
+          .select('id, name, owner_id, family_id, created_at, avatar_path')
+          .eq('family_id', widget.familyId);
+
+      vaults = (familyVaultRes as List).cast<Map<String, dynamic>>();
+    } catch (_) {
+      vaults = [];
+    }
+
+    // 2) Always fetch YOUR vault by owner_id (robust)
+    try {
+      final myVault = await _supabase
+          .from('vaults')
+          .select('id, name, owner_id, family_id, created_at, avatar_path')
+          .eq('owner_id', user.id)
+          .maybeSingle();
+
+      if (myVault != null) {
+        myVaultMap = Map<String, dynamic>.from(myVault);
+        final myId = (myVaultMap['id'] ?? '').toString();
+        final alreadyInList =
+            vaults.any((v) => (v['id'] ?? '').toString() == myId);
+        if (!alreadyInList) {
+          vaults.add(myVaultMap);
+        }
       }
+    } catch (_) {
+      // keep going
     }
 
     // 3) Signed avatar urls for any vaults that have avatar_path
@@ -120,31 +129,36 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       }
     }
 
-    // 4) Special: ensure YOUR avatar url is computed even if map lookup fails later
+    // 4) Special: ensure YOUR avatar url is computed even if list lookups fail
     String? yourAvatarUrl;
     if (myVaultMap != null) {
       final myId = (myVaultMap['id'] ?? '').toString();
       yourAvatarUrl = avatarUrlByVaultId[myId];
 
-      // if not in map for any reason, re-generate directly from your vault row
-      if ((yourAvatarUrl == null || yourAvatarUrl!.trim().isEmpty)) {
+      if (yourAvatarUrl == null || yourAvatarUrl!.trim().isEmpty) {
         final path = (myVaultMap['avatar_path'] ?? '').toString().trim();
         if (path.isNotEmpty) {
-          yourAvatarUrl = await _signedAvatarUrl(path);
-          if (yourAvatarUrl != null && yourAvatarUrl!.trim().isNotEmpty) {
-            avatarUrlByVaultId[myId] = yourAvatarUrl!;
+          final direct = await _signedAvatarUrl(path);
+          if (direct != null && direct.trim().isNotEmpty) {
+            yourAvatarUrl = direct;
+            avatarUrlByVaultId[myId] = direct;
           }
         }
       }
     }
 
-    // 5) Family members (slot positions)
-    final memberRes = await _supabase
-        .from('family_members')
-        .select('user_id, slot_key, role, joined_at')
-        .eq('family_id', widget.familyId);
+    // 5) Family members (slot positions) — if policy breaks, we still show your vault
+    List<Map<String, dynamic>> members = [];
+    try {
+      final memberRes = await _supabase
+          .from('family_members')
+          .select('user_id, slot_key, role, joined_at')
+          .eq('family_id', widget.familyId);
 
-    final members = (memberRes as List).cast<Map<String, dynamic>>();
+      members = (memberRes as List).cast<Map<String, dynamic>>();
+    } catch (_) {
+      members = [];
+    }
 
     return _FamilyData(
       vaults: vaults,
@@ -183,7 +197,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   }
 
   Map<String, dynamic>? _yourVault(_FamilyData data) {
-    // Prefer explicit "yourVault" fetched by owner_id
     if (data.yourVault != null) return data.yourVault;
 
     final uid = _supabase.auth.currentUser?.id;
@@ -212,12 +225,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       if (vaultId.isEmpty) return;
 
       if (!mounted) return;
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => VaultHomeScreen(vaultId: vaultId, vaultName: vaultName),
         ),
       );
+
+      // IMPORTANT: refresh when returning so avatar updates appear
+      _refresh();
     } catch (_) {
       // silent MVP
     }
@@ -295,7 +311,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     }
   }
 
-  void _openVaultFromTree(_FamilyData data, Map<String, dynamic> v) {
+  Future<void> _openVaultFromTree(_FamilyData data, Map<String, dynamic> v) async {
     final uid = _supabase.auth.currentUser?.id;
     final ownerId = (v['owner_id'] ?? '').toString();
     final vaultId = (v['id'] ?? '').toString();
@@ -303,22 +319,26 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
     if (vaultId.isEmpty) return;
 
+    if (!mounted) return;
+
     if (uid != null && ownerId == uid) {
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => VaultHomeScreen(vaultId: vaultId, vaultName: vaultName),
         ),
       );
     } else {
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) =>
-              VaultReadOnlyScreen(vaultId: vaultId, vaultName: vaultName),
+          builder: (_) => VaultReadOnlyScreen(vaultId: vaultId, vaultName: vaultName),
         ),
       );
     }
+
+    // IMPORTANT: refresh when returning so avatar updates appear
+    _refresh();
   }
 
   GlobalKey _keyFor(String id) => _nodeKeys.putIfAbsent(id, () => GlobalKey());
@@ -358,7 +378,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
             tooltip: 'Refresh',
             onPressed: _refresh,
             icon: const Icon(Icons.refresh),
-          )
+          ),
         ],
       ),
       body: FutureBuilder<_FamilyData>(
@@ -379,7 +399,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
           final yourName = (yourVault?['name'] ?? 'Your vault (you)').toString();
           final yourVaultId = (yourVault?['id'] ?? '').toString();
 
-          // Prefer the explicitly computed yourAvatarUrl (more robust on web)
           final yourAvatarUrl =
               (data.yourAvatarUrl != null && data.yourAvatarUrl!.trim().isNotEmpty)
                   ? data.yourAvatarUrl
@@ -404,8 +423,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                 ),
               ),
               ListView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                 children: [
                   const SizedBox(height: 8),
                   Center(
@@ -419,8 +437,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                   const Center(
                     child: Text(
                       'Your Family Tree (MVP)',
-                      style:
-                          TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
+                      style: TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -433,8 +450,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(20),
-                          border:
-                              Border.all(color: Colors.black.withOpacity(0.08)),
+                          border: Border.all(color: Colors.black.withOpacity(0.08)),
                           color: Colors.white.withOpacity(0.22),
                         ),
                         child: Stack(
@@ -453,8 +469,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 _SectionHeader(
                                   title: 'Grandparents',
                                   isOpen: _showGrandparents,
-                                  onToggle: () => setState(() =>
-                                      _showGrandparents = !_showGrandparents),
+                                  onToggle: () =>
+                                      setState(() => _showGrandparents = !_showGrandparents),
                                 ),
                                 if (_showGrandparents) ...[
                                   const SizedBox(height: 8),
@@ -470,15 +486,13 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                   key: _keyFor(kMaternalGm),
                                                   filled: slotVault[kMaternalGm],
                                                   avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kMaternalGm]?['id'] ??
-                                                              '')
+                                                      (slotVault[kMaternalGm]?['id'] ?? '')
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kMaternalGm,
                                                     title: 'Maternal Grandmom',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
+                                                  onOpen: (v) => _openVaultFromTree(data, v),
                                                   showAddLabel: 'Add grandmom',
                                                 ),
                                               ),
@@ -488,15 +502,13 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                   key: _keyFor(kMaternalGf),
                                                   filled: slotVault[kMaternalGf],
                                                   avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kMaternalGf]?['id'] ??
-                                                              '')
+                                                      (slotVault[kMaternalGf]?['id'] ?? '')
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kMaternalGf,
                                                     title: 'Maternal Granddad',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
+                                                  onOpen: (v) => _openVaultFromTree(data, v),
                                                   showAddLabel: 'Add granddad',
                                                 ),
                                               ),
@@ -515,15 +527,13 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                   key: _keyFor(kPaternalGm),
                                                   filled: slotVault[kPaternalGm],
                                                   avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kPaternalGm]?['id'] ??
-                                                              '')
+                                                      (slotVault[kPaternalGm]?['id'] ?? '')
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kPaternalGm,
                                                     title: 'Paternal Grandmom',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
+                                                  onOpen: (v) => _openVaultFromTree(data, v),
                                                   showAddLabel: 'Add grandmom',
                                                 ),
                                               ),
@@ -533,15 +543,13 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                   key: _keyFor(kPaternalGf),
                                                   filled: slotVault[kPaternalGf],
                                                   avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kPaternalGf]?['id'] ??
-                                                              '')
+                                                      (slotVault[kPaternalGf]?['id'] ?? '')
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kPaternalGf,
                                                     title: 'Paternal Granddad',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
+                                                  onOpen: (v) => _openVaultFromTree(data, v),
                                                   showAddLabel: 'Add granddad',
                                                 ),
                                               ),
@@ -564,12 +572,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           key: _keyFor(kMother),
                                           filled: slotVault[kMother],
                                           avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kMother]?['id'] ?? '')
-                                                  .toString()],
-                                          onInvite: () => _createInvite(
-                                              slotKey: kMother, title: 'Mom'),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                              (slotVault[kMother]?['id'] ?? '').toString()],
+                                          onInvite: () =>
+                                              _createInvite(slotKey: kMother, title: 'Mom'),
+                                          onOpen: (v) => _openVaultFromTree(data, v),
                                           showAddLabel: 'Add mom',
                                         ),
                                       ),
@@ -580,12 +586,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           key: _keyFor(kFather),
                                           filled: slotVault[kFather],
                                           avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kFather]?['id'] ?? '')
-                                                  .toString()],
-                                          onInvite: () => _createInvite(
-                                              slotKey: kFather, title: 'Dad'),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                              (slotVault[kFather]?['id'] ?? '').toString()],
+                                          onInvite: () =>
+                                              _createInvite(slotKey: kFather, title: 'Dad'),
+                                          onOpen: (v) => _openVaultFromTree(data, v),
                                           showAddLabel: 'Add dad',
                                         ),
                                       ),
@@ -603,14 +607,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           key: _keyFor(kSpouse1),
                                           filled: slotVault[kSpouse1],
                                           avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kSpouse1]?['id'] ?? '')
-                                                  .toString()],
-                                          onInvite: () => _createInvite(
-                                            slotKey: kSpouse1,
-                                            title: 'Spouse',
-                                          ),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                              (slotVault[kSpouse1]?['id'] ?? '').toString()],
+                                          onInvite: () =>
+                                              _createInvite(slotKey: kSpouse1, title: 'Spouse'),
+                                          onOpen: (v) => _openVaultFromTree(data, v),
                                           showAddLabel: 'Add spouse',
                                         ),
                                       ),
@@ -623,11 +623,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                         name: yourName,
                                         subtitle: 'You',
                                         avatarUrl: yourAvatarUrl,
-                                        onTap: () {
+                                        onTap: () async {
                                           if (yourVault != null) {
-                                            _openVaultFromTree(data, yourVault);
+                                            await _openVaultFromTree(data, yourVault);
                                           } else {
-                                            _openYourVaultFallback();
+                                            await _openYourVaultFallback();
                                           }
                                         },
                                       ),
@@ -642,14 +642,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               key: _keyFor(kSibling1),
                                               filled: slotVault[kSibling1],
                                               avatarUrl: data.avatarUrlByVaultId[
-                                                  (slotVault[kSibling1]?['id'] ??
-                                                          '')
-                                                      .toString()],
+                                                  (slotVault[kSibling1]?['id'] ?? '').toString()],
                                               onInvite: () => _createInvite(
-                                                  slotKey: kSibling1,
-                                                  title: 'Sibling 1'),
-                                              onOpen: (v) =>
-                                                  _openVaultFromTree(data, v),
+                                                  slotKey: kSibling1, title: 'Sibling 1'),
+                                              onOpen: (v) => _openVaultFromTree(data, v),
                                               showAddLabel: 'Add sibling',
                                             ),
                                             const SizedBox(height: 10),
@@ -657,14 +653,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               key: _keyFor(kSibling2),
                                               filled: slotVault[kSibling2],
                                               avatarUrl: data.avatarUrlByVaultId[
-                                                  (slotVault[kSibling2]?['id'] ??
-                                                          '')
-                                                      .toString()],
+                                                  (slotVault[kSibling2]?['id'] ?? '').toString()],
                                               onInvite: () => _createInvite(
-                                                  slotKey: kSibling2,
-                                                  title: 'Sibling 2'),
-                                              onOpen: (v) =>
-                                                  _openVaultFromTree(data, v),
+                                                  slotKey: kSibling2, title: 'Sibling 2'),
+                                              onOpen: (v) => _openVaultFromTree(data, v),
                                               showAddLabel: 'Add sibling',
                                             ),
                                             const SizedBox(height: 10),
@@ -672,14 +664,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               key: _keyFor(kSibling3),
                                               filled: slotVault[kSibling3],
                                               avatarUrl: data.avatarUrlByVaultId[
-                                                  (slotVault[kSibling3]?['id'] ??
-                                                          '')
-                                                      .toString()],
+                                                  (slotVault[kSibling3]?['id'] ?? '').toString()],
                                               onInvite: () => _createInvite(
-                                                  slotKey: kSibling3,
-                                                  title: 'Sibling 3'),
-                                              onOpen: (v) =>
-                                                  _openVaultFromTree(data, v),
+                                                  slotKey: kSibling3, title: 'Sibling 3'),
+                                              onOpen: (v) => _openVaultFromTree(data, v),
                                               showAddLabel: 'Add sibling',
                                             ),
                                           ],
@@ -692,8 +680,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 _SectionHeader(
                                   title: 'Descendants',
                                   isOpen: _showDescendants,
-                                  onToggle: () => setState(() =>
-                                      _showDescendants = !_showDescendants),
+                                  onToggle: () =>
+                                      setState(() => _showDescendants = !_showDescendants),
                                 ),
                                 if (_showDescendants) ...[
                                   const SizedBox(height: 8),
@@ -708,60 +696,47 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           text: 'Add child',
                                           filled: slotVault[kChild1],
                                           avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kChild1]?['id'] ?? '')
-                                                  .toString()],
-                                          onInvite: () => _createInvite(
-                                              slotKey: kChild1, title: 'Child 1'),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                              (slotVault[kChild1]?['id'] ?? '').toString()],
+                                          onInvite: () =>
+                                              _createInvite(slotKey: kChild1, title: 'Child 1'),
+                                          onOpen: (v) => _openVaultFromTree(data, v),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild2),
                                           text: 'Add child',
                                           filled: slotVault[kChild2],
                                           avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kChild2]?['id'] ?? '')
-                                                  .toString()],
-                                          onInvite: () => _createInvite(
-                                              slotKey: kChild2, title: 'Child 2'),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                              (slotVault[kChild2]?['id'] ?? '').toString()],
+                                          onInvite: () =>
+                                              _createInvite(slotKey: kChild2, title: 'Child 2'),
+                                          onOpen: (v) => _openVaultFromTree(data, v),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild3),
                                           text: 'Add child',
                                           filled: slotVault[kChild3],
                                           avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kChild3]?['id'] ?? '')
-                                                  .toString()],
-                                          onInvite: () => _createInvite(
-                                              slotKey: kChild3, title: 'Child 3'),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                              (slotVault[kChild3]?['id'] ?? '').toString()],
+                                          onInvite: () =>
+                                              _createInvite(slotKey: kChild3, title: 'Child 3'),
+                                          onOpen: (v) => _openVaultFromTree(data, v),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild4),
                                           text: 'Add child',
                                           filled: slotVault[kChild4],
                                           avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kChild4]?['id'] ?? '')
-                                                  .toString()],
-                                          onInvite: () => _createInvite(
-                                              slotKey: kChild4, title: 'Child 4'),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                              (slotVault[kChild4]?['id'] ?? '').toString()],
+                                          onInvite: () =>
+                                              _createInvite(slotKey: kChild4, title: 'Child 4'),
+                                          onOpen: (v) => _openVaultFromTree(data, v),
                                         ),
                                       ],
                                     ),
                                   ),
                                 ],
                                 const SizedBox(height: 14),
-                                SizedBox(
-                                  height: 54,
-                                  child: CustomPaint(
-                                    painter: _BottomVinesPainter(),
-                                  ),
-                                ),
+                                SizedBox(height: 54, child: CustomPaint(painter: _BottomVinesPainter())),
                                 const SizedBox(height: 10),
                                 Center(
                                   child: Text(
@@ -849,8 +824,7 @@ class _GroupCard extends StatelessWidget {
               children: [
                 Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
                 const Spacer(),
-                Icon(Icons.keyboard_arrow_down,
-                    color: Colors.black.withOpacity(0.35)),
+                Icon(Icons.keyboard_arrow_down, color: Colors.black.withOpacity(0.35)),
               ],
             ),
             const SizedBox(height: 10),
@@ -889,16 +863,11 @@ class _AvatarBubble extends StatelessWidget {
       child: SizedBox(
         width: radius * 2,
         height: radius * 2,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Container(color: Colors.black.withOpacity(0.06)),
-            Image.network(
-              u,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => bg,
-            ),
-          ],
+        child: Image.network(
+          u,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          errorBuilder: (_, __, ___) => bg,
         ),
       ),
     );
@@ -940,15 +909,11 @@ class _YourVaultCard extends StatelessWidget {
                 const SizedBox(height: 10),
                 Text(
                   name,
-                  style:
-                      const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(color: Colors.black.withOpacity(0.55)),
-                ),
+                Text(subtitle, style: TextStyle(color: Colors.black.withOpacity(0.55))),
               ],
             ),
           ),
@@ -1055,8 +1020,7 @@ class _SmallInviteSlot extends StatelessWidget {
                 : CircleAvatar(
                     radius: 16,
                     backgroundColor: Colors.black.withOpacity(0.08),
-                    child: Icon(Icons.add,
-                        color: Colors.black.withOpacity(0.65), size: 18),
+                    child: Icon(Icons.add, color: Colors.black.withOpacity(0.65), size: 18),
                   ),
             const SizedBox(width: 10),
             Expanded(
