@@ -1,3 +1,4 @@
+// lib/screens/vault_home_screen.dart
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -6,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
 import 'create_memory_screen.dart';
 
@@ -38,7 +40,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   String? _displayName;
   bool _savingAvatar = false;
 
-  // --- Featured photos ---
+  // --- Featured photos (highlights) ---
   bool _loadingPhotos = true;
   bool _uploadingPhoto = false;
   List<Map<String, String>> _featuredPhotos = []; // {path,url}
@@ -53,21 +55,37 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   String? _memoryPhotoError;
   final Map<String, List<_MemPhoto>> _memoryPhotosById = {};
 
-  // --- Voice notes ---
+  // --- Core voice note (one per vault) ---
+  bool _loadingCoreVoice = true;
+  String? _coreVoiceError;
+  bool _savingCoreVoice = false;
+  _VoiceNote? _coreVoice; // uses same model
+
+  // --- Voice notes (general vault-level) ---
   bool _loadingVoice = true;
   bool _uploadingVoice = false;
   String? _voiceError;
   final List<_VoiceNote> _voiceNotes = [];
 
+  // --- Memory voice notes ---
+  bool _loadingMemoryVoice = true;
+  String? _memoryVoiceError;
+  final Map<String, List<_VoiceNote>> _memoryVoiceById = {};
+
+  // Playback
   final AudioPlayer _player = AudioPlayer();
-  String? _playingVoiceId; // which note is currently playing
+  String? _playingKey; // e.g. "core:vaultId" OR "vault:<id>" OR "mem:<id>"
   bool _isPlaying = false;
+
+  // Web recorder (safe on non-web)
+  final WebAudioRecorder _recorder = createWebAudioRecorder();
 
   // Buckets
   static const String _avatarBucket = 'avatars';
   static const String _featuredPhotosBucket = 'vault_photos';
   static const String _memoryPhotosBucket = 'memory_photos';
   static const String _voiceBucket = 'vault_voice';
+  static const String _memoryVoiceBucket = 'memory_voice';
 
   @override
   void initState() {
@@ -83,13 +101,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (!mounted) return;
       setState(() {
         _isPlaying = false;
-        _playingVoiceId = null;
+        _playingKey = null;
       });
     });
 
     _loadVaultMeta();
     _loadMemories();
     _loadFeaturedPhotos();
+    _loadCoreVoice();
     _loadVoiceNotes();
   }
 
@@ -98,12 +117,43 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     _autoSlideTimer?.cancel();
     _highlightController.dispose();
     _player.dispose();
+    _recorder.dispose();
     super.dispose();
   }
 
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<String?> _promptRename({
+    required String title,
+    required String initial,
+    String hint = 'Voice note name',
+  }) async {
+    final c = TextEditingController(text: initial);
+
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: c,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: hint,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, c.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   String _extFromName(String name) {
@@ -142,13 +192,171 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   Future<String?> _signedUrl(String bucket, String path) async {
     try {
-      final signed =
-          await _client.storage.from(bucket).createSignedUrl(path, 60 * 60);
+      final signed = await _client.storage.from(bucket).createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (_) {
       return null;
     }
+  }
+
+  /* =========================
+     UNIVERSAL RECORD DIALOG
+  ========================== */
+
+  Future<void> _openRecordDialog({
+    required String title,
+    required String subtitle,
+    required Future<void> Function(RecordedAudio rec) onSave,
+  }) async {
+    if (!_recorder.isSupported) {
+      _toast('Recording not supported in this browser (use Upload for now).');
+      return;
+    }
+
+    bool saving = false;
+    String? err;
+    int seconds = 0;
+    Timer? t;
+
+    Future<void> stopAndSave(StateSetter setInner) async {
+      if (saving) return;
+      setInner(() {
+        saving = true;
+        err = null;
+      });
+
+      try {
+        final rec = await _recorder.stop();
+        await onSave(rec);
+        if (!mounted) return;
+        Navigator.pop(context);
+      } catch (e) {
+        setInner(() {
+          err = e.toString();
+          saving = false;
+        });
+      } finally {
+        t?.cancel();
+      }
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !saving,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setInner) {
+            Future<void> startIfNeeded() async {
+              if (_recorder.isRecording) return;
+              try {
+                await _recorder.start();
+                t?.cancel();
+                t = Timer.periodic(const Duration(seconds: 1), (_) {
+                  seconds += 1;
+                  if (ctx.mounted) setInner(() {});
+                });
+              } catch (e) {
+                setInner(() => err = e.toString());
+              }
+            }
+
+            // Start recording once when dialog builds
+            WidgetsBinding.instance.addPostFrameCallback((_) => startIfNeeded());
+
+            String mmss(int s) {
+              final m = (s ~/ 60).toString().padLeft(2, '0');
+              final ss = (s % 60).toString().padLeft(2, '0');
+              return '$m:$ss';
+            }
+
+            return Dialog(
+              insetPadding: const EdgeInsets.all(16),
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                        ),
+                        IconButton(
+                          onPressed: saving
+                              ? null
+                              : () async {
+                                  try {
+                                    await _recorder.cancel();
+                                  } catch (_) {}
+                                  t?.cancel();
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                },
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        subtitle,
+                        style: TextStyle(color: Colors.black.withOpacity(0.65)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.black.withOpacity(0.08)),
+                        color: Colors.white.withOpacity(0.45),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.mic, color: Colors.black.withOpacity(0.65)),
+                          const SizedBox(width: 10),
+                          Text(
+                            saving ? 'Saving…' : (_recorder.isRecording ? 'Recording…' : 'Starting…'),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          const Spacer(),
+                          Text(
+                            mmss(seconds),
+                            style: TextStyle(color: Colors.black.withOpacity(0.65), fontFeatures: const []),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (err != null) ...[
+                      const SizedBox(height: 10),
+                      Text(err!, style: const TextStyle(color: Colors.red)),
+                    ],
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: saving ? null : () => stopAndSave(setInner),
+                        icon: const Icon(Icons.stop_circle_outlined),
+                        label: Text(saving ? 'Stop & save' : 'Stop & save'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tip: speak naturally.',
+                      style: TextStyle(color: Colors.black.withOpacity(0.55), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    t?.cancel();
   }
 
   /* =========================
@@ -166,9 +374,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (!mounted) return;
 
       final path = (res?['avatar_path'] as String?)?.trim();
-      final dn = (res?['display_name'] as String?) ??
-          (res?['name'] as String?) ??
-          _vaultName;
+      final dn = (res?['display_name'] as String?) ?? (res?['name'] as String?) ?? _vaultName;
 
       String? signedUrl;
       if (path != null && path.isNotEmpty) {
@@ -180,9 +386,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       setState(() {
         _avatarPath = path;
         _avatarUrl = signedUrl;
-        _displayName = (dn ?? _vaultName).trim().isEmpty
-            ? _vaultName
-            : (dn ?? _vaultName).trim();
+        _displayName = (dn ?? _vaultName).trim().isEmpty ? _vaultName : (dn ?? _vaultName).trim();
       });
     } catch (_) {
       // silent
@@ -193,11 +397,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     try {
       setState(() => _savingAvatar = true);
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-      );
-
+      final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
@@ -219,9 +419,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             ),
           );
 
-      await _client
-          .from('vaults')
-          .update({'avatar_path': path}).eq('id', widget.vaultId);
+      await _client.from('vaults').update({'avatar_path': path}).eq('id', widget.vaultId);
 
       final signedUrl = await _signedUrl(_avatarBucket, path);
 
@@ -241,10 +439,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Widget _vaultAvatarHeader() {
-    final name = (_displayName ?? _vaultName).trim().isEmpty
-        ? 'Your vault'
-        : (_displayName ?? _vaultName).trim();
-
+    final name = (_displayName ?? _vaultName).trim().isEmpty ? 'Your vault' : (_displayName ?? _vaultName).trim();
     final hasAvatar = _avatarUrl != null && _avatarUrl!.trim().isNotEmpty;
 
     return Container(
@@ -261,27 +456,18 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             radius: 28,
             backgroundColor: Colors.black.withOpacity(0.06),
             backgroundImage: hasAvatar ? NetworkImage(_avatarUrl!) : null,
-            child: !hasAvatar
-                ? Icon(
-                    Icons.person,
-                    color: Colors.black.withOpacity(0.45),
-                    size: 28,
-                  )
-                : null,
+            child: !hasAvatar ? Icon(Icons.person, color: Colors.black.withOpacity(0.45), size: 28) : null,
           ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name,
-                    style: const TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w700)),
+                Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                 const SizedBox(height: 4),
                 Text(
                   'Text + Photos + Voice',
-                  style: TextStyle(
-                      fontSize: 12.5, color: Colors.black.withOpacity(0.60)),
+                  style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.60)),
                 ),
               ],
             ),
@@ -301,8 +487,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   ========================== */
 
   String _featuredPrefix(String userId) => '$userId/${widget.vaultId}/featured';
-  int get _highlightsCount =>
-      _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
+  int get _highlightsCount => _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
 
   void _setupAutoSlide() {
     _autoSlideTimer?.cancel();
@@ -381,10 +566,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-      );
+      final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
@@ -420,12 +602,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         title: const Text('Delete photo?'),
         content: const Text('This will permanently delete this photo.'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
         ],
       ),
     );
@@ -462,13 +640,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   children: [
                     Row(
                       children: [
-                        const Text('All photos',
-                            style: TextStyle(fontWeight: FontWeight.w800)),
+                        const Text('All photos', style: TextStyle(fontWeight: FontWeight.w800)),
                         const Spacer(),
-                        IconButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(Icons.close),
-                        ),
+                        IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -485,9 +659,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             final path = _featuredPhotos[i]['path'] ?? '';
                             return Stack(
                               children: [
-                                Positioned.fill(
-                                  child: Image.network(url, fit: BoxFit.cover),
-                                ),
+                                Positioned.fill(child: Image.network(url, fit: BoxFit.cover)),
                                 Positioned(
                                   top: 10,
                                   right: 10,
@@ -500,10 +672,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                     },
                                     child: CircleAvatar(
                                       radius: 16,
-                                      backgroundColor:
-                                          Colors.black.withOpacity(0.55),
-                                      child: const Icon(Icons.delete_outline,
-                                          size: 18, color: Colors.white),
+                                      backgroundColor: Colors.black.withOpacity(0.55),
+                                      child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
                                     ),
                                   ),
                                 ),
@@ -516,15 +686,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        Text('${idx + 1} / $total',
-                            style: TextStyle(
-                                color: Colors.black.withOpacity(0.65))),
+                        Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
                         const Spacer(),
                         SizedBox(
                           height: 40,
                           child: OutlinedButton.icon(
-                            onPressed:
-                                _uploadingPhoto ? null : _uploadFeaturedPhoto,
+                            onPressed: _uploadingPhoto ? null : _uploadFeaturedPhoto,
                             icon: const Icon(Icons.add_photo_alternate_outlined),
                             label: Text(_uploadingPhoto ? 'Uploading…' : 'Add'),
                           ),
@@ -574,13 +741,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         children: [
           Row(
             children: [
-              const Text('Your highlights',
-                  style: TextStyle(fontWeight: FontWeight.w800)),
+              const Text('Your highlights', style: TextStyle(fontWeight: FontWeight.w800)),
               const Spacer(),
               Text(
                 'Favourite photos / memories',
-                style: TextStyle(
-                    fontSize: 12.5, color: Colors.black.withOpacity(0.55)),
+                style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.55)),
               ),
             ],
           ),
@@ -627,8 +792,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       child: PageView.builder(
                         controller: _highlightController,
                         itemCount: _highlightsCount,
-                        onPageChanged: (i) =>
-                            setState(() => _highlightIndex = i),
+                        onPageChanged: (i) => setState(() => _highlightIndex = i),
                         itemBuilder: (_, i) {
                           final url = _featuredPhotos[i]['url'] ?? '';
                           final path = _featuredPhotos[i]['path'] ?? '';
@@ -648,10 +812,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                   onTap: () => _deleteFeaturedPhoto(path),
                                   child: CircleAvatar(
                                     radius: 16,
-                                    backgroundColor:
-                                        Colors.black.withOpacity(0.55),
-                                    child: const Icon(Icons.delete_outline,
-                                        size: 18, color: Colors.white),
+                                    backgroundColor: Colors.black.withOpacity(0.55),
+                                    child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
                                   ),
                                 ),
                               ),
@@ -660,10 +822,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                 bottom: 12,
                                 child: Text(
                                   'Tap to view all',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w700,
-                                  ),
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
                                 ),
                               ),
                             ],
@@ -686,10 +845,277 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   /* =========================
-     VOICE NOTES
+     CORE VOICE NOTE
+     Table: vault_core_voice_note (one row per vault)
   ========================== */
 
   String _voicePrefix(String userId) => '$userId/${widget.vaultId}/voice';
+
+  Future<void> _loadCoreVoice() async {
+    setState(() {
+      _loadingCoreVoice = true;
+      _coreVoiceError = null;
+      _coreVoice = null;
+    });
+
+    try {
+      final row = await _client
+          .from('vault_core_voice_note')
+          .select('id, path, title, created_at')
+          .eq('vault_id', widget.vaultId)
+          .maybeSingle();
+
+      if (row == null) {
+        if (!mounted) return;
+        setState(() => _loadingCoreVoice = false);
+        return;
+      }
+
+      final id = (row['id'] ?? '').toString();
+      final path = (row['path'] ?? '').toString().trim();
+      final title = (row['title'] ?? '').toString().trim();
+      final createdAt = (row['created_at'] ?? '').toString();
+
+      if (id.isEmpty || path.isEmpty) {
+        if (!mounted) return;
+        setState(() => _loadingCoreVoice = false);
+        return;
+      }
+
+      final url = await _signedUrl(_voiceBucket, path);
+      if (url == null || url.trim().isEmpty) {
+        if (!mounted) return;
+        setState(() => _loadingCoreVoice = false);
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _coreVoice = _VoiceNote(
+          id: id,
+          path: path,
+          title: title.isEmpty ? 'Core message' : title,
+          url: url,
+          createdAt: createdAt,
+        );
+        _loadingCoreVoice = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingCoreVoice = false;
+        _coreVoiceError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _uploadCoreVoiceFile() async {
+    try {
+      setState(() => _savingCoreVoice = true);
+
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) throw Exception('Not signed in');
+
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'webm'],
+        withData: true,
+      );
+      if (picked == null || picked.files.isEmpty) return;
+
+      final file = picked.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) throw Exception('No file bytes received');
+
+      final ext = _extFromName(file.name);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final path = '${_voicePrefix(userId)}/core_$ts.$ext';
+
+      await _client.storage.from(_voiceBucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
+
+      // upsert one row per vault
+      await _client.from('vault_core_voice_note').upsert(
+        {
+          'vault_id': widget.vaultId,
+          'path': path,
+          'title': 'Core message',
+        },
+        onConflict: 'vault_id',
+      );
+
+      await _loadCoreVoice();
+      _toast('Core voice note saved.');
+    } catch (e) {
+      _toast('Save failed: $e');
+    } finally {
+      if (mounted) setState(() => _savingCoreVoice = false);
+    }
+  }
+
+  Future<void> _recordCoreVoice() async {
+    await _openRecordDialog(
+      title: 'Record your core message',
+      subtitle: 'If they only hear one thing — what should they know about you?',
+      onSave: (rec) async {
+        setState(() => _savingCoreVoice = true);
+
+        final userId = _client.auth.currentUser?.id;
+        if (userId == null) throw Exception('Not signed in');
+
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        final path = '${_voicePrefix(userId)}/core_$ts.${rec.extension}';
+
+        await _client.storage.from(_voiceBucket).uploadBinary(
+              path,
+              Uint8List.fromList(rec.bytes),
+              fileOptions: FileOptions(
+                upsert: false,
+                contentType: rec.mimeType,
+              ),
+            );
+
+        await _client.from('vault_core_voice_note').upsert(
+          {
+            'vault_id': widget.vaultId,
+            'path': path,
+            'title': 'Core message',
+          },
+          onConflict: 'vault_id',
+        );
+
+        await _loadCoreVoice();
+        if (mounted) setState(() => _savingCoreVoice = false);
+        _toast('Core voice note saved.');
+      },
+    );
+  }
+
+  Future<void> _deleteCoreVoice() async {
+    final v = _coreVoice;
+    if (v == null) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete core message?'),
+        content: const Text('This will permanently delete your core voice note.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      if (_playingKey == 'core:${widget.vaultId}') {
+        await _player.stop();
+        if (mounted) setState(() => _playingKey = null);
+      }
+
+      await _client.storage.from(_voiceBucket).remove([v.path]);
+      await _client.from('vault_core_voice_note').delete().eq('vault_id', widget.vaultId);
+      await _loadCoreVoice();
+      _toast('Core voice note deleted.');
+    } catch (e) {
+      _toast('Delete failed: $e');
+    }
+  }
+
+  Future<void> _renameCoreVoice() async {
+    final v = _coreVoice;
+    if (v == null) return;
+
+    final newTitle = await _promptRename(
+      title: 'Rename core message',
+      initial: v.title,
+      hint: 'Core message title',
+    );
+    if (newTitle == null || newTitle.isEmpty) return;
+
+    try {
+      await _client.from('vault_core_voice_note').update({'title': newTitle}).eq('vault_id', widget.vaultId);
+      await _loadCoreVoice();
+      _toast('Renamed.');
+    } catch (e) {
+      _toast('Rename failed: $e');
+    }
+  }
+
+  Widget _coreVoiceSection() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        color: Colors.white.withOpacity(0.25),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('Core voice note', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Spacer(),
+              SizedBox(
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: _savingCoreVoice ? null : _uploadCoreVoiceFile,
+                  icon: const Icon(Icons.file_upload_outlined),
+                  label: Text(_savingCoreVoice ? 'Saving…' : 'Upload'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: (_savingCoreVoice || !_recorder.isSupported) ? null : _recordCoreVoice,
+                  icon: const Icon(Icons.mic_none),
+                  label: const Text('Record'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'If they only look at one thing — this is what you want your family to know about you.',
+            style: TextStyle(color: Colors.black.withOpacity(0.65)),
+          ),
+          const SizedBox(height: 10),
+          if (_loadingCoreVoice)
+            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+          else if (_coreVoiceError != null)
+            Text('Core voice load issue (MVP): $_coreVoiceError',
+                style: TextStyle(color: Colors.black.withOpacity(0.60)))
+          else if (_coreVoice == null)
+            Text(
+              'No core message yet. Record a short 30–90s clip.',
+              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+            )
+          else
+            _voiceTile(
+              _coreVoice!,
+              playKey: 'core:${widget.vaultId}',
+              onDelete: _deleteCoreVoice,
+              onRename: _renameCoreVoice,
+            ),
+        ],
+      ),
+    );
+  }
+
+  /* =========================
+     VAULT VOICE NOTES (general)
+     Table: vault_voice_notes (many per vault)
+  ========================== */
 
   Future<void> _loadVoiceNotes() async {
     setState(() {
@@ -789,29 +1215,60 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  Future<void> _deleteVoiceNote(_VoiceNote v) async {
+  Future<void> _recordVaultVoice() async {
+    await _openRecordDialog(
+      title: 'Record voice note',
+      subtitle: 'A quick voice clip — future generations can hear you.',
+      onSave: (rec) async {
+        setState(() => _uploadingVoice = true);
+
+        final userId = _client.auth.currentUser?.id;
+        if (userId == null) throw Exception('Not signed in');
+
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        final path = '${_voicePrefix(userId)}/$ts.${rec.extension}';
+
+        await _client.storage.from(_voiceBucket).uploadBinary(
+              path,
+              Uint8List.fromList(rec.bytes),
+              fileOptions: FileOptions(
+                upsert: false,
+                contentType: rec.mimeType,
+              ),
+            );
+
+        await _client.from('vault_voice_notes').insert({
+          'vault_id': widget.vaultId,
+          'path': path,
+          'title': 'Recorded $ts.${rec.extension}',
+        });
+
+        await _loadVoiceNotes();
+        if (mounted) setState(() => _uploadingVoice = false);
+        _toast('Voice note added.');
+      },
+    );
+  }
+
+  Future<void> _deleteVaultVoice(_VoiceNote v) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete voice note?'),
         content: const Text('This will permanently delete this voice note.'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
         ],
       ),
     );
     if (ok != true) return;
 
     try {
-      if (_playingVoiceId == v.id) {
+      if (_playingKey == 'vault:${v.id}') {
         await _player.stop();
         setState(() {
-          _playingVoiceId = null;
+          _playingKey = null;
           _isPlaying = false;
         });
       }
@@ -826,10 +1283,25 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  Future<void> _togglePlay(_VoiceNote v) async {
+  Future<void> _renameVaultVoice(_VoiceNote v) async {
+    final newTitle = await _promptRename(
+      title: 'Rename voice note',
+      initial: v.title,
+    );
+    if (newTitle == null || newTitle.isEmpty) return;
+
     try {
-      // If tapping the currently loaded voice note -> toggle pause/resume
-      if (_playingVoiceId == v.id) {
+      await _client.from('vault_voice_notes').update({'title': newTitle}).eq('id', v.id);
+      await _loadVoiceNotes();
+      _toast('Renamed.');
+    } catch (e) {
+      _toast('Rename failed: $e');
+    }
+  }
+
+  Future<void> _togglePlay(_VoiceNote v, {required String playKey}) async {
+    try {
+      if (_playingKey == playKey) {
         if (_isPlaying) {
           await _player.pause();
         } else {
@@ -838,10 +1310,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         return;
       }
 
-      // Otherwise: stop old, load new, play
       await _player.stop();
       setState(() {
-        _playingVoiceId = v.id;
+        _playingKey = playKey;
         _isPlaying = false;
       });
 
@@ -849,6 +1320,56 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     } catch (e) {
       _toast('Playback failed: $e');
     }
+  }
+
+  Widget _voiceTile(
+    _VoiceNote v, {
+    required String playKey,
+    required Future<void> Function() onDelete,
+    Future<void> Function()? onRename,
+  }) {
+    final isThis = _playingKey == playKey;
+    final icon = isThis && _isPlaying ? Icons.pause_circle_outline : Icons.play_circle_outline;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        color: Colors.white.withOpacity(0.35),
+      ),
+      child: ListTile(
+        leading: IconButton(
+          icon: Icon(icon),
+          onPressed: () => _togglePlay(v, playKey: playKey),
+        ),
+        title: Text(
+          v.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          v.createdAt.isEmpty ? '' : 'Added: ${v.createdAt}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              tooltip: 'Rename',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: onRename,
+            ),
+            IconButton(
+              tooltip: 'Delete voice note',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: onDelete,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _voiceNotesSection() {
@@ -865,75 +1386,47 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         children: [
           Row(
             children: [
-              const Text('Voice notes',
-                  style: TextStyle(fontWeight: FontWeight.w800)),
+              const Text('Voice notes', style: TextStyle(fontWeight: FontWeight.w800)),
               const Spacer(),
               SizedBox(
                 height: 40,
                 child: OutlinedButton.icon(
                   onPressed: _uploadingVoice ? null : _uploadVoiceNote,
-                  icon: const Icon(Icons.mic_none),
+                  icon: const Icon(Icons.file_upload_outlined),
                   label: Text(_uploadingVoice ? 'Uploading…' : 'Upload'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: (_uploadingVoice || !_recorder.isSupported) ? null : _recordVaultVoice,
+                  icon: const Icon(Icons.mic_none),
+                  label: const Text('Record'),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
           if (_loadingVoice)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: CircularProgressIndicator(),
-              ),
-            )
+            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
           else if (_voiceError != null)
-            Text(
-              'Voice load issue (MVP): $_voiceError',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
-            )
+            Text('Voice load issue (MVP): $_voiceError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else if (_voiceNotes.isEmpty)
             Text(
-              'No voice notes yet. Upload a short clip for future generations to hear you.',
+              'No voice notes yet. Upload or record a short clip for future generations to hear you.',
               style: TextStyle(color: Colors.black.withOpacity(0.60)),
             )
           else
             Column(
-              children: _voiceNotes.map((v) {
-                final isThis = _playingVoiceId == v.id;
-                final icon = isThis && _isPlaying
-                    ? Icons.pause_circle_outline
-                    : Icons.play_circle_outline;
-
-                return Container(
-                  margin: const EdgeInsets.only(top: 10),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.black.withOpacity(0.08)),
-                    color: Colors.white.withOpacity(0.35),
-                  ),
-                  child: ListTile(
-                    leading: IconButton(
-                      icon: Icon(icon),
-                      onPressed: () => _togglePlay(v),
-                    ),
-                    title: Text(
-                      v.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      v.createdAt.isEmpty ? '' : 'Added: ${v.createdAt}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: IconButton(
-                      tooltip: 'Delete voice note',
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () => _deleteVoiceNote(v),
-                    ),
-                  ),
-                );
-              }).toList(),
+              children: _voiceNotes
+                  .map((v) => _voiceTile(
+                        v,
+                        playKey: 'vault:${v.id}',
+                        onDelete: () => _deleteVaultVoice(v),
+                        onRename: () => _renameVaultVoice(v),
+                      ))
+                  .toList(),
             ),
         ],
       ),
@@ -1004,10 +1497,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-      );
+      final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
@@ -1048,12 +1538,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         title: const Text('Delete photo?'),
         content: const Text('This will permanently delete this photo.'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
         ],
       ),
     );
@@ -1092,13 +1578,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   children: [
                     Row(
                       children: [
-                        const Text('Memory photos',
-                            style: TextStyle(fontWeight: FontWeight.w800)),
+                        const Text('Memory photos', style: TextStyle(fontWeight: FontWeight.w800)),
                         const Spacer(),
-                        IconButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(Icons.close),
-                        ),
+                        IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -1114,9 +1596,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             final p = photos[i];
                             return Stack(
                               children: [
-                                Positioned.fill(
-                                  child: Image.network(p.url, fit: BoxFit.cover),
-                                ),
+                                Positioned.fill(child: Image.network(p.url, fit: BoxFit.cover)),
                                 Positioned(
                                   top: 10,
                                   right: 10,
@@ -1128,10 +1608,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                     },
                                     child: CircleAvatar(
                                       radius: 16,
-                                      backgroundColor:
-                                          Colors.black.withOpacity(0.55),
-                                      child: const Icon(Icons.delete_outline,
-                                          size: 18, color: Colors.white),
+                                      backgroundColor: Colors.black.withOpacity(0.55),
+                                      child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
                                     ),
                                   ),
                                 ),
@@ -1144,9 +1622,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     const SizedBox(height: 10),
                     Row(
                       children: [
-                        Text('${idx + 1} / $total',
-                            style: TextStyle(
-                                color: Colors.black.withOpacity(0.65))),
+                        Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
                         const Spacer(),
                         SizedBox(
                           height: 40,
@@ -1175,10 +1651,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (_loadingMemoryPhotos) {
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text(
-          'Loading photos…',
-          style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
-        ),
+        child: Text('Loading photos…', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
       );
     }
 
@@ -1212,7 +1685,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         height: 66,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          itemCount: preview.length + 1, // + add button
+          itemCount: preview.length + 1,
           separatorBuilder: (_, __) => const SizedBox(width: 10),
           itemBuilder: (context, i) {
             if (i == 0) {
@@ -1227,8 +1700,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     border: Border.all(color: Colors.black.withOpacity(0.10)),
                     color: Colors.white.withOpacity(0.35),
                   ),
-                  child: Icon(Icons.add,
-                      color: Colors.black.withOpacity(0.65)),
+                  child: Icon(Icons.add, color: Colors.black.withOpacity(0.65)),
                 ),
               );
             }
@@ -1256,8 +1728,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         child: CircleAvatar(
                           radius: 12,
                           backgroundColor: Colors.black.withOpacity(0.55),
-                          child: const Icon(Icons.delete_outline,
-                              size: 14, color: Colors.white),
+                          child: const Icon(Icons.delete_outline, size: 14, color: Colors.white),
                         ),
                       ),
                     ),
@@ -1267,6 +1738,292 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  /* =========================
+     MEMORY VOICE NOTES
+     Table: memory_voice_notes (many per memory)
+  ========================== */
+
+  String _memoryVoicePrefix(String userId, String memoryId) => '$userId/${widget.vaultId}/memories/$memoryId/voice';
+
+  Future<void> _loadMemoryVoiceForVault() async {
+    setState(() {
+      _loadingMemoryVoice = true;
+      _memoryVoiceError = null;
+      _memoryVoiceById.clear();
+    });
+
+    try {
+      if (_memories.isEmpty) {
+        setState(() => _loadingMemoryVoice = false);
+        return;
+      }
+
+      final rows = await _client
+          .from('memory_voice_notes')
+          .select('id, memory_id, path, title, created_at')
+          .eq('vault_id', widget.vaultId)
+          .order('created_at', ascending: false);
+
+      final list = (rows as List).cast<Map<String, dynamic>>();
+
+      _memoryVoiceById.clear();
+      for (final r in list) {
+        final id = (r['id'] ?? '').toString();
+        final memoryId = (r['memory_id'] ?? '').toString();
+        final path = (r['path'] ?? '').toString().trim();
+        final title = (r['title'] ?? '').toString().trim();
+        final createdAt = (r['created_at'] ?? '').toString();
+        if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
+
+        final url = await _signedUrl(_memoryVoiceBucket, path);
+        if (url == null || url.trim().isEmpty) continue;
+
+        _memoryVoiceById.putIfAbsent(memoryId, () => []).add(
+              _VoiceNote(
+                id: id,
+                path: path,
+                title: title.isEmpty ? 'Voice note' : title,
+                url: url,
+                createdAt: createdAt,
+              ),
+            );
+      }
+
+      if (!mounted) return;
+      setState(() => _loadingMemoryVoice = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMemoryVoice = false;
+        _memoryVoiceError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _uploadMemoryVoice(String memoryId) async {
+    try {
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) throw Exception('Not signed in');
+
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'webm'],
+        withData: true,
+      );
+      if (picked == null || picked.files.isEmpty) return;
+
+      final file = picked.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) throw Exception('No file bytes received');
+
+      final ext = _extFromName(file.name);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+
+      final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.$ext';
+
+      await _client.storage.from(_memoryVoiceBucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
+
+      await _client.from('memory_voice_notes').insert({
+        'vault_id': widget.vaultId,
+        'memory_id': memoryId,
+        'path': path,
+        'title': file.name,
+      });
+
+      await _loadMemoryVoiceForVault();
+      _toast('Voice added to memory.');
+    } catch (e) {
+      _toast('Add voice failed: $e');
+    }
+  }
+
+  Future<void> _recordMemoryVoice(String memoryId) async {
+    await _openRecordDialog(
+      title: 'Record memory voice',
+      subtitle: 'Add a voice note that belongs to this memory.',
+      onSave: (rec) async {
+        final userId = _client.auth.currentUser?.id;
+        if (userId == null) throw Exception('Not signed in');
+
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.${rec.extension}';
+
+        await _client.storage.from(_memoryVoiceBucket).uploadBinary(
+              path,
+              Uint8List.fromList(rec.bytes),
+              fileOptions: FileOptions(
+                upsert: false,
+                contentType: rec.mimeType,
+              ),
+            );
+
+        await _client.from('memory_voice_notes').insert({
+          'vault_id': widget.vaultId,
+          'memory_id': memoryId,
+          'path': path,
+          'title': 'Recorded $ts.${rec.extension}',
+        });
+
+        await _loadMemoryVoiceForVault();
+        _toast('Voice added to memory.');
+      },
+    );
+  }
+
+  Future<void> _deleteMemoryVoice(String memoryId, _VoiceNote v) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete voice note?'),
+        content: const Text('This will permanently delete this voice note.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      final key = 'mem:${v.id}';
+      if (_playingKey == key) {
+        await _player.stop();
+        if (mounted) setState(() => _playingKey = null);
+      }
+
+      await _client.storage.from(_memoryVoiceBucket).remove([v.path]);
+      await _client.from('memory_voice_notes').delete().eq('id', v.id);
+      await _loadMemoryVoiceForVault();
+      _toast('Voice note deleted.');
+    } catch (e) {
+      _toast('Delete failed: $e');
+    }
+  }
+
+  Future<void> _renameMemoryVoice(String memoryId, _VoiceNote v) async {
+    final newTitle = await _promptRename(
+      title: 'Rename memory voice',
+      initial: v.title,
+    );
+    if (newTitle == null || newTitle.isEmpty) return;
+
+    try {
+      await _client.from('memory_voice_notes').update({'title': newTitle}).eq('id', v.id);
+      await _loadMemoryVoiceForVault();
+      _toast('Renamed.');
+    } catch (e) {
+      _toast('Rename failed: $e');
+    }
+  }
+
+  Widget _memoryVoiceStrip(String memoryId) {
+    final notes = _memoryVoiceById[memoryId] ?? [];
+    final preview = notes.take(2).toList();
+
+    if (_loadingMemoryVoice) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text('Loading voice…', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
+      );
+    }
+
+    if (_memoryVoiceError != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          'Voice load issue (MVP): $_memoryVoiceError',
+          style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              SizedBox(
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: () => _uploadMemoryVoice(memoryId),
+                  icon: const Icon(Icons.mic_none, size: 18),
+                  label: const Text('Add voice'),
+                ),
+              ),
+              SizedBox(
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: _recorder.isSupported ? () => _recordMemoryVoice(memoryId) : null,
+                  icon: const Icon(Icons.fiber_manual_record, size: 18),
+                  label: const Text('Record'),
+                ),
+              ),
+            ],
+          ),
+          if (notes.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'No voice on this memory yet.',
+                style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+              ),
+            )
+          else
+            Column(
+              children: preview.map((v) {
+                return Container(
+                  margin: const EdgeInsets.only(top: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.black.withOpacity(0.08)),
+                    color: Colors.white.withOpacity(0.35),
+                  ),
+                  child: ListTile(
+                    dense: true,
+                    leading: IconButton(
+                      icon: Icon(
+                        (_playingKey == 'mem:${v.id}' && _isPlaying)
+                            ? Icons.pause_circle_outline
+                            : Icons.play_circle_outline,
+                      ),
+                      onPressed: () => _togglePlay(v, playKey: 'mem:${v.id}'),
+                    ),
+                    title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Rename',
+                          icon: const Icon(Icons.edit_outlined),
+                          onPressed: () => _renameMemoryVoice(memoryId, v),
+                        ),
+                        IconButton(
+                          tooltip: 'Delete',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _deleteMemoryVoice(memoryId, v),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+        ],
       ),
     );
   }
@@ -1294,6 +2051,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       });
 
       await _loadMemoryPhotosForVault();
+      await _loadMemoryVoiceForVault();
     } on PostgrestException catch (e) {
       setState(() {
         _error = e.message;
@@ -1340,9 +2098,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
             child: const Text('Save'),
@@ -1354,9 +2110,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (newName == null || newName.isEmpty) return;
 
     try {
-      await _client
-          .from('vaults')
-          .update({'name': newName}).eq('id', widget.vaultId);
+      await _client.from('vaults').update({'name': newName}).eq('id', widget.vaultId);
 
       setState(() => _vaultName = newName);
 
@@ -1375,10 +2129,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   Future<void> _editMemory(Map<String, dynamic> m) async {
     final memoryId = (m['id'] ?? '').toString();
 
-    final promptController =
-        TextEditingController(text: (m['prompt_text'] ?? '').toString());
-    final bodyController =
-        TextEditingController(text: (m['body'] ?? '').toString());
+    final promptController = TextEditingController(text: (m['prompt_text'] ?? '').toString());
+    final bodyController = TextEditingController(text: (m['body'] ?? '').toString());
 
     final result = await showDialog<Map<String, String>>(
       context: context,
@@ -1407,9 +2159,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ],
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, {
               'prompt_text': promptController.text.trim(),
@@ -1460,12 +2210,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         title: const Text('Delete memory?'),
         content: Text('Delete this memory permanently?\n\n$prompt'),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Delete')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
         ],
       ),
     );
@@ -1515,6 +2261,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             onPressed: () async {
               await _loadVaultMeta();
               await _loadFeaturedPhotos();
+              await _loadCoreVoice();
               await _loadVoiceNotes();
               await _loadMemories();
             },
@@ -1535,14 +2282,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               : _error != null
                   ? Center(child: Text('Load failed: $_error'))
                   : ListView.separated(
-                      itemCount: _memories.isEmpty ? 4 : _memories.length + 3,
+                      itemCount: _memories.isEmpty ? 5 : _memories.length + 4,
                       separatorBuilder: (_, __) => const Divider(),
                       itemBuilder: (context, i) {
                         if (i == 0) return _vaultAvatarHeader();
                         if (i == 1) return _featuredPhotosSection();
-                        if (i == 2) return _voiceNotesSection();
+                        if (i == 2) return _coreVoiceSection();
+                        if (i == 3) return _voiceNotesSection();
 
-                        if (_memories.isEmpty && i == 3) {
+                        if (_memories.isEmpty && i == 4) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 10),
                             child: Center(
@@ -1552,8 +2300,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                   const Text('No memories yet.'),
                                   const SizedBox(height: 12),
                                   ElevatedButton(
-                                    onPressed: () =>
-                                        _openAddMemory(initialLifeStage: 'early'),
+                                    onPressed: () => _openAddMemory(initialLifeStage: 'early'),
                                     child: const Text('Add your first memory'),
                                   ),
                                 ],
@@ -1562,7 +2309,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                           );
                         }
 
-                        final m = _memories[i - 3];
+                        final m = _memories[i - 4];
                         final memoryId = (m['id'] ?? '').toString();
                         final stage = (m['life_stage'] ?? '').toString();
                         final prompt = (m['prompt_text'] ?? '').toString();
@@ -1578,12 +2325,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                body,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                              Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
                               _memoryPhotoStrip(memoryId),
+                              _memoryVoiceStrip(memoryId),
                             ],
                           ),
                           onTap: () => _editMemory(m),

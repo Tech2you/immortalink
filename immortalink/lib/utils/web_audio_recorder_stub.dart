@@ -1,15 +1,27 @@
-import 'dart:typed_data';
+import 'web_audio_recorder_types.dart';
 
-class WebAudioRecorder {
-  static bool get isSupported => false;
+WebAudioRecorder createWebAudioRecorderImpl() => _StubRecorder();
 
+class _StubRecorder implements WebAudioRecorder {
+  @override
+  bool get isSupported => false;
+
+  @override
+  bool get isRecording => false;
+
+  @override
   Future<void> start() async {
-    throw UnsupportedError('WebAudioRecorder is only supported on Flutter Web.');
+    throw UnsupportedError('Web audio recording is only supported on web.');
   }
 
-  Future<Uint8List> stop() async {
-    throw UnsupportedError('WebAudioRecorder is only supported on Flutter Web.');
+  @override
+  Future<RecordedAudio> stop() async {
+    throw UnsupportedError('Web audio recording is only supported on web.');
   }
 
-  Future<void> dispose() async {}
+  @override
+  Future<void> cancel() async {}
+
+  @override
+  void dispose() {}
 }
