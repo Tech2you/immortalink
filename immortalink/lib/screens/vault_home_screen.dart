@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
 import 'create_memory_screen.dart';
+import 'vault_companion_screen.dart';
 
 class VaultHomeScreen extends StatefulWidget {
   final String vaultId;
@@ -254,7 +255,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               }
             }
 
-            // Start recording once when dialog builds
             WidgetsBinding.instance.addPostFrameCallback((_) => startIfNeeded());
 
             String mmss(int s) {
@@ -332,7 +332,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       child: ElevatedButton.icon(
                         onPressed: saving ? null : () => stopAndSave(setInner),
                         icon: const Icon(Icons.stop_circle_outlined),
-                        label: Text(saving ? 'Stop & save' : 'Stop & save'),
+                        label: const Text('Stop & save'),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -431,6 +431,20 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
+  void _openAskAI() {
+    final name = (_displayName ?? _vaultName).trim().isEmpty ? 'Vault' : (_displayName ?? _vaultName).trim();
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => VaultCompanionScreen(
+          vaultId: widget.vaultId,
+          displayName: name,
+        ),
+      ),
+    );
+  }
+
   Widget _vaultAvatarHeader() {
     final name = (_displayName ?? _vaultName).trim().isEmpty ? 'Your vault' : (_displayName ?? _vaultName).trim();
     final hasAvatar = _avatarUrl != null && _avatarUrl!.trim().isNotEmpty;
@@ -461,6 +475,21 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 Text(
                   'Text + Photos + Voice',
                   style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.60)),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    SizedBox(
+                      height: 40,
+                      child: OutlinedButton.icon(
+                        onPressed: _openAskAI,
+                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                        label: const Text('Ask (AI)'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -844,64 +873,63 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   String _voicePrefix(String userId) => '$userId/${widget.vaultId}/voice';
 
-Future<void> _loadCoreVoice() async {
-  setState(() {
-    _loadingCoreVoice = true;
-    _coreVoiceError = null;
-    _coreVoice = null;
-  });
-
-  try {
-    final row = await _client
-        .from('vault_core_voice_note')
-        .select('id, path, title, created_at')
-        .eq('vault_id', widget.vaultId)
-        .maybeSingle();
-
-    if (row == null) {
-      if (!mounted) return;
-      setState(() => _loadingCoreVoice = false);
-      return;
-    }
-
-    final id = (row['id'] ?? '').toString();
-    final path = (row['path'] ?? '').toString().trim();
-    final title = (row['title'] ?? '').toString().trim();
-    final createdAt = (row['created_at'] ?? '').toString();
-
-    if (id.isEmpty || path.isEmpty) {
-      if (!mounted) return;
-      setState(() => _loadingCoreVoice = false);
-      return;
-    }
-
-    final url = await _signedUrl(_voiceBucket, path);
-    if (url == null || url.trim().isEmpty) {
-      if (!mounted) return;
-      setState(() => _loadingCoreVoice = false);
-      return;
-    }
-
-    if (!mounted) return;
+  Future<void> _loadCoreVoice() async {
     setState(() {
-      _coreVoice = _VoiceNote(
-        id: id,
-        path: path,
-        title: title.isEmpty ? 'Core message' : title,
-        url: url,
-        createdAt: createdAt,
-      );
-      _loadingCoreVoice = false;
+      _loadingCoreVoice = true;
+      _coreVoiceError = null;
+      _coreVoice = null;
     });
-  } catch (e) {
-    if (!mounted) return;
-    setState(() {
-      _loadingCoreVoice = false;
-      _coreVoiceError = e.toString();
-    });
+
+    try {
+      final row = await _client
+          .from('vault_core_voice_note')
+          .select('id, path, title, created_at')
+          .eq('vault_id', widget.vaultId)
+          .maybeSingle();
+
+      if (row == null) {
+        if (!mounted) return;
+        setState(() => _loadingCoreVoice = false);
+        return;
+      }
+
+      final id = (row['id'] ?? '').toString();
+      final path = (row['path'] ?? '').toString().trim();
+      final title = (row['title'] ?? '').toString().trim();
+      final createdAt = (row['created_at'] ?? '').toString();
+
+      if (id.isEmpty || path.isEmpty) {
+        if (!mounted) return;
+        setState(() => _loadingCoreVoice = false);
+        return;
+      }
+
+      final url = await _signedUrl(_voiceBucket, path);
+      if (url == null || url.trim().isEmpty) {
+        if (!mounted) return;
+        setState(() => _loadingCoreVoice = false);
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _coreVoice = _VoiceNote(
+          id: id,
+          path: path,
+          title: title.isEmpty ? 'Core message' : title,
+          url: url,
+          createdAt: createdAt,
+        );
+        _loadingCoreVoice = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingCoreVoice = false;
+        _coreVoiceError = e.toString();
+      });
+    }
   }
-}
-
 
   Future<void> _uploadCoreVoiceFile() async {
     try {
@@ -934,7 +962,6 @@ Future<void> _loadCoreVoice() async {
             ),
           );
 
-      // upsert one row per vault
       await _client.from('vault_core_voice_note').upsert(
         {
           'vault_id': widget.vaultId,
@@ -1160,8 +1187,7 @@ Future<void> _loadCoreVoice() async {
           if (_loadingCoreVoice)
             const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
           else if (_coreVoiceError != null)
-            Text('Core voice load issue (MVP): $_coreVoiceError',
-                style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text('Core voice load issue (MVP): $_coreVoiceError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else if (_coreVoice == null)
             Text(
               'No core message yet. Record a short 30–90s clip.',
