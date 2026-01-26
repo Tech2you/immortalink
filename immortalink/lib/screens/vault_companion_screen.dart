@@ -88,11 +88,33 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     setState(() {});
   }
 
+  Future<void> _scrollToBottom() async {
+    await Future.delayed(const Duration(milliseconds: 60));
+    if (!_scroll.hasClients) return;
+    _scroll.animateTo(
+      _scroll.position.maxScrollExtent + 300,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
+
   Future<void> _send() async {
     if (!_accepted) return;
 
     final text = _controller.text.trim();
     if (text.isEmpty || _sending) return;
+
+    // ✅ Must have a session so Supabase can attach Authorization
+    final session = _client.auth.currentSession;
+    if (session == null) {
+      setState(() {
+        _msgs.add(_ChatMsg(
+          role: _Role.assistant,
+          text: 'You are not signed in (session missing). Please sign in again.',
+        ));
+      });
+      return;
+    }
 
     setState(() {
       _sending = true;
@@ -100,7 +122,10 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
       _controller.clear();
     });
 
+    await _scrollToBottom();
+
     try {
+      // ✅ This includes Authorization automatically
       final res = await _client.functions.invoke(
         'vault_ai_chat',
         body: {
@@ -110,26 +135,37 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         },
       );
 
-      if (res.status != 200) {
-        final errText = (res.data is Map && (res.data as Map)['error'] != null)
-            ? (res.data as Map)['error'].toString()
-            : 'Request failed (${res.status}).';
+      final data = res.data;
 
-        setState(() {
-          _msgs.add(_ChatMsg(role: _Role.assistant, text: errText));
-        });
-      } else {
-        final data = res.data as Map?;
-        final answer = (data?['answer'] ?? '').toString().trim();
-
-        setState(() {
-          _msgs.add(_ChatMsg(
-            role: _Role.assistant,
-            text: answer.isEmpty ? '(No answer returned)' : answer,
-          ));
-        });
+      String answer = '';
+      if (data is Map) {
+        answer = (data['answer'] ?? '').toString().trim();
+        if (answer.isEmpty && data['error'] != null) {
+          answer = 'Error: ${data['error']}';
+        }
+      } else if (data is String) {
+        answer = data.trim();
       }
+
+      if (!mounted) return;
+      setState(() {
+        _msgs.add(_ChatMsg(
+          role: _Role.assistant,
+          text: answer.isEmpty ? '(No answer returned)' : answer,
+        ));
+      });
+    } on FunctionException catch (e) {
+      // ✅ Edge Function error (401/403/500 etc)
+      final msg = (e.details ?? e.toString()).toString();
+      if (!mounted) return;
+      setState(() {
+        _msgs.add(_ChatMsg(
+          role: _Role.assistant,
+          text: 'Function error: $msg',
+        ));
+      });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _msgs.add(_ChatMsg(
           role: _Role.assistant,
@@ -137,16 +173,8 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         ));
       });
     } finally {
-      setState(() => _sending = false);
-
-      await Future.delayed(const Duration(milliseconds: 60));
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOut,
-        );
-      }
+      if (mounted) setState(() => _sending = false);
+      await _scrollToBottom();
     }
   }
 
