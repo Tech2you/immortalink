@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/indexing_service.dart';
 import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
 import 'create_memory_screen.dart';
@@ -60,7 +61,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   bool _loadingCoreVoice = true;
   String? _coreVoiceError;
   bool _savingCoreVoice = false;
-  _VoiceNote? _coreVoice; // uses same model
+  _VoiceNote? _coreVoice;
 
   // --- Memory voice notes ---
   bool _loadingMemoryVoice = true;
@@ -69,7 +70,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   // Playback
   final AudioPlayer _player = AudioPlayer();
-  String? _playingKey; // e.g. "core:vaultId" OR "vault:<id>" OR "mem:<id>"
+  String? _playingKey; // e.g. "core:vaultId" OR "mem:<id>"
   bool _isPlaying = false;
 
   // Web recorder (safe on non-web)
@@ -81,6 +82,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   static const String _memoryPhotosBucket = 'memory_photos';
   static const String _voiceBucket = 'vault_voice';
   static const String _memoryVoiceBucket = 'memory_voice';
+
+  bool _reindexing = false;
 
   @override
   void initState() {
@@ -317,7 +320,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                           const Spacer(),
                           Text(
                             mmss(seconds),
-                            style: TextStyle(color: Colors.black.withOpacity(0.65), fontFeatures: const []),
+                            style: TextStyle(color: Colors.black.withOpacity(0.65)),
                           ),
                         ],
                       ),
@@ -782,12 +785,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
           const SizedBox(height: 12),
           if (_loadingPhotos)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: CircularProgressIndicator(),
-              ),
-            )
+            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
           else if (_featuredPhotos.isEmpty)
             Row(
               children: [
@@ -820,13 +818,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                           final path = _featuredPhotos[i]['path'] ?? '';
                           return Stack(
                             children: [
-                              Positioned.fill(
-                                child: Image.network(
-                                  url,
-                                  fit: BoxFit.cover,
-                                  gaplessPlayback: true,
-                                ),
-                              ),
+                              Positioned.fill(child: Image.network(url, fit: BoxFit.cover, gaplessPlayback: true)),
                               Positioned(
                                 top: 10,
                                 right: 10,
@@ -842,10 +834,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                               const Positioned(
                                 left: 12,
                                 bottom: 12,
-                                child: Text(
-                                  'Tap to view all',
-                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                                ),
+                                child: Text('Tap to view all',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
                               ),
                             ],
                           );
@@ -854,10 +844,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _dots(
-                    _highlightsCount,
-                    _highlightIndex.clamp(0, (_highlightsCount - 1).clamp(0, 99)),
-                  ),
+                  _dots(_highlightsCount, _highlightIndex.clamp(0, (_highlightsCount - 1).clamp(0, 99))),
                 ],
               ),
             ),
@@ -956,18 +943,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _client.storage.from(_voiceBucket).uploadBinary(
             path,
             bytes,
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: _contentTypeFromExt(ext),
-            ),
+            fileOptions: FileOptions(upsert: false, contentType: _contentTypeFromExt(ext)),
           );
 
       await _client.from('vault_core_voice_note').upsert(
-        {
-          'vault_id': widget.vaultId,
-          'path': path,
-          'title': 'Core message',
-        },
+        {'vault_id': widget.vaultId, 'path': path, 'title': 'Core message'},
         onConflict: 'vault_id',
       );
 
@@ -996,18 +976,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         await _client.storage.from(_voiceBucket).uploadBinary(
               path,
               Uint8List.fromList(rec.bytes),
-              fileOptions: FileOptions(
-                upsert: false,
-                contentType: rec.mimeType,
-              ),
+              fileOptions: FileOptions(upsert: false, contentType: rec.mimeType),
             );
 
         await _client.from('vault_core_voice_note').upsert(
-          {
-            'vault_id': widget.vaultId,
-            'path': path,
-            'title': 'Core message',
-          },
+          {'vault_id': widget.vaultId, 'path': path, 'title': 'Core message'},
           onConflict: 'vault_id',
         );
 
@@ -1114,29 +1087,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           icon: Icon(icon),
           onPressed: () => _togglePlay(v, playKey: playKey),
         ),
-        title: Text(
-          v.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: Text(
-          v.createdAt.isEmpty ? '' : 'Added: ${v.createdAt}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(v.createdAt.isEmpty ? '' : 'Added: ${v.createdAt}', maxLines: 1, overflow: TextOverflow.ellipsis),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              tooltip: 'Rename',
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: onRename,
-            ),
-            IconButton(
-              tooltip: 'Delete voice note',
-              icon: const Icon(Icons.delete_outline),
-              onPressed: onDelete,
-            ),
+            IconButton(tooltip: 'Rename', icon: const Icon(Icons.edit_outlined), onPressed: onRename),
+            IconButton(tooltip: 'Delete voice note', icon: const Icon(Icons.delete_outline), onPressed: onDelete),
           ],
         ),
       ),
@@ -1189,17 +1146,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           else if (_coreVoiceError != null)
             Text('Core voice load issue (MVP): $_coreVoiceError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else if (_coreVoice == null)
-            Text(
-              'No core message yet. Record a short 30–90s clip.',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
-            )
+            Text('No core message yet. Record a short 30–90s clip.', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else
-            _voiceTile(
-              _coreVoice!,
-              playKey: 'core:${widget.vaultId}',
-              onDelete: _deleteCoreVoice,
-              onRename: _renameCoreVoice,
-            ),
+            _voiceTile(_coreVoice!, playKey: 'core:${widget.vaultId}', onDelete: _deleteCoreVoice, onRename: _renameCoreVoice),
         ],
       ),
     );
@@ -1239,12 +1188,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         final url = await _signedUrl(_memoryPhotosBucket, path);
         if (url == null || url.trim().isEmpty) return null;
 
-        return _MemPhoto(
-          id: id,
-          memoryId: memoryId,
-          path: path,
-          url: url,
-        );
+        return _MemPhoto(id: id, memoryId: memoryId, path: path, url: url);
       }).toList();
 
       final resolved = await Future.wait(futures);
@@ -1278,23 +1222,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final ext = _extFromName(file.name);
       final ts = DateTime.now().millisecondsSinceEpoch;
-
       final path = '$userId/${widget.vaultId}/memories/$memoryId/$ts.$ext';
 
       await _client.storage.from(_memoryPhotosBucket).uploadBinary(
             path,
             bytes,
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: _contentTypeFromExt(ext),
-            ),
+            fileOptions: FileOptions(upsert: false, contentType: _contentTypeFromExt(ext)),
           );
 
-      await _client.from('memory_photos').insert({
-        'vault_id': widget.vaultId,
-        'memory_id': memoryId,
-        'path': path,
-      });
+      await _client.from('memory_photos').insert({'vault_id': widget.vaultId, 'memory_id': memoryId, 'path': path});
 
       await _loadMemoryPhotosForVault();
       _toast('Photo added to memory.');
@@ -1430,10 +1366,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (_memoryPhotoError != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text(
-          'Photo load issue (MVP): $_memoryPhotoError',
-          style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
-        ),
+        child: Text('Photo load issue (MVP): $_memoryPhotoError', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
       );
     }
 
@@ -1485,13 +1418,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 borderRadius: BorderRadius.circular(14),
                 child: Stack(
                   children: [
-                    Image.network(
-                      p.url,
-                      width: 92,
-                      height: 66,
-                      fit: BoxFit.cover,
-                      gaplessPlayback: true,
-                    ),
+                    Image.network(p.url, width: 92, height: 66, fit: BoxFit.cover, gaplessPlayback: true),
                     Positioned(
                       top: 6,
                       right: 6,
@@ -1594,24 +1521,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final ext = _extFromName(file.name);
       final ts = DateTime.now().millisecondsSinceEpoch;
-
       final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.$ext';
 
       await _client.storage.from(_memoryVoiceBucket).uploadBinary(
             path,
             bytes,
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: _contentTypeFromExt(ext),
-            ),
+            fileOptions: FileOptions(upsert: false, contentType: _contentTypeFromExt(ext)),
           );
 
-      await _client.from('memory_voice_notes').insert({
-        'vault_id': widget.vaultId,
-        'memory_id': memoryId,
-        'path': path,
-        'title': file.name,
-      });
+      await _client.from('memory_voice_notes').insert({'vault_id': widget.vaultId, 'memory_id': memoryId, 'path': path, 'title': file.name});
 
       await _loadMemoryVoiceForVault();
       _toast('Voice added to memory.');
@@ -1634,10 +1552,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         await _client.storage.from(_memoryVoiceBucket).uploadBinary(
               path,
               Uint8List.fromList(rec.bytes),
-              fileOptions: FileOptions(
-                upsert: false,
-                contentType: rec.mimeType,
-              ),
+              fileOptions: FileOptions(upsert: false, contentType: rec.mimeType),
             );
 
         await _client.from('memory_voice_notes').insert({
@@ -1684,11 +1599,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _renameMemoryVoice(String memoryId, _VoiceNote v) async {
-    final newTitle = await _promptRename(
-      title: 'Rename voice note',
-      initial: v.title,
-      hint: 'Voice note title',
-    );
+    final newTitle = await _promptRename(title: 'Rename voice note', initial: v.title, hint: 'Voice note title');
     if (newTitle == null || newTitle.isEmpty) return;
 
     try {
@@ -1717,12 +1628,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        'Voice notes • $prompt',
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      child: Text('Voice notes • $prompt',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis),
                     ),
                     IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
                   ],
@@ -1744,11 +1653,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         child: ListTile(
                           dense: true,
                           leading: IconButton(
-                            icon: Icon(
-                              (_playingKey == 'mem:${v.id}' && _isPlaying)
-                                  ? Icons.pause_circle_outline
-                                  : Icons.play_circle_outline,
-                            ),
+                            icon: Icon((_playingKey == 'mem:${v.id}' && _isPlaying) ? Icons.pause_circle_outline : Icons.play_circle_outline),
                             onPressed: () => _togglePlay(v, playKey: 'mem:${v.id}'),
                           ),
                           title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -1809,10 +1714,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (_memoryVoiceError != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text(
-          'Voice load issue (MVP): $_memoryVoiceError',
-          style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
-        ),
+        child: Text('Voice load issue (MVP): $_memoryVoiceError', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
       );
     }
 
@@ -1855,10 +1757,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           if (notes.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'No voice on this memory yet.',
-                style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
-              ),
+              child: Text('No voice on this memory yet.', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
             )
           else
             Column(
@@ -1873,27 +1772,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   child: ListTile(
                     dense: true,
                     leading: IconButton(
-                      icon: Icon(
-                        (_playingKey == 'mem:${v.id}' && _isPlaying)
-                            ? Icons.pause_circle_outline
-                            : Icons.play_circle_outline,
-                      ),
+                      icon: Icon((_playingKey == 'mem:${v.id}' && _isPlaying) ? Icons.pause_circle_outline : Icons.play_circle_outline),
                       onPressed: () => _togglePlay(v, playKey: 'mem:${v.id}'),
                     ),
                     title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          tooltip: 'Rename',
-                          icon: const Icon(Icons.edit_outlined),
-                          onPressed: () => _renameMemoryVoice(memoryId, v),
-                        ),
-                        IconButton(
-                          tooltip: 'Delete',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _deleteMemoryVoice(memoryId, v),
-                        ),
+                        IconButton(tooltip: 'Rename', icon: const Icon(Icons.edit_outlined), onPressed: () => _renameMemoryVoice(memoryId, v)),
+                        IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline), onPressed: () => _deleteMemoryVoice(memoryId, v)),
                       ],
                     ),
                   ),
@@ -1910,52 +1797,70 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   ========================== */
 
   Future<void> _loadMemories() async {
+  if (!mounted) return;
+
+  setState(() {
+    _loading = true;
+    _error = null;
+  });
+
+  try {
+    // If session is missing, show a real error instead of hanging forever.
+    final session = _client.auth.currentSession;
+    if (session == null) {
+      throw Exception('No active session. Please sign in again.');
+    }
+
+    final data = await _client
+        .from('memories')
+        .select('id, vault_id, life_stage, prompt_text, body, created_at')
+        .eq('vault_id', widget.vaultId)
+        .order('created_at', ascending: false)
+        .timeout(const Duration(seconds: 12)); // ✅ prevents infinite spinner
+
+    if (!mounted) return;
+
     setState(() {
-      _loading = true;
-      _error = null;
+      _memories = List<Map<String, dynamic>>.from(data);
     });
 
-    try {
-      final data = await _client
-          .from('memories')
-          .select('id, vault_id, life_stage, prompt_text, body, created_at')
-          .eq('vault_id', widget.vaultId)
-          .order('created_at', ascending: false);
-
-      setState(() {
-        _memories = List<Map<String, dynamic>>.from(data);
-        _loading = false;
-      });
-
-      await _loadMemoryPhotosForVault();
-      await _loadMemoryVoiceForVault();
-    } on PostgrestException catch (e) {
-      setState(() {
-        _error = e.message;
-        _loading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
+    // These load “extras” and should not block the whole screen
+    unawaited(_loadMemoryPhotosForVault());
+    unawaited(_loadMemoryVoiceForVault());
+  } on TimeoutException {
+    if (!mounted) return;
+    setState(() {
+      _error = 'Timed out loading memories. Check internet / Supabase URL / auth.';
+    });
+  } on PostgrestException catch (e) {
+    if (!mounted) return;
+    setState(() {
+      _error = 'Postgrest: ${e.message}';
+    });
+  } catch (e) {
+    if (!mounted) return;
+    setState(() {
+      _error = e.toString();
+    });
+  } finally {
+    if (!mounted) return;
+    setState(() => _loading = false); // ✅ always stops spinner
   }
+}
+
 
   Future<void> _openAddMemory({String? initialLifeStage}) async {
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => CreateMemoryScreen(
-          vaultId: widget.vaultId,
-          initialLifeStage: initialLifeStage,
-        ),
+        builder: (_) => CreateMemoryScreen(vaultId: widget.vaultId, initialLifeStage: initialLifeStage),
       ),
     );
 
     if (saved == true) {
       await _loadMemories();
       _toast('Memory saved.');
+      // indexing happens inside CreateMemoryScreen
     }
   }
 
@@ -1969,17 +1874,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Vault name',
-            border: OutlineInputBorder(),
-          ),
+          decoration: const InputDecoration(labelText: 'Vault name', border: OutlineInputBorder()),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Save'),
-          ),
+          ElevatedButton(onPressed: () => Navigator.pop(context, controller.text.trim()), child: const Text('Save')),
         ],
       ),
     );
@@ -2019,29 +1918,20 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             TextField(
               controller: promptController,
               maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'Prompt (question)',
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: 'Prompt (question)', border: OutlineInputBorder()),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: bodyController,
               maxLines: 6,
-              decoration: const InputDecoration(
-                labelText: 'Your answer',
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: 'Your answer', border: OutlineInputBorder()),
             ),
           ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, {
-              'prompt_text': promptController.text.trim(),
-              'body': bodyController.text.trim(),
-            }),
+            onPressed: () => Navigator.pop(context, {'prompt_text': promptController.text.trim(), 'body': bodyController.text.trim()}),
             child: const Text('Save'),
           ),
         ],
@@ -2063,17 +1953,17 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
 
     try {
-      await _client.from('memories').update({
-        'prompt_text': newPromptText,
-        'body': newBody,
-      }).eq('id', memoryId);
+      await _client.from('memories').update({'prompt_text': newPromptText, 'body': newBody}).eq('id', memoryId);
+
+      // ✅ re-index after edit (Edge Function only)
+      await IndexingService.indexMemory(vaultId: widget.vaultId, memoryId: memoryId);
 
       await _loadMemories();
       _toast('Memory updated.');
     } on PostgrestException catch (e) {
       _toast('Update failed: ${e.message}');
     } catch (e) {
-      _toast('Update failed: $e');
+      _toast('Update/index failed: $e');
     }
   }
 
@@ -2119,6 +2009,19 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
+  Future<void> _reindexVaultNow() async {
+    if (_reindexing) return;
+    setState(() => _reindexing = true);
+    try {
+      final n = await IndexingService.backfillVault(vaultId: widget.vaultId);
+      _toast('AI index updated: $n memories indexed');
+    } catch (e) {
+      _toast('Re-index failed: $e');
+    } finally {
+      if (mounted) setState(() => _reindexing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final tileBg = Theme.of(context).colorScheme.surface.withOpacity(0.72);
@@ -2131,6 +2034,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             tooltip: 'Rename vault',
             icon: const Icon(Icons.edit),
             onPressed: _renameVault,
+          ),
+          IconButton(
+            tooltip: _reindexing ? 'Re-indexing…' : 'Re-index AI',
+            icon: Icon(_reindexing ? Icons.hourglass_top : Icons.auto_fix_high),
+            onPressed: _reindexing ? null : _reindexVaultNow,
           ),
           IconButton(
             tooltip: 'Refresh',
@@ -2192,9 +2100,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
                         return ListTile(
                           tileColor: tileBg,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           leading: Chip(label: Text(_prettyStage(stage))),
                           title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
                           subtitle: Column(

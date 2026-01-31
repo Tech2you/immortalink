@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -83,7 +84,8 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
 
     _msgs.add(_ChatMsg(
       role: _Role.assistant,
-      text: 'Ask me anything. I’ll answer as thoughtfully as I can, based on what’s in this vault.',
+      text:
+          'Ask me anything. I’ll answer as thoughtfully as I can, based on what’s in this vault.',
     ));
     setState(() {});
   }
@@ -98,13 +100,21 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     );
   }
 
+  Future<Map<String, String>> _authHeaders() async {
+    final session = _client.auth.currentSession;
+    if (session == null) return {};
+    final token = session.accessToken;
+    return {
+      'Authorization': 'Bearer $token',
+    };
+  }
+
   Future<void> _send() async {
     if (!_accepted) return;
 
     final text = _controller.text.trim();
     if (text.isEmpty || _sending) return;
 
-    // ✅ Must have a session so Supabase can attach Authorization
     final session = _client.auth.currentSession;
     if (session == null) {
       setState(() {
@@ -125,21 +135,26 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     await _scrollToBottom();
 
     try {
-      // ✅ This includes Authorization automatically
-      final res = await _client.functions.invoke(
-        'vault_ai_chat',
-        body: {
-          'vault_id': widget.vaultId,
-          'message': text,
-          'display_name': widget.displayName,
-        },
-      );
+      final headers = await _authHeaders();
+
+      final res = await _client.functions
+          .invoke(
+            'vault_ai_chat',
+            headers: headers, // ✅ FORCE JWT HEADER (fixes web flakiness)
+            body: {
+              'vault_id': widget.vaultId,
+              'message': text,
+              'display_name': widget.displayName,
+            },
+          )
+          .timeout(const Duration(seconds: 40));
 
       final data = res.data;
 
       String answer = '';
       if (data is Map) {
-        answer = (data['answer'] ?? '').toString().trim();
+        // Support both old and new response keys
+        answer = (data['reply'] ?? data['answer'] ?? '').toString().trim();
         if (answer.isEmpty && data['error'] != null) {
           answer = 'Error: ${data['error']}';
         }
@@ -155,7 +170,6 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         ));
       });
     } on FunctionException catch (e) {
-      // ✅ Edge Function error (401/403/500 etc)
       final msg = (e.details ?? e.toString()).toString();
       if (!mounted) return;
       setState(() {
@@ -180,7 +194,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = 'Ask ${widget.displayName}';
+    final title = 'Vault Companion • ${widget.displayName}';
 
     return Scaffold(
       appBar: AppBar(title: Text(title)),
@@ -196,15 +210,22 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
                 final isUser = m.role == _Role.user;
 
                 return Align(
-                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment:
+                      isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 6),
                     padding: const EdgeInsets.all(12),
                     constraints: const BoxConstraints(maxWidth: 560),
                     decoration: BoxDecoration(
                       color: isUser
-                          ? Theme.of(context).colorScheme.primary.withOpacity(0.12)
-                          : Theme.of(context).colorScheme.surface.withOpacity(0.85),
+                          ? Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withOpacity(0.12)
+                          : Theme.of(context)
+                              .colorScheme
+                              .surface
+                              .withOpacity(0.85),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: Colors.black.withOpacity(0.06)),
                     ),

@@ -10,13 +10,30 @@ Future<void> main() async {
 
   await dotenv.load(fileName: ".env");
 
-  await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL'] ?? '',
-    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
-  );
+  final url = (dotenv.env['SUPABASE_URL'] ?? '').trim();
+  final anon = (dotenv.env['SUPABASE_ANON_KEY'] ?? '').trim();
+
+  if (url.isEmpty || anon.isEmpty) {
+    runApp(const MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Text(
+            'Missing SUPABASE_URL or SUPABASE_ANON_KEY.\n'
+            'For Flutter Web, .env may not be loading.\n'
+            'Fix the web env setup.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    ));
+    return;
+  }
+
+  await Supabase.initialize(url: url, anonKey: anon);
 
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/prompts.dart';
+import '../services/indexing_service.dart';
 
 class CreateMemoryScreen extends StatefulWidget {
   final String vaultId;
@@ -20,96 +21,109 @@ class CreateMemoryScreen extends StatefulWidget {
 class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   final _client = Supabase.instance.client;
 
-  final _bodyController = TextEditingController();
-  final _customPromptController = TextEditingController();
-
+  late String _stage;
+  String? _selectedPromptId;
   bool _saving = false;
-  String? _error;
 
-  String _lifeStage = 'early';
-  MemoryPrompt? _prompt;
-
-  bool _useCustomPrompt = false;
+  final _promptController = TextEditingController();
+  final _bodyController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _lifeStage = widget.initialLifeStage ?? 'early';
+    final init = (widget.initialLifeStage ?? 'early').trim();
+    _stage = init.isEmpty ? 'early' : init;
+    _syncPromptSelectionToStage();
   }
 
   @override
   void dispose() {
+    _promptController.dispose();
     _bodyController.dispose();
-    _customPromptController.dispose();
     super.dispose();
   }
 
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   List<MemoryPrompt> get _stagePrompts =>
-      memoryPrompts.where((p) => p.lifeStage == _lifeStage).toList();
+      memoryPrompts.where((p) => p.lifeStage == _stage).toList();
+
+  void _syncPromptSelectionToStage() {
+    final stageIds = _stagePrompts.map((e) => e.id).toSet();
+    if (_selectedPromptId != null && !stageIds.contains(_selectedPromptId)) {
+      _selectedPromptId = null;
+    }
+    if (_selectedPromptId == null && _stagePrompts.isNotEmpty) {
+      _selectedPromptId = _stagePrompts.first.id;
+      _promptController.text = _stagePrompts.first.text;
+    }
+  }
+
+  String _promptKey(String promptText) {
+    // If chosen from prompt list, use that stable ID
+    final chosen = _selectedPromptId?.trim();
+    if (chosen != null && chosen.isNotEmpty) return chosen;
+
+    // Otherwise generate a stable-ish key for custom prompt text
+    // (Don’t use millis; keeps key stable if user edits body only)
+    final t = promptText.trim().toLowerCase();
+    final hash = t.codeUnits.fold<int>(0, (h, c) => (h * 31 + c) & 0x7fffffff);
+    return 'custom_$hash';
+  }
 
   Future<void> _save() async {
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
+    if (_saving) return;
 
+    final promptText = _promptController.text.trim();
     final body = _bodyController.text.trim();
+
+    if (promptText.isEmpty) {
+      _toast('Prompt cannot be empty.');
+      return;
+    }
     if (body.isEmpty) {
-      setState(() {
-        _saving = false;
-        _error = 'Please write something for your memory.';
-      });
+      _toast('Answer cannot be empty.');
       return;
     }
 
-    // Determine prompt_key + prompt_text based on selection
-    String promptKey;
-    String promptText;
+    final promptKey = _promptKey(promptText);
 
-    if (_useCustomPrompt) {
-      promptText = _customPromptController.text.trim();
-      if (promptText.isEmpty) {
-        setState(() {
-          _saving = false;
-          _error = 'Please enter your custom prompt/title.';
-        });
-        return;
-      }
-      // stable enough for MVP; keeps NOT NULL satisfied
-      promptKey = 'custom_${DateTime.now().millisecondsSinceEpoch}';
-    } else {
-      if (_prompt == null) {
-        setState(() {
-          _saving = false;
-          _error = 'Please choose a prompt.';
-        });
-        return;
-      }
-      promptKey = _prompt!.id;      // ✅ correct: id
-      promptText = _prompt!.text;   // ✅ correct: text
-    }
+    setState(() => _saving = true);
 
     try {
-      await _client.from('memories').insert({
-        'vault_id': widget.vaultId,
-        'life_stage': _lifeStage,
-        'prompt_key': promptKey,
-        'prompt_text': promptText,
-        'body': body,
+      final inserted = await _client
+          .from('memories')
+          .insert({
+            'vault_id': widget.vaultId,
+            'life_stage': _stage,
+            'prompt_key': promptKey, // ✅ FIX
+            'prompt_text': promptText,
+            'body': body,
+          })
+          .select('id')
+          .single();
+
+      final memoryId = (inserted['id'] ?? '').toString();
+      if (memoryId.isEmpty) throw Exception('Insert succeeded but no id returned');
+
+      // ✅ indexing should NOT block saving
+      IndexingService.indexMemory(vaultId: widget.vaultId, memoryId: memoryId)
+          .catchError((e) {
+        debugPrint('Indexing failed: $e');
+        _toast('Saved, but indexing failed (AI may miss it).');
       });
 
       if (!mounted) return;
       Navigator.pop(context, true);
     } on PostgrestException catch (e) {
-      setState(() {
-        _error = e.message;
-        _saving = false;
-      });
+      _toast('Save failed: ${e.message}');
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _saving = false;
-      });
+      _toast('Save failed: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -119,118 +133,94 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Add Memory'),
+        title: const Text('Add memory'),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _save,
+            child: Text(
+              _saving ? 'Saving…' : 'Save',
+              style: TextStyle(
+                color: _saving
+                    ? Colors.black38
+                    : Theme.of(context).colorScheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: ListView(
           children: [
-            // Life stage selector
             DropdownButtonFormField<String>(
-              value: _lifeStage,
+              value: _stage,
               decoration: const InputDecoration(
                 labelText: 'Life stage',
                 border: OutlineInputBorder(),
               ),
               items: const [
-                DropdownMenuItem(value: 'early', child: Text('Early')),
-                DropdownMenuItem(value: 'mid', child: Text('Mid')),
-                DropdownMenuItem(value: 'late', child: Text('Late')),
+                DropdownMenuItem(value: 'early', child: Text('Early life')),
+                DropdownMenuItem(value: 'mid', child: Text('Mid life')),
+                DropdownMenuItem(value: 'late', child: Text('Late life')),
               ],
               onChanged: _saving
                   ? null
                   : (v) {
                       if (v == null) return;
                       setState(() {
-                        _lifeStage = v;
-                        _prompt = null;
-                        _useCustomPrompt = false;
-                        _customPromptController.clear();
+                        _stage = v;
+                        _syncPromptSelectionToStage();
                       });
                     },
             ),
             const SizedBox(height: 14),
-
-            // Prompt selector + custom option
-            DropdownButtonFormField<String>(
-              value: _useCustomPrompt
-                  ? '__custom__'
-                  : (_prompt?.id), // store id
+            const Text('Choose a prompt',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: prompts.map((p) {
+                final selected = _selectedPromptId == p.id;
+                return ChoiceChip(
+                  selected: selected,
+                  label: Text(p.text),
+                  onSelected: _saving
+                      ? null
+                      : (_) {
+                          setState(() {
+                            _selectedPromptId = p.id;
+                            _promptController.text = p.text;
+                          });
+                        },
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _promptController,
+              maxLines: 3,
+              enabled: !_saving,
               decoration: const InputDecoration(
-                labelText: 'Prompt',
+                labelText: 'Prompt (question)',
                 border: OutlineInputBorder(),
               ),
-              items: [
-                ...prompts.map(
-                  (p) => DropdownMenuItem(
-                    value: p.id,
-                    child: Text(
-                      p.text,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-                const DropdownMenuItem(
-                  value: '__custom__',
-                  child: Text('✍️ Write your own memory (custom prompt)'),
-                ),
-              ],
-              onChanged: _saving
-                  ? null
-                  : (value) {
-                      setState(() {
-                        if (value == '__custom__') {
-                          _useCustomPrompt = true;
-                          _prompt = null;
-                        } else {
-                          _useCustomPrompt = false;
-                          _prompt = prompts.firstWhere(
-                            (p) => p.id == value,
-                            orElse: () => prompts.first,
-                          );
-                        }
-                      });
-                    },
+              onChanged: (_) {
+                if (_selectedPromptId != null) {
+                  setState(() => _selectedPromptId = null);
+                }
+              },
             ),
-            const SizedBox(height: 12),
-
-            if (_useCustomPrompt) ...[
-              TextField(
-                controller: _customPromptController,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Custom prompt / title',
-                  hintText: 'e.g. “My biggest lesson at university”',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-
+            const SizedBox(height: 14),
             TextField(
               controller: _bodyController,
-              maxLines: 8,
+              maxLines: 10,
+              enabled: !_saving,
               decoration: const InputDecoration(
-                labelText: 'Your memory',
+                labelText: 'Your answer',
                 border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            if (_error != null) ...[
-              Text(
-                _error!,
-                style: const TextStyle(color: Colors.red),
-              ),
-              const SizedBox(height: 10),
-            ],
-
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _saving ? null : _save,
-                child: Text(_saving ? 'Saving...' : 'Save Memory'),
               ),
             ),
           ],

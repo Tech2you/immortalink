@@ -1,0 +1,7 @@
+project_id = "vbzyvaylfdhwowdbodmk"
+
+[functions.index_memory]
+verify_jwt = true
+
+[functions.vault_ai_chat]
+verify_jwt = true
