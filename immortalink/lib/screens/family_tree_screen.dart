@@ -228,7 +228,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => VaultHomeScreen(vaultId: vaultId, vaultName: vaultName),
+          builder: (_) =>
+              VaultHomeScreen(vaultId: vaultId, vaultName: vaultName),
         ),
       );
 
@@ -236,6 +237,26 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       _refresh();
     } catch (_) {
       // silent MVP
+    }
+  }
+
+  // ✅ NEW (invite support): fetch your vault id reliably for invite metadata
+  Future<String?> _getMyVaultIdForInvite() async {
+    try {
+      final uid = _supabase.auth.currentUser?.id;
+      if (uid == null) return null;
+
+      final v = await _supabase
+          .from('vaults')
+          .select('id')
+          .eq('owner_id', uid)
+          .maybeSingle();
+
+      final id = (v?['id'] ?? '').toString();
+      if (id.isEmpty) return null;
+      return id;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -255,19 +276,48 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     try {
       final code = _generateInviteCode();
 
-      await _supabase.from('family_invites').insert({
-        'family_id': widget.familyId,
-        'created_by': user.id,
-        'invite_code': code,
-        'slot_key': slotKey,
-      });
+      // ✅ NEW: expiry (Join screen already checks expires_at)
+      final expiresAt = DateTime.now().add(const Duration(days: 7)).toUtc();
+
+      // ✅ NEW: root vault id (used for Step 3A layouts if you added the column)
+      final myVaultId = await _getMyVaultIdForInvite();
+      if (myVaultId == null || myVaultId.trim().isEmpty) {
+        throw Exception('You need a vault before creating an invite.');
+      }
+
+      // Try insert WITH root_vault_id (if your DB has the column).
+      // If the column doesn't exist, we retry WITHOUT it so nothing breaks.
+      try {
+        await _supabase.from('family_invites').insert({
+          'family_id': widget.familyId,
+          'created_by': user.id,
+          'invite_code': code,
+          'slot_key': slotKey,
+          'expires_at': expiresAt.toIso8601String(),
+          'root_vault_id': myVaultId, // optional column
+        });
+      } catch (e) {
+        final msg = e.toString().toLowerCase();
+        final looksLikeMissingColumn =
+            msg.contains('column') && msg.contains('root_vault_id');
+        if (!looksLikeMissingColumn) rethrow;
+
+        // Retry without root_vault_id (compatible with your current schema)
+        await _supabase.from('family_invites').insert({
+          'family_id': widget.familyId,
+          'created_by': user.id,
+          'invite_code': code,
+          'slot_key': slotKey,
+          'expires_at': expiresAt.toIso8601String(),
+        });
+      }
 
       if (!mounted) return;
 
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Invite created'),
+          title: Text('Invite created: $title'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -279,6 +329,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
               SelectableText(
                 code,
                 style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Expires: ${expiresAt.toLocal()}',
+                style: TextStyle(color: Colors.black.withOpacity(0.6), fontSize: 12),
               ),
             ],
           ),
@@ -325,14 +380,16 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => VaultHomeScreen(vaultId: vaultId, vaultName: vaultName),
+          builder: (_) =>
+              VaultHomeScreen(vaultId: vaultId, vaultName: vaultName),
         ),
       );
     } else {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => VaultReadOnlyScreen(vaultId: vaultId, vaultName: vaultName),
+          builder: (_) =>
+              VaultReadOnlyScreen(vaultId: vaultId, vaultName: vaultName),
         ),
       );
     }
@@ -469,8 +526,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 _SectionHeader(
                                   title: 'Grandparents',
                                   isOpen: _showGrandparents,
-                                  onToggle: () =>
-                                      setState(() => _showGrandparents = !_showGrandparents),
+                                  onToggle: () => setState(
+                                      () => _showGrandparents = !_showGrandparents),
                                 ),
                                 if (_showGrandparents) ...[
                                   const SizedBox(height: 8),
@@ -608,8 +665,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           filled: slotVault[kSpouse1],
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kSpouse1]?['id'] ?? '').toString()],
-                                          onInvite: () =>
-                                              _createInvite(slotKey: kSpouse1, title: 'Spouse'),
+                                          onInvite: () => _createInvite(
+                                              slotKey: kSpouse1, title: 'Spouse'),
                                           onOpen: (v) => _openVaultFromTree(data, v),
                                           showAddLabel: 'Add spouse',
                                         ),
@@ -697,8 +754,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           filled: slotVault[kChild1],
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kChild1]?['id'] ?? '').toString()],
-                                          onInvite: () =>
-                                              _createInvite(slotKey: kChild1, title: 'Child 1'),
+                                          onInvite: () => _createInvite(
+                                              slotKey: kChild1, title: 'Child 1'),
                                           onOpen: (v) => _openVaultFromTree(data, v),
                                         ),
                                         _SmallInviteSlot(
@@ -707,8 +764,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           filled: slotVault[kChild2],
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kChild2]?['id'] ?? '').toString()],
-                                          onInvite: () =>
-                                              _createInvite(slotKey: kChild2, title: 'Child 2'),
+                                          onInvite: () => _createInvite(
+                                              slotKey: kChild2, title: 'Child 2'),
                                           onOpen: (v) => _openVaultFromTree(data, v),
                                         ),
                                         _SmallInviteSlot(
@@ -717,8 +774,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           filled: slotVault[kChild3],
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kChild3]?['id'] ?? '').toString()],
-                                          onInvite: () =>
-                                              _createInvite(slotKey: kChild3, title: 'Child 3'),
+                                          onInvite: () => _createInvite(
+                                              slotKey: kChild3, title: 'Child 3'),
                                           onOpen: (v) => _openVaultFromTree(data, v),
                                         ),
                                         _SmallInviteSlot(
@@ -727,8 +784,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           filled: slotVault[kChild4],
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kChild4]?['id'] ?? '').toString()],
-                                          onInvite: () =>
-                                              _createInvite(slotKey: kChild4, title: 'Child 4'),
+                                          onInvite: () => _createInvite(
+                                              slotKey: kChild4, title: 'Child 4'),
                                           onOpen: (v) => _openVaultFromTree(data, v),
                                         ),
                                       ],
@@ -736,7 +793,9 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                   ),
                                 ],
                                 const SizedBox(height: 14),
-                                SizedBox(height: 54, child: CustomPaint(painter: _BottomVinesPainter())),
+                                SizedBox(
+                                    height: 54,
+                                    child: CustomPaint(painter: _BottomVinesPainter())),
                                 const SizedBox(height: 10),
                                 Center(
                                   child: Text(
@@ -824,7 +883,8 @@ class _GroupCard extends StatelessWidget {
               children: [
                 Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
                 const Spacer(),
-                Icon(Icons.keyboard_arrow_down, color: Colors.black.withOpacity(0.35)),
+                Icon(Icons.keyboard_arrow_down,
+                    color: Colors.black.withOpacity(0.35)),
               ],
             ),
             const SizedBox(height: 10),
@@ -913,7 +973,8 @@ class _YourVaultCard extends StatelessWidget {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 4),
-                Text(subtitle, style: TextStyle(color: Colors.black.withOpacity(0.55))),
+                Text(subtitle,
+                    style: TextStyle(color: Colors.black.withOpacity(0.55))),
               ],
             ),
           ),
@@ -1020,7 +1081,8 @@ class _SmallInviteSlot extends StatelessWidget {
                 : CircleAvatar(
                     radius: 16,
                     backgroundColor: Colors.black.withOpacity(0.08),
-                    child: Icon(Icons.add, color: Colors.black.withOpacity(0.65), size: 18),
+                    child: Icon(Icons.add,
+                        color: Colors.black.withOpacity(0.65), size: 18),
                   ),
             const SizedBox(width: 10),
             Expanded(
