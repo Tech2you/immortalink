@@ -48,14 +48,28 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
       if (familyId == null || familyId.isEmpty) throw Exception('Invite missing family_id');
       if (slotKey == null || slotKey.isEmpty) throw Exception('Invite missing slot_key');
 
-      // 2) Find your vault (MVP assumes 1 vault per user)
-      final myVault = await _supabase
-          .from('vaults')
-          .select('id')
-          .eq('owner_id', user.id)
-          .maybeSingle();
+      // 2) Ensure you have a vault (auto-create if missing)
+Map<String, dynamic>? myVault = await _supabase
+    .from('vaults')
+    .select('id, name')
+    .eq('owner_id', user.id)
+    .maybeSingle();
 
-      if (myVault == null) throw Exception('No vault found for your account');
+if (myVault == null) {
+  // Create a default vault for this user
+  final created = await _supabase
+      .from('vaults')
+      .insert({
+        'owner_id': user.id,
+        'name': 'My Vault',
+        'family_id': null, // will be updated below
+      })
+      .select('id, name')
+      .single();
+
+  myVault = Map<String, dynamic>.from(created);
+}
+
 
       // 3) Add to family_members with correct slot placement
       await _supabase.from('family_members').upsert({
