@@ -196,6 +196,70 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     return slotVault;
   }
 
+  // ✅ STEP 4 FIX: Build a view-specific slot map:
+  // 1) Remove current user from any slot (prevents "me as my own child")
+  // 2) If current user joined as a child_* slot, show family OWNER as a parent on this user's view.
+  Map<String, Map<String, dynamic>> _slotToVaultMapForView(_FamilyData data) {
+    final base = _slotToVaultMap(data);
+
+    final uid = _supabase.auth.currentUser?.id;
+    if (uid == null) return base;
+
+    // Remove any slots that point to ME (so I don't appear twice)
+    base.removeWhere((_, v) => (v['owner_id'] ?? '').toString() == uid);
+
+    // Find my slot_key in this family
+    String mySlotKey = '';
+    for (final m in data.members) {
+      if ((m['user_id'] ?? '').toString() == uid) {
+        mySlotKey = (m['slot_key'] ?? '').toString();
+        break;
+      }
+    }
+
+    // Find the family owner user_id (fallback to first "owner" role)
+    String ownerUserId = '';
+    for (final m in data.members) {
+      final role = (m['role'] ?? '').toString().toLowerCase();
+      if (role == 'owner') {
+        ownerUserId = (m['user_id'] ?? '').toString();
+        break;
+      }
+    }
+
+    // Find owner's vault
+    Map<String, dynamic>? ownerVault;
+    if (ownerUserId.isNotEmpty) {
+      for (final v in data.vaults) {
+        if ((v['owner_id'] ?? '').toString() == ownerUserId) {
+          ownerVault = v;
+          break;
+        }
+      }
+    }
+
+    // If I joined as a child, show owner as one parent on my view (mom if empty else dad).
+    if (mySlotKey.startsWith('child_') && ownerVault != null) {
+      if (base[kMother] == null) {
+        base[kMother] = ownerVault;
+      } else if (base[kFather] == null) {
+        base[kFather] = ownerVault;
+      }
+    }
+
+    // (Optional MVP behavior you can extend later)
+    // If I joined as sibling_, you might also want to show owner as a parent.
+    if (mySlotKey.startsWith('sibling_') && ownerVault != null) {
+      if (base[kMother] == null) {
+        base[kMother] = ownerVault;
+      } else if (base[kFather] == null) {
+        base[kFather] = ownerVault;
+      }
+    }
+
+    return base;
+  }
+
   Map<String, dynamic>? _yourVault(_FamilyData data) {
     if (data.yourVault != null) return data.yourVault;
 
@@ -450,7 +514,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                 yourAvatarUrl: null,
               );
 
-          final slotVault = _slotToVaultMap(data);
+          // ✅ STEP 4: use view-specific map (no self-duplication, shows owner as parent for child joins)
+          final slotVault = _slotToVaultMapForView(data);
 
           final yourVault = _yourVault(data);
           final yourName = (yourVault?['name'] ?? 'Your vault (you)').toString();
