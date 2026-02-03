@@ -14,7 +14,13 @@ class VaultsScreen extends StatefulWidget {
   State<VaultsScreen> createState() => _VaultsScreenState();
 }
 
-class _VaultsScreenState extends State<VaultsScreen> {
+class _VaultsScreenState extends State<VaultsScreen> {void _openJoinFamilyScreen() {
+  Navigator.push(
+    context,
+    MaterialPageRoute(builder: (_) => const JoinFamilyScreen()),
+  ).then((_) => _loadVault()); // optional refresh
+}
+
   final _supabase = Supabase.instance.client;
 
   bool _loading = true;
@@ -299,59 +305,38 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (ok != true) return;
     if (_vault == null) return;
 
-    final familyName =
-        controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
-    final vaultId = (_vault!['id'] ?? '').toString();
+   final familyName =
+    controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
+final vaultId = (_vault!['id'] ?? '').toString();
 
-    try {
-      final family = await _supabase
-          .from('family_groups')
-          .insert({'name': familyName})
-          .select('id')
-          .single()
-          .timeout(const Duration(seconds: 12));
+try {
+ final newFamilyId = await _supabase
+    .rpc('create_family_group_and_link_vault', params: {
+      'p_family_name': familyName,
+    })
+    .timeout(const Duration(seconds: 12));
 
-      final newFamilyId = (family['id'] ?? '').toString();
-      if (newFamilyId.isEmpty) throw Exception('Failed to create family id');
+final newFamilyIdStr = (newFamilyId ?? '').toString();
+if (newFamilyIdStr.isEmpty) throw Exception('Failed to create family id');
 
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) throw Exception('Not signed in');
+await _loadVault();
 
-      // NOTE: you currently insert slot_key: null — keep as-is for now (your constraint allows null)
-      await _supabase.from('family_members').insert({
-        'family_id': newFamilyId,
-        'user_id': userId,
-        'role': 'owner',
-        'slot_key': null,
-      }).timeout(const Duration(seconds: 12));
+if (!mounted) return;
+Navigator.push(
+  context,
+  MaterialPageRoute(
+    builder: (_) => FamilyTreeScreen(familyId: newFamilyIdStr),
+  ),
+);
 
-      await _supabase
-          .from('vaults')
-          .update({'family_id': newFamilyId})
-          .eq('id', vaultId)
-          .timeout(const Duration(seconds: 12));
 
-      await _loadVault();
-
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: newFamilyId)),
-      );
-    } on TimeoutException {
-      _toast('Family setup timed out. Try again.');
-    } on PostgrestException catch (e) {
-      _toast('Family setup failed: ${e.message}');
-    } catch (e) {
-      _toast('Family setup failed: $e');
-    }
-  }
-
-  void _openJoinFamilyScreen() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const JoinFamilyScreen()),
-    );
+} on TimeoutException {
+  _toast('Family setup timed out. Try again.');
+} on PostgrestException catch (e) {
+  _toast('Family setup failed: ${e.message}');
+} catch (e) {
+  _toast('Family setup failed: $e');
+}
   }
 
   @override
