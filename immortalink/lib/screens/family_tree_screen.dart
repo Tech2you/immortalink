@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
+import 'vaults_screen.dart';
 
 class FamilyTreeScreen extends StatefulWidget {
   final String familyId;
@@ -174,6 +175,51 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       _future = _loadFamilyData();
     });
   }
+Future<void> _leaveFamily() async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Leave family?'),
+      content: const Text(
+        'This will remove you from the family and detach your vault. '
+        'You can re-join later with an invite.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Leave'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmed != true) return;
+
+  try {
+    await _supabase.rpc('leave_family', params: {
+      'p_family_id': widget.familyId,
+    });
+
+    if (!mounted) return;
+
+   Navigator.of(context).pushAndRemoveUntil(
+  MaterialPageRoute(builder: (_) => const VaultsScreen()),
+  (route) => false,
+);
+
+    // Option B: if you do NOT have named routes, use this instead:
+    // Navigator.of(context).popUntil((route) => route.isFirst);
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Failed to leave family: $e')),
+    );
+  }
+}
 
   Map<String, Map<String, dynamic>> _slotToVaultMap(_FamilyData data) {
     // owner_id -> vault
@@ -358,7 +404,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
           'invite_code': code,
           'slot_key': slotKey,
           'expires_at': expiresAt.toIso8601String(),
-          'root_vault_id': myVaultId, // optional column
+          'inviter_vault_id': myVaultId,
+
         });
       } catch (e) {
         final msg = e.toString().toLowerCase();
@@ -495,12 +542,18 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       appBar: AppBar(
         title: const Text('Your Family Tree'),
         actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _refresh,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
+  IconButton(
+    tooltip: 'Refresh',
+    onPressed: _refresh,
+    icon: const Icon(Icons.refresh),
+  ),
+  IconButton(
+    tooltip: 'Leave family',
+    onPressed: _leaveFamily,
+    icon: const Icon(Icons.exit_to_app),
+  ),
+],
+
       ),
       body: FutureBuilder<_FamilyData>(
         future: _future,
