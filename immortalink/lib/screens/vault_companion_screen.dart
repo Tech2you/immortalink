@@ -147,7 +147,8 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
               'display_name': widget.displayName,
             },
           )
-          .timeout(const Duration(seconds: 40));
+          .timeout(const Duration(seconds: 75));
+
 
       final data = res.data;
 
