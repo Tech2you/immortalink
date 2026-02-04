@@ -1,3 +1,4 @@
+// lib/screens/vault_readonly_screen.dart
 import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -33,11 +34,25 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   String? _avatarUrl; // signed url
   String? _displayName;
 
+  // ✅ NEW: Owner id (needed to locate highlights folder)
+  String? _ownerId;
+
   // Buckets (same as VaultHomeScreen)
   static const String _avatarBucket = 'avatars';
+  static const String _featuredPhotosBucket = 'vault_photos';
   static const String _memoryPhotosBucket = 'memory_photos';
   static const String _voiceBucket = 'vault_voice';
   static const String _memoryVoiceBucket = 'memory_voice';
+
+  // ✅ NEW: Featured photos (highlights)
+  bool _loadingHighlights = true;
+  String? _highlightsError;
+  List<Map<String, String>> _featuredPhotos = []; // {path,url}
+
+  // ✅ NEW: Carousel state
+  final PageController _highlightController = PageController();
+  Timer? _autoSlideTimer;
+  int _highlightIndex = 0;
 
   // Core voice note
   bool _loadingCoreVoice = true;
@@ -82,6 +97,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
   @override
   void dispose() {
+    _autoSlideTimer?.cancel();
+    _highlightController.dispose();
     _player.dispose();
     super.dispose();
   }
@@ -115,14 +132,13 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       // Meta
       final meta = await _client
           .from('vaults')
-          .select('avatar_path, display_name, name')
+          .select('owner_id, avatar_path, display_name, name')
           .eq('id', widget.vaultId)
           .maybeSingle();
 
+      final ownerId = (meta?['owner_id'] as String?)?.trim();
       final path = (meta?['avatar_path'] as String?)?.trim();
-      final dn = (meta?['display_name'] as String?) ??
-          (meta?['name'] as String?) ??
-          _vaultName;
+      final dn = (meta?['display_name'] as String?) ?? (meta?['name'] as String?) ?? _vaultName;
 
       String? signed;
       if (path != null && path.isNotEmpty) {
@@ -139,6 +155,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       if (!mounted) return;
 
       setState(() {
+        _ownerId = ownerId;
         _avatarUrl = signed;
         _displayName = (dn ?? _vaultName).toString();
         _memories = List<Map<String, dynamic>>.from(data);
@@ -146,6 +163,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       });
 
       // Load extras (don’t block UI)
+      unawaited(_loadHighlights()); // ✅ NEW
       unawaited(_loadCoreVoice());
       unawaited(_loadMemoryPhotosForVault());
       unawaited(_loadMemoryVoiceForVault());
@@ -161,6 +179,262 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       });
     }
   }
+
+  /* =========================
+     ✅ OWNER HIGHLIGHTS (READ ONLY)
+  ========================== */
+
+  String _featuredPrefix(String ownerId) => '$ownerId/${widget.vaultId}/featured';
+
+  int get _highlightsCount => _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
+
+  void _setupAutoSlide() {
+    _autoSlideTimer?.cancel();
+    final n = _highlightsCount;
+    if (n <= 1) return;
+
+    _highlightIndex = 0;
+    _autoSlideTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      final nn = _highlightsCount;
+      if (nn <= 1) return;
+
+      _highlightIndex = (_highlightIndex + 1) % nn;
+      _highlightController.animateToPage(
+        _highlightIndex,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  Future<void> _loadHighlights() async {
+    setState(() {
+      _loadingHighlights = true;
+      _highlightsError = null;
+      _featuredPhotos = [];
+    });
+
+    try {
+      final ownerId = _ownerId;
+      if (ownerId == null || ownerId.isEmpty) {
+        if (!mounted) return;
+        setState(() => _loadingHighlights = false);
+        return;
+      }
+
+      final prefix = _featuredPrefix(ownerId);
+
+      final list = await _client.storage.from(_featuredPhotosBucket).list(
+            path: prefix,
+            searchOptions: const SearchOptions(limit: 200, offset: 0),
+          );
+
+      final items = <Map<String, String>>[];
+      for (final obj in list) {
+        final name = obj.name.toString();
+        if (name.trim().isEmpty) continue;
+
+        final fullPath = '$prefix/$name';
+        final url = await _signedUrl(_featuredPhotosBucket, fullPath);
+        if (url == null || url.trim().isEmpty) continue;
+
+        items.add({'path': fullPath, 'url': url});
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _featuredPhotos = items;
+        _loadingHighlights = false;
+      });
+
+      _setupAutoSlide();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _featuredPhotos = [];
+        _loadingHighlights = false;
+        _highlightsError = e.toString();
+      });
+    }
+  }
+
+  void _openHighlightsGallery() {
+    if (_featuredPhotos.isEmpty) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final pc = PageController();
+        int idx = 0;
+
+        return StatefulBuilder(
+          builder: (ctx, setInner) {
+            final total = _featuredPhotos.length;
+
+            return Dialog(
+              insetPadding: const EdgeInsets.all(16),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        const Text('Owner highlights', style: TextStyle(fontWeight: FontWeight.w800)),
+                        const Spacer(),
+                        IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: PageView.builder(
+                          controller: pc,
+                          itemCount: total,
+                          onPageChanged: (v) => setInner(() => idx = v),
+                          itemBuilder: (_, i) {
+                            final url = _featuredPhotos[i]['url'] ?? '';
+                            return Positioned.fill(child: Image.network(url, fit: BoxFit.cover));
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                        const Spacer(),
+                        SizedBox(
+                          height: 40,
+                          child: OutlinedButton.icon(
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(Icons.check),
+                            label: const Text('Done'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _dots(int count, int active) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: List.generate(count, (i) {
+        final on = i == active;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          width: on ? 14 : 7,
+          height: 7,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            color: Colors.black.withOpacity(on ? 0.50 : 0.18),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _highlightsSection() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        color: Colors.white.withOpacity(0.25),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('Owner highlights', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Spacer(),
+              Text(
+                'Favourite photos / moments',
+                style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.55)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_loadingHighlights)
+            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+          else if (_highlightsError != null)
+            Text(
+              'Highlights load issue (MVP): $_highlightsError',
+              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+            )
+          else if (_featuredPhotos.isEmpty)
+            Row(
+              children: [
+                Icon(Icons.photo, color: Colors.black.withOpacity(0.45)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'No highlights yet.',
+                    style: TextStyle(color: Colors.black.withOpacity(0.60)),
+                  ),
+                ),
+              ],
+            )
+          else
+            InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: _openHighlightsGallery,
+              child: Column(
+                children: [
+                  AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: PageView.builder(
+                        controller: _highlightController,
+                        itemCount: _highlightsCount,
+                        onPageChanged: (i) => setState(() => _highlightIndex = i),
+                        itemBuilder: (_, i) {
+                          final url = _featuredPhotos[i]['url'] ?? '';
+                          return Stack(
+                            children: [
+                              Positioned.fill(child: Image.network(url, fit: BoxFit.cover, gaplessPlayback: true)),
+                              const Positioned(
+                                left: 12,
+                                bottom: 12,
+                                child: Text(
+                                  'Tap to view all',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _dots(_highlightsCount, _highlightIndex.clamp(0, (_highlightsCount - 1).clamp(0, 99))),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /* =========================
+     CORE VOICE
+  ========================== */
 
   Future<void> _loadCoreVoice() async {
     setState(() {
@@ -220,6 +494,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     }
   }
 
+  /* =========================
+     MEMORY PHOTOS
+  ========================== */
+
   Future<void> _loadMemoryPhotosForVault() async {
     setState(() {
       _loadingMemoryPhotos = true;
@@ -269,6 +547,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       });
     }
   }
+
+  /* =========================
+     MEMORY VOICE
+  ========================== */
 
   Future<void> _loadMemoryVoiceForVault() async {
     setState(() {
@@ -324,6 +606,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       });
     }
   }
+
+  /* =========================
+     UI HELPERS
+  ========================== */
 
   Future<void> _togglePlay(_VoiceNote v, {required String playKey}) async {
     try {
@@ -458,8 +744,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     if (_memoryPhotoError != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text('Photo load issue (MVP): $_memoryPhotoError',
-            style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
+        child: Text(
+          'Photo load issue (MVP): $_memoryPhotoError',
+          style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+        ),
       );
     }
 
@@ -508,8 +796,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     if (_memoryVoiceError != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text('Voice load issue (MVP): $_memoryVoiceError',
-            style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
+        child: Text(
+          'Voice load issue (MVP): $_memoryVoiceError',
+          style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+        ),
       );
     }
 
@@ -566,9 +856,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
             radius: 28,
             backgroundColor: Colors.black.withOpacity(0.06),
             backgroundImage: hasAvatar ? NetworkImage(_avatarUrl!) : null,
-            child: !hasAvatar
-                ? Icon(Icons.person, color: Colors.black.withOpacity(0.45), size: 28)
-                : null,
+            child: !hasAvatar ? Icon(Icons.person, color: Colors.black.withOpacity(0.45), size: 28) : null,
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -612,8 +900,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           if (_loadingCoreVoice)
             const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
           else if (_coreVoiceError != null)
-            Text('Core voice load issue (MVP): $_coreVoiceError',
-                style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text('Core voice load issue (MVP): $_coreVoiceError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else if (_coreVoice == null)
             Text('No core message yet.', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else
@@ -668,20 +955,22 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               : _error != null
                   ? Center(child: Text('Load failed: $_error'))
                   : ListView.separated(
-                      itemCount: _memories.isEmpty ? 3 : _memories.length + 2,
+                      // ✅ header + highlights + core voice + memories
+                      itemCount: _memories.isEmpty ? 4 : _memories.length + 3,
                       separatorBuilder: (_, __) => const Divider(),
                       itemBuilder: (context, i) {
                         if (i == 0) return _headerCard();
-                        if (i == 1) return _coreVoiceSection();
+                        if (i == 1) return _highlightsSection(); // ✅ NEW
+                        if (i == 2) return _coreVoiceSection();
 
-                        if (_memories.isEmpty && i == 2) {
+                        if (_memories.isEmpty && i == 3) {
                           return const Padding(
                             padding: EdgeInsets.only(top: 10),
                             child: Center(child: Text('No memories yet.')),
                           );
                         }
 
-                        final m = _memories[i - 2];
+                        final m = _memories[i - 3];
                         final memoryId = (m['id'] ?? '').toString();
                         final stage = (m['life_stage'] ?? '').toString();
                         final prompt = (m['prompt_text'] ?? '').toString();
