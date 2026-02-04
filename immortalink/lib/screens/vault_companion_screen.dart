@@ -84,8 +84,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
 
     _msgs.add(_ChatMsg(
       role: _Role.assistant,
-      text:
-          'Ask me anything. I’ll answer as thoughtfully as I can, based on what’s in this vault.',
+      text: 'Ask me anything. I’ll answer as thoughtfully as I can, based on what’s in this vault.',
     ));
     setState(() {});
   }
@@ -100,14 +99,17 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     );
   }
 
-  Future<Map<String, String>> _authHeaders() async {
+  Map<String, String> _authHeadersOrEmpty() {
     final session = _client.auth.currentSession;
-    if (session == null) return {};
-    final token = session.accessToken;
+    final token = session?.accessToken?.trim();
+    if (token == null || token.isEmpty) return {};
     return {
       'Authorization': 'Bearer $token',
+      'authorization': 'Bearer $token',
     };
   }
+
+  String _safeExtract(dynamic v) => (v ?? '').toString().trim();
 
   Future<void> _send() async {
     if (!_accepted) return;
@@ -135,29 +137,50 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     await _scrollToBottom();
 
     try {
-      final headers = await _authHeaders();
+      final headers = _authHeadersOrEmpty();
+
+      // ✅ Send BOTH new + old keys so we are compatible with any function version.
+      final body = {
+        // new keys (preferred)
+        'vaultId': widget.vaultId,
+        'question': text,
+        'displayName': widget.displayName,
+
+        // old keys (compat)
+        'vault_id': widget.vaultId,
+        'prompt': text,
+        'message': text,
+        'display_name': widget.displayName,
+      };
 
       final res = await _client.functions
           .invoke(
             'vault_ai_chat',
-            headers: headers, // ✅ FORCE JWT HEADER (fixes web flakiness)
-            body: {
-              'vault_id': widget.vaultId,
-              'message': text,
-              'display_name': widget.displayName,
-            },
+            headers: headers,
+            body: body,
           )
-          .timeout(const Duration(seconds: 75));
+          .timeout(const Duration(seconds: 60));
 
+      // ✅ If the function returned non-200, show something useful
+      if (res.status != 200) {
+        final d = res.data;
+        final err = (d is Map)
+            ? _safeExtract(d['error'] ?? d['message'] ?? d['details'])
+            : _safeExtract(d);
+        throw Exception('Function HTTP ${res.status}${err.isEmpty ? '' : ': $err'}');
+      }
 
       final data = res.data;
 
       String answer = '';
+      String debug = '';
+
       if (data is Map) {
-        // Support both old and new response keys
-        answer = (data['reply'] ?? data['answer'] ?? '').toString().trim();
-        if (answer.isEmpty && data['error'] != null) {
-          answer = 'Error: ${data['error']}';
+        answer = _safeExtract(data['answer'] ?? data['reply']);
+        debug = _safeExtract(data['debug']);
+        if (answer.isEmpty) {
+          final err = _safeExtract(data['error'] ?? data['message'] ?? data['details']);
+          if (err.isNotEmpty) answer = 'Error: $err';
         }
       } else if (data is String) {
         answer = data.trim();
@@ -167,7 +190,9 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
       setState(() {
         _msgs.add(_ChatMsg(
           role: _Role.assistant,
-          text: answer.isEmpty ? '(No answer returned)' : answer,
+          text: answer.isEmpty
+              ? (debug.isNotEmpty ? 'No answer returned. Debug: $debug' : '(No answer returned)')
+              : answer,
         ));
       });
     } on FunctionException catch (e) {
@@ -177,6 +202,14 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         _msgs.add(_ChatMsg(
           role: _Role.assistant,
           text: 'Function error: $msg',
+        ));
+      });
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        _msgs.add(_ChatMsg(
+          role: _Role.assistant,
+          text: 'Sorry — the AI took too long to respond. Please try again.',
         ));
       });
     } catch (e) {
@@ -211,22 +244,15 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
                 final isUser = m.role == _Role.user;
 
                 return Align(
-                  alignment:
-                      isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 6),
                     padding: const EdgeInsets.all(12),
                     constraints: const BoxConstraints(maxWidth: 560),
                     decoration: BoxDecoration(
                       color: isUser
-                          ? Theme.of(context)
-                              .colorScheme
-                              .primary
-                              .withOpacity(0.12)
-                          : Theme.of(context)
-                              .colorScheme
-                              .surface
-                              .withOpacity(0.85),
+                          ? Theme.of(context).colorScheme.primary.withOpacity(0.12)
+                          : Theme.of(context).colorScheme.surface.withOpacity(0.85),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: Colors.black.withOpacity(0.06)),
                     ),
