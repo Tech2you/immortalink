@@ -14,12 +14,13 @@ class VaultsScreen extends StatefulWidget {
   State<VaultsScreen> createState() => _VaultsScreenState();
 }
 
-class _VaultsScreenState extends State<VaultsScreen> {void _openJoinFamilyScreen() {
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => const JoinFamilyScreen()),
-  ).then((_) => _loadVault()); // optional refresh
-}
+class _VaultsScreenState extends State<VaultsScreen> {
+  void _openJoinFamilyScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const JoinFamilyScreen()),
+    ).then((_) => _loadVault()); // optional refresh
+  }
 
   final _supabase = Supabase.instance.client;
 
@@ -38,6 +39,43 @@ class _VaultsScreenState extends State<VaultsScreen> {void _openJoinFamilyScreen
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ✅ NEW: Sign out button action
+  Future<void> _signOut() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text('You will be signed out of ImmortaLink.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    try {
+      await _supabase.auth.signOut();
+      // Navigation back to SignInScreen should happen via your auth-gate/main.dart.
+      // We still clear local state so this screen doesn't show old data if it lingers.
+      if (!mounted) return;
+      setState(() {
+        _vault = null;
+        _vaultAvatarUrl = null;
+        _error = null;
+      });
+    } catch (e) {
+      _toast('Sign out failed: $e');
+    }
   }
 
   Future<String?> _signedAvatarUrl(String path) async {
@@ -305,38 +343,36 @@ class _VaultsScreenState extends State<VaultsScreen> {void _openJoinFamilyScreen
     if (ok != true) return;
     if (_vault == null) return;
 
-   final familyName =
-    controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
-final vaultId = (_vault!['id'] ?? '').toString();
+    final familyName =
+        controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
+    final vaultId = (_vault!['id'] ?? '').toString();
 
-try {
- final newFamilyId = await _supabase
-    .rpc('create_family_group_and_link_vault', params: {
-      'p_family_name': familyName,
-    })
-    .timeout(const Duration(seconds: 12));
+    try {
+      final newFamilyId = await _supabase
+          .rpc('create_family_group_and_link_vault', params: {
+            'p_family_name': familyName,
+          })
+          .timeout(const Duration(seconds: 12));
 
-final newFamilyIdStr = (newFamilyId ?? '').toString();
-if (newFamilyIdStr.isEmpty) throw Exception('Failed to create family id');
+      final newFamilyIdStr = (newFamilyId ?? '').toString();
+      if (newFamilyIdStr.isEmpty) throw Exception('Failed to create family id');
 
-await _loadVault();
+      await _loadVault();
 
-if (!mounted) return;
-Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (_) => FamilyTreeScreen(familyId: newFamilyIdStr),
-  ),
-);
-
-
-} on TimeoutException {
-  _toast('Family setup timed out. Try again.');
-} on PostgrestException catch (e) {
-  _toast('Family setup failed: ${e.message}');
-} catch (e) {
-  _toast('Family setup failed: $e');
-}
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FamilyTreeScreen(familyId: newFamilyIdStr),
+        ),
+      );
+    } on TimeoutException {
+      _toast('Family setup timed out. Try again.');
+    } on PostgrestException catch (e) {
+      _toast('Family setup failed: ${e.message}');
+    } catch (e) {
+      _toast('Family setup failed: $e');
+    }
   }
 
   @override
@@ -363,6 +399,12 @@ Navigator.push(
             tooltip: 'Join family',
             onPressed: _openJoinFamilyScreen,
             icon: const Icon(Icons.group_add),
+          ),
+          // ✅ NEW: Sign out button
+          IconButton(
+            tooltip: 'Sign out',
+            onPressed: _signOut,
+            icon: const Icon(Icons.logout),
           ),
         ],
       ),
