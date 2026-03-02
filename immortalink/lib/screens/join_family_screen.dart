@@ -15,42 +15,40 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   bool _loading = false;
 
   Future<void> _join() async {
-  final code = _controller.text.trim();
-  if (code.isEmpty) return;
+    final code = _controller.text.trim();
+    if (code.isEmpty) return;
 
-  setState(() => _loading = true);
+    setState(() => _loading = true);
 
-  try {
-    final user = _supabase.auth.currentUser;
-    if (user == null) throw Exception('Not signed in');
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) throw Exception('Not signed in');
 
-    // ✅ Single secure server-side join
-    final res = await _supabase.rpc(
-      'join_family_by_invite',
-      params: {'p_invite_code': code},
-    );
+      final res = await _supabase.rpc(
+        'join_family_by_invite',
+        params: {'p_invite_code': code},
+      );
 
-    final familyId = res?.toString();
-    if (familyId == null || familyId.isEmpty) {
-      throw Exception('Join failed (no family id returned)');
+      final familyId = res?.toString();
+      if (familyId == null || familyId.isEmpty) {
+        throw Exception('Join failed (no family id returned)');
+      }
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: familyId)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Join failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-
-    if (!mounted) return;
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: familyId)),
-    );
-  } catch (e) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Join failed: $e')),
-    );
-  } finally {
-    if (mounted) setState(() => _loading = false);
   }
-}
-
 
   @override
   void dispose() {
