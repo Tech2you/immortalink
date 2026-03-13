@@ -38,6 +38,18 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
   ])) as T;
 }
 
+function guessFileForPath(storagePath: string): { filename: string; mime: string } {
+  const lower = (storagePath || "").toLowerCase();
+  if (lower.endsWith(".webm")) return { filename: "voice_note.webm", mime: "audio/webm" };
+  if (lower.endsWith(".m4a")) return { filename: "voice_note.m4a", mime: "audio/mp4" };
+  if (lower.endsWith(".mp3")) return { filename: "voice_note.mp3", mime: "audio/mpeg" };
+  if (lower.endsWith(".wav")) return { filename: "voice_note.wav", mime: "audio/wav" };
+  if (lower.endsWith(".aac")) return { filename: "voice_note.aac", mime: "audio/aac" };
+  if (lower.endsWith(".ogg")) return { filename: "voice_note.ogg", mime: "audio/ogg" };
+  // fallback
+  return { filename: "voice_note.bin", mime: "application/octet-stream" };
+}
+
 async function downloadVoiceNoteBytes({
   admin,
   storagePath,
@@ -45,72 +57,44 @@ async function downloadVoiceNoteBytes({
   admin: any;
   storagePath: string;
 }): Promise<Uint8Array> {
-  // Try a few likely buckets (MVP safe)
-  const buckets = [
-    "voice_notes",
-    "vault_voice_notes",
-    "memory_voice_notes",
-    "vault_media",
-    "vault_voice_notes",
-  ];
+  // ✅ Your actual bucket for memory voice notes
+  const bucket = "memory_voice";
 
-  let lastErr = "";
+  const { data, error } = await admin.storage
+    .from(bucket)
+    .createSignedUrl(storagePath, 60 * 60);
 
-  for (const bucket of buckets) {
-    try {
-      // 1 hour signed URL
-      const { data, error } = await admin.storage
-        .from(bucket)
-        .createSignedUrl(storagePath, 60 * 60);
-
-      if (error || !data?.signedUrl) {
-        lastErr = error?.message || "No signedUrl";
-        continue;
-      }
-
-      const resp = await fetch(data.signedUrl);
-      if (!resp.ok) {
-        lastErr = `Fetch failed ${resp.status}`;
-        continue;
-      }
-
-      const buf = new Uint8Array(await resp.arrayBuffer());
-      if (!buf.length) {
-        lastErr = "Empty audio file";
-        continue;
-      }
-
-      return buf;
-    } catch (e) {
-      lastErr = String(e);
-    }
+  if (error || !data?.signedUrl) {
+    throw new Error(`Signed URL failed for bucket="${bucket}" path="${storagePath}": ${error?.message || "No signedUrl"}`);
   }
 
-  throw new Error(
-    `Could not download audio from storage_path="${storagePath}". Last error: ${lastErr}`,
-  );
+  const resp = await fetch(data.signedUrl);
+  if (!resp.ok) throw new Error(`Fetch audio failed ${resp.status}`);
+
+  const buf = new Uint8Array(await resp.arrayBuffer());
+  if (!buf.length) throw new Error("Empty audio file");
+  return buf;
 }
 
 async function transcribeWithOpenAI({
   apiKey,
   audioBytes,
+  storagePath,
 }: {
   apiKey: string;
   audioBytes: Uint8Array;
+  storagePath: string;
 }): Promise<string> {
-  // OpenAI Whisper transcription endpoint
   const form = new FormData();
   form.append("model", "gpt-4o-mini-transcribe");
 
-  // name is important for MIME inference sometimes
-  const file = new File([audioBytes], "voice_note.m4a", { type: "audio/mp4" });
+  const { filename, mime } = guessFileForPath(storagePath);
+  const file = new File([audioBytes], filename, { type: mime });
   form.append("file", file);
 
   const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
   });
 
@@ -120,8 +104,7 @@ async function transcribeWithOpenAI({
   }
 
   const data = await resp.json().catch(() => ({}));
-  const text = (data?.text ?? "").toString();
-  return textClean(text);
+  return textClean((data?.text ?? "").toString());
 }
 
 serve(async (req) => {
@@ -135,7 +118,10 @@ serve(async (req) => {
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
 
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SERVICE_ROLE_KEY) {
-      return json(500, { error: "Missing SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY in function env." });
+      return json(500, {
+        error:
+          "Missing SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY in function env.",
+      });
     }
     if (!OPENAI_API_KEY) {
       return json(500, { error: "Missing OPENAI_API_KEY in Edge Function secrets." });
@@ -148,111 +134,74 @@ serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
 
-    // Admin client (bypass RLS for inserts into chunks, signed URL, etc.)
+    // Admin client (bypass RLS)
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    // Verify JWT
+    // Verify JWT (this is why your Flutter invoke MUST send Authorization header)
     const { data: u, error: uErr } = await userClient.auth.getUser();
     if (uErr || !u?.user) return json(401, { error: "Invalid/missing JWT" });
 
     const payload = await req.json().catch(() => ({}));
+
     const vaultId = textClean(payload?.vault_id || payload?.vaultId || "");
-    const voiceNoteId = textClean(payload?.voice_note_id || payload?.voiceNoteId || "");
+    const memoryVoiceNoteId = textClean(
+      payload?.memory_voice_note_id || payload?.memoryVoiceNoteId || payload?.memory_voice_noteId || ""
+    );
 
     if (!vaultId) return json(400, { error: "vault_id is required" });
-    if (!voiceNoteId) return json(400, { error: "voice_note_id is required" });
+    if (!memoryVoiceNoteId) return json(400, { error: "memory_voice_note_id is required" });
 
-    // Fetch voice note (RLS must allow owner/family as you decide)
+    // ✅ Fetch from *your* VN table
     const { data: vn, error: vnErr } = await withTimeout(
       userClient
-        .from("voice_notes")
-        .select("id, vault_id, storage_path, prompt_text, life_stage")
-        .eq("id", voiceNoteId)
+        .from("memory_voice_notes")
+        .select("id, vault_id, memory_id, title, path, created_at")
+        .eq("id", memoryVoiceNoteId)
         .eq("vault_id", vaultId)
         .maybeSingle(),
       5000,
-      "DB(voice_notes)"
+      "DB(memory_voice_notes)"
     );
 
     if (vnErr) return json(500, { error: vnErr.message });
     if (!vn) return json(403, { error: "Not allowed or not found" });
 
-    const storagePath = textClean(vn.storage_path || "");
-    if (!storagePath) return json(400, { error: "voice note storage_path is empty" });
+    const memoryId = textClean(vn.memory_id || "");
+    const storagePath = textClean(vn.path || "");
+    const title = textClean(vn.title || "Voice note");
+
+    if (!memoryId) return json(400, { error: "memory_id is empty on memory_voice_notes row" });
+    if (!storagePath) return json(400, { error: "path is empty on memory_voice_notes row" });
 
     // 1) Download audio
     const audioBytes = await withTimeout(
       downloadVoiceNoteBytes({ admin, storagePath }),
-      12000,
+      15000,
       "download audio"
     );
 
     // 2) Transcribe
     const transcript = await withTimeout(
-      transcribeWithOpenAI({ apiKey: OPENAI_API_KEY, audioBytes }),
-      25000,
+      transcribeWithOpenAI({ apiKey: OPENAI_API_KEY, audioBytes, storagePath }),
+      30000,
       "transcription"
     );
 
     if (!transcript) {
-      return json(200, { ok: true, transcript: "", chunk_count: 0, note: "No speech detected." });
-    }
-
-    // 3) Find or create a memory row for this voice note
-    let memoryId = "";
-
-    const { data: mapping } = await admin
-      .from("voice_note_memories")
-      .select("memory_id")
-      .eq("voice_note_id", voiceNoteId)
-      .maybeSingle();
-
-    if (mapping?.memory_id) {
-      memoryId = textClean(mapping.memory_id);
-    }
-
-    const memPrompt = textClean(vn.prompt_text || "") || "Voice note";
-    const lifeStage = textClean(vn.life_stage || "");
-    const fullPrompt = lifeStage
-      ? `Voice note (${lifeStage}): ${memPrompt}`
-      : `Voice note: ${memPrompt}`;
-
-    if (!memoryId) {
-      const { data: inserted, error: insErr } = await admin
-        .from("memories")
-        .insert({
-          vault_id: vaultId,
-          prompt_text: fullPrompt,
-          body: transcript,
-        })
-        .select("id")
-        .maybeSingle();
-
-      if (insErr) return json(500, { error: `memories insert failed: ${insErr.message}` });
-
-      memoryId = textClean(inserted?.id || "");
-      if (!memoryId) return json(500, { error: "Failed to create memory id" });
-
-      await admin.from("voice_note_memories").insert({
-        voice_note_id: voiceNoteId,
+      return json(200, {
+        ok: true,
+        memory_voice_note_id: memoryVoiceNoteId,
         memory_id: memoryId,
-        vault_id: vaultId,
+        chunk_count: 0,
+        note: "No speech detected.",
       });
-    } else {
-      // Update existing memory for this voice note
-      await admin
-        .from("memories")
-        .update({
-          prompt_text: fullPrompt,
-          body: transcript,
-        })
-        .eq("id", memoryId);
     }
 
-    // 4) Chunk into memory_chunks (your AI already reads this)
-    const chunks = chunkText(`Q: ${fullPrompt}\nA: ${transcript}`, 900);
+    // 3) Write chunks into memory_chunks (Vault AI already reads this)
+    const fullText = `Voice note title: ${title}\nTranscript:\n${transcript}`;
+    const chunks = chunkText(fullText, 900);
 
-    // delete old chunks for this memory first (clean)
+    // Clean old chunks for THIS memory (keeps it deterministic for MVP)
     await admin
       .from("memory_chunks")
       .delete()
@@ -273,10 +222,10 @@ serve(async (req) => {
 
     return json(200, {
       ok: true,
-      voice_note_id: voiceNoteId,
+      memory_voice_note_id: memoryVoiceNoteId,
       memory_id: memoryId,
       chunk_count: payloadChunks.length,
-      transcript_preview: transcript.slice(0, 220),
+      transcript_preview: transcript.slice(0, 240),
     });
   } catch (e) {
     return json(500, { error: String(e) });

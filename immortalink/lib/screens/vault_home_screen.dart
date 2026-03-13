@@ -435,7 +435,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   void _openAskAI() {
-    final name = (_displayName ?? _vaultName).trim().isEmpty ? 'Vault' : (_displayName ?? _vaultName).trim();
+    final name = (_displayName ?? _vaultName).trim().isNotEmpty ? (_displayName ?? _vaultName).trim() : 'Vault';
 
     Navigator.push(
       context,
@@ -449,7 +449,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Widget _vaultAvatarHeader() {
-    final name = (_displayName ?? _vaultName).trim().isEmpty ? 'Your vault' : (_displayName ?? _vaultName).trim();
+    final name = (_displayName ?? _vaultName).trim().isNotEmpty ? (_displayName ?? _vaultName).trim() : 'Your vault';
     final hasAvatar = _avatarUrl != null && _avatarUrl!.trim().isNotEmpty;
 
     return Container(
@@ -1503,70 +1503,155 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  Future<void> _uploadMemoryVoice(String memoryId) async {
-    try {
-      final userId = _client.auth.currentUser?.id;
-      if (userId == null) throw Exception('Not signed in');
+ Future<void> _uploadMemoryVoice(String memoryId) async {
+  try {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) throw Exception('Not signed in');
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'webm'],
-        withData: true,
-      );
-      if (picked == null || picked.files.isEmpty) return;
+    final picked = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'webm'],
+      withData: true,
+    );
+    if (picked == null || picked.files.isEmpty) return;
 
-      final file = picked.files.first;
-      final bytes = file.bytes;
-      if (bytes == null) throw Exception('No file bytes received');
+    final file = picked.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) throw Exception('No file bytes received');
 
-      final ext = _extFromName(file.name);
-      final ts = DateTime.now().millisecondsSinceEpoch;
-      final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.$ext';
+    final ext = _extFromName(file.name);
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.$ext';
 
-      await _client.storage.from(_memoryVoiceBucket).uploadBinary(
-            path,
-            bytes,
-            fileOptions: FileOptions(upsert: false, contentType: _contentTypeFromExt(ext)),
-          );
+    // 1) upload audio
+    await _client.storage.from(_memoryVoiceBucket).uploadBinary(
+          path,
+          bytes,
+          fileOptions: FileOptions(upsert: false, contentType: _contentTypeFromExt(ext)),
+        );
 
-      await _client.from('memory_voice_notes').insert({'vault_id': widget.vaultId, 'memory_id': memoryId, 'path': path, 'title': file.name});
+    // 2) insert DB row + fetch id
+    final inserted = await _client
+        .from('memory_voice_notes')
+        .insert({
+          'vault_id': widget.vaultId,
+          'memory_id': memoryId,
+          'path': path,
+          'title': file.name,
+        })
+        .select('id')
+        .maybeSingle();
 
-      await _loadMemoryVoiceForVault();
-      _toast('Voice added to memory.');
-    } catch (e) {
-      _toast('Add voice failed: $e');
+    final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
+
+    // 3) call Edge Function to transcribe + index
+    if (memoryVoiceNoteId.isNotEmpty) {
+      final token = _client.auth.currentSession?.accessToken?.trim();
+      if (token == null || token.isEmpty) {
+        throw Exception('Missing session token. Please sign in again.');
+      }
+
+   
+if (token == null || token.isEmpty) {
+  throw Exception('Missing session token. Please sign in again.');
+}
+
+final res = await _client.functions.invoke(
+  'index_voice_note',
+  headers: {
+    'Authorization': 'Bearer $token',
+    'authorization': 'Bearer $token',
+  },
+  body: {
+    'vault_id': widget.vaultId,
+    // ✅ function expects THIS key
+    'memory_voice_note_id': memoryVoiceNoteId,
+  },
+);
+
+if (res.status != 200) {
+  throw Exception('index_voice_note failed: HTTP ${res.status}: ${res.data}');
+}
     }
-  }
 
-  Future<void> _recordMemoryVoice(String memoryId) async {
-    await _openRecordDialog(
-      title: 'Record memory voice',
-      subtitle: 'Add a voice note that belongs to this memory.',
-      onSave: (rec) async {
+    await _loadMemoryVoiceForVault();
+    _toast('Voice added to memory.');
+  } catch (e) {
+    _toast('Add voice failed: $e');
+  }
+}
+
+ Future<void> _recordMemoryVoice(String memoryId) async {
+  await _openRecordDialog(
+    title: 'Record memory voice',
+    subtitle: 'Add a voice note that belongs to this memory.',
+    onSave: (rec) async {
+      try {
         final userId = _client.auth.currentUser?.id;
         if (userId == null) throw Exception('Not signed in');
 
         final ts = DateTime.now().millisecondsSinceEpoch;
         final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.${rec.extension}';
 
+        // 1) upload audio
         await _client.storage.from(_memoryVoiceBucket).uploadBinary(
               path,
               Uint8List.fromList(rec.bytes),
               fileOptions: FileOptions(upsert: false, contentType: rec.mimeType),
             );
 
-        await _client.from('memory_voice_notes').insert({
-          'vault_id': widget.vaultId,
-          'memory_id': memoryId,
-          'path': path,
-          'title': 'Recorded $ts.${rec.extension}',
-        });
+        // 2) insert DB row + fetch id
+        final inserted = await _client
+            .from('memory_voice_notes')
+            .insert({
+              'vault_id': widget.vaultId,
+              'memory_id': memoryId,
+              'path': path,
+              'title': 'Recorded $ts.${rec.extension}',
+            })
+            .select('id')
+            .maybeSingle();
+
+        final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
+
+        // 3) call Edge Function to transcribe + index
+        if (memoryVoiceNoteId.isNotEmpty) {
+          final token = _client.auth.currentSession?.accessToken?.trim();
+          if (token == null || token.isEmpty) {
+            throw Exception('Missing session token. Please sign in again.');
+          }
+
+         
+if (token == null || token.isEmpty) {
+  throw Exception('Missing session token. Please sign in again.');
+}
+
+final res = await _client.functions.invoke(
+  'index_voice_note',
+  headers: {
+    'Authorization': 'Bearer $token',
+    'authorization': 'Bearer $token',
+  },
+  body: {
+    'vault_id': widget.vaultId,
+    // ✅ function expects THIS key
+    'memory_voice_note_id': memoryVoiceNoteId,
+  },
+);
+
+if (res.status != 200) {
+  throw Exception('index_voice_note failed: HTTP ${res.status}: ${res.data}');
+}
+        }
 
         await _loadMemoryVoiceForVault();
         _toast('Voice added to memory.');
-      },
-    );
-  }
+      } catch (e) {
+        _toast('Add voice failed: $e');
+      }
+    },
+  );
+}
 
   Future<void> _deleteMemoryVoice(String memoryId, _VoiceNote v) async {
     final ok = await showDialog<bool>(
@@ -1797,57 +1882,56 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   ========================== */
 
   Future<void> _loadMemories() async {
-  if (!mounted) return;
+    if (!mounted) return;
 
-  setState(() {
-    _loading = true;
-    _error = null;
-  });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
-  try {
-    // If session is missing, show a real error instead of hanging forever.
-    final session = _client.auth.currentSession;
-    if (session == null) {
-      throw Exception('No active session. Please sign in again.');
+    try {
+      // If session is missing, show a real error instead of hanging forever.
+      final session = _client.auth.currentSession;
+      if (session == null) {
+        throw Exception('No active session. Please sign in again.');
+      }
+
+      final data = await _client
+          .from('memories')
+          .select('id, vault_id, life_stage, prompt_text, body, created_at')
+          .eq('vault_id', widget.vaultId)
+          .order('created_at', ascending: false)
+          .timeout(const Duration(seconds: 12)); // ✅ prevents infinite spinner
+
+      if (!mounted) return;
+
+      setState(() {
+        _memories = List<Map<String, dynamic>>.from(data);
+      });
+
+      // These load “extras” and should not block the whole screen
+      unawaited(_loadMemoryPhotosForVault());
+      unawaited(_loadMemoryVoiceForVault());
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Timed out loading memories. Check internet / Supabase URL / auth.';
+      });
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Postgrest: ${e.message}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() => _loading = false); // ✅ always stops spinner
     }
-
-    final data = await _client
-        .from('memories')
-        .select('id, vault_id, life_stage, prompt_text, body, created_at')
-        .eq('vault_id', widget.vaultId)
-        .order('created_at', ascending: false)
-        .timeout(const Duration(seconds: 12)); // ✅ prevents infinite spinner
-
-    if (!mounted) return;
-
-    setState(() {
-      _memories = List<Map<String, dynamic>>.from(data);
-    });
-
-    // These load “extras” and should not block the whole screen
-    unawaited(_loadMemoryPhotosForVault());
-    unawaited(_loadMemoryVoiceForVault());
-  } on TimeoutException {
-    if (!mounted) return;
-    setState(() {
-      _error = 'Timed out loading memories. Check internet / Supabase URL / auth.';
-    });
-  } on PostgrestException catch (e) {
-    if (!mounted) return;
-    setState(() {
-      _error = 'Postgrest: ${e.message}';
-    });
-  } catch (e) {
-    if (!mounted) return;
-    setState(() {
-      _error = e.toString();
-    });
-  } finally {
-    if (!mounted) return;
-    setState(() => _loading = false); // ✅ always stops spinner
   }
-}
-
 
   Future<void> _openAddMemory({String? initialLifeStage}) async {
     final saved = await Navigator.push<bool>(
