@@ -85,11 +85,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
 
     setState(() => _accepted = true);
 
-    _msgs.add(_ChatMsg(
-      role: _Role.assistant,
-      text:
-          'Ask me anything. I’ll answer as thoughtfully as I can, based on what’s in this vault.',
-    ));
+   
 
     setState(() {});
     _focus.requestFocus();
@@ -314,8 +310,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.auto_awesome, size: 18),
-          const SizedBox(width: 10),
+          // ✅ removed the starred "auto_awesome" icon
           Expanded(
             child: Text(
               'Ask me anything. I’ll answer as thoughtfully as I can, based on what’s in this vault.',
@@ -328,6 +323,19 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
   }
 
   Widget _buildChatList(BuildContext context) {
+    // ✅ FIX: if _msgs is empty, show only quick prompts (prevents RangeError red screen)
+    if (_msgs.isEmpty) {
+      return ListView(
+        controller: _scroll,
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        children: [
+          _QuickPrompts(
+            onTap: _sending ? null : _sendQuick,
+          ),
+        ],
+      );
+    }
+
     final showQuickPrompts = _msgs.length <= 1; // basically empty besides the greeting
     return ListView.builder(
       controller: _scroll,

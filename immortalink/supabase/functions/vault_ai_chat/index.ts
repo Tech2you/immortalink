@@ -10,6 +10,7 @@
 // - vaults SELECT now ONLY uses real columns (id, owner_id, family_id, name, display_name)
 // - slot_key mapping supports parent_left/right and child_left/right
 // - relationship questions return deterministic answer (no hallucination)
+// - ✅ NEW: relationship works even when viewer slot_key is NULL (family root) by using owner slot_key
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -72,29 +73,26 @@ function isRelationshipQuestion(qRaw: string): boolean {
 }
 
 /**
- * Viewer relation to OWNER from the viewer's slot_key.
- * IMPORTANT: slot_key is assigned to the *viewer* in family_members.
+ * Relation from an absolute family-tree slot_key (as used in your FamilyTreeScreen constants).
+ * Interpreted as: "this person's relationship to the FAMILY ROOT".
+ *
+ * We reuse this mapping to infer relationships even when the viewer is the family root (slot_key null).
  */
-function viewerRelationFromSlotKey(slotKeyRaw: string): string {
+function relationToRootFromSlotKey(slotKeyRaw: string): string {
   const slotKey = (slotKeyRaw || "").toLowerCase().trim();
   if (!slotKey) return "unknown";
 
-  // ✅ common “tree slots”
+  // common legacy slots
   if (slotKey === "parent_left" || slotKey === "parent_right") return "parent";
   if (slotKey === "child_left" || slotKey === "child_right") return "child";
 
-  // Parents of the owner
   if (slotKey === "mother" || slotKey === "father") return "parent";
-
-  // Children of the owner (supports child_1, child_a, etc)
   if (slotKey.startsWith("child_")) return "child";
 
-  // Descendants layers (children of children etc)
   if (slotKey.startsWith("grandchild_")) return "grandchild";
   if (slotKey.startsWith("greatgrandchild_") || slotKey.startsWith("great_grandchild_")) return "great-grandchild";
   if (slotKey === "greatgrandchild_left" || slotKey === "greatgrandchild_right") return "great-grandchild";
 
-  // Grandparents of the owner
   if (
     slotKey === "maternal_gm" ||
     slotKey === "maternal_gf" ||
@@ -102,7 +100,6 @@ function viewerRelationFromSlotKey(slotKeyRaw: string): string {
     slotKey === "paternal_gf"
   ) return "grandparent";
 
-  // Great-grandparents of the owner
   if (
     slotKey === "maternal_ggm" ||
     slotKey === "maternal_ggf" ||
@@ -116,9 +113,7 @@ function viewerRelationFromSlotKey(slotKeyRaw: string): string {
   return "unknown";
 }
 
-/**
- * Invert viewer->owner relation into owner->viewer relation.
- */
+/** Invert relation. */
 function invertRelation(viewerRel: string): string {
   const r = (viewerRel || "").toLowerCase().trim();
 
@@ -165,7 +160,7 @@ async function openaiChat({
     };
   }
 
-  // ✅ FIX: ancestor-first conversation. Never ask the viewer to “teach you about them”.
+  // ancestor-first conversation. Never ask the viewer to “teach you about them”.
   const system = `
 You are the ImmortaLink "Vault Companion".
 
@@ -190,7 +185,7 @@ GROUNDING:
      - what I did for work/study
      - my personality/values
      - my family stories / big life lessons
-  3) Ask ONE follow-up question that is ancestor-focused, e.g.:
+  3) Ask ONE follow-up question that is ancestor-focused:
      "What would you like to know about my life next?"
   4) Optionally suggest: "If you add a memory/voice note about <topic>, I can answer better."
 
@@ -304,31 +299,79 @@ serve(async (req) => {
 
     const isOwnerAsking = !!vaultOwnerUserId && viewerUserId === vaultOwnerUserId;
 
+    // =========================
+    // Relationship resolution (robust)
+    // =========================
     let viewerRole = isOwnerAsking ? "owner" : "visitor";
     let viewerSlotKey = "";
+    let ownerSlotKey = "";
+
     let viewerToOwner = isOwnerAsking ? "owner" : "unknown";
     let ownerToViewer = isOwnerAsking ? "owner" : "family member";
 
     if (!isOwnerAsking && familyId) {
       try {
-        const { data: fm, error: fmErr } = await withTimeout(
+        // Fetch BOTH member rows in one query (viewer + vault owner)
+        const { data: rows, error: fmErr } = await withTimeout(
           supabase
             .from("family_members")
-            .select("role, slot_key")
+            .select("user_id, role, slot_key")
             .eq("family_id", familyId)
-            .eq("user_id", viewerUserId)
-            .maybeSingle(),
+            .in("user_id", [viewerUserId, vaultOwnerUserId]),
           3_000,
           "DB(family_members)"
         );
 
-        if (!fmErr && fm) {
-          viewerRole = textClean((fm as any).role || viewerRole) || viewerRole;
-          viewerSlotKey = textClean((fm as any).slot_key || "");
-          viewerToOwner = viewerRelationFromSlotKey(viewerSlotKey);
-          ownerToViewer = invertRelation(viewerToOwner);
+        if (!fmErr && Array.isArray(rows)) {
+          for (const r of rows) {
+            const uid = textClean((r as any).user_id || "");
+            if (uid === viewerUserId) {
+              viewerRole = textClean((r as any).role || viewerRole) || viewerRole;
+              viewerSlotKey = textClean((r as any).slot_key || "");
+            }
+            if (uid === vaultOwnerUserId) {
+              ownerSlotKey = textClean((r as any).slot_key || "");
+            }
+          }
         }
-      } catch (_) {}
+      } catch (_) {
+        // ignore MVP
+      }
+
+      // ✅ Key logic:
+      // If viewer has slot_key -> assume owner is FAMILY ROOT (slot_key null) OR we can't infer; still use viewer slot for best-effort.
+      // If viewer slot_key is NULL (viewer is family root) -> infer viewer↔owner from OWNER slot_key.
+      //
+      // This fixes your screenshot: viewer is root (slot null), owner is child_2 → viewerToOwner = parent.
+      if (!viewerSlotKey && ownerSlotKey) {
+        // owner relation to viewer(root)
+        const ownerToViewerRel = relationToRootFromSlotKey(ownerSlotKey); // e.g. child
+        viewerToOwner = invertRelation(ownerToViewerRel);               // e.g. parent
+        ownerToViewer = invertRelation(viewerToOwner);                  // e.g. child
+      } else if (viewerSlotKey && !ownerSlotKey) {
+        // owner is root, viewer has slot
+        viewerToOwner = relationToRootFromSlotKey(viewerSlotKey);
+        ownerToViewer = invertRelation(viewerToOwner);
+      } else if (viewerSlotKey && ownerSlotKey) {
+        // both have slots → MVP: only confidently detect siblings/spouse if obvious; else unknown
+        const vRel = relationToRootFromSlotKey(viewerSlotKey);
+        const oRel = relationToRootFromSlotKey(ownerSlotKey);
+
+        if (vRel === "child" && oRel === "child") {
+          viewerToOwner = "sibling";
+          ownerToViewer = "sibling";
+        } else if (vRel === "spouse" || oRel === "spouse") {
+          // not perfect, but avoids "unknown" for spouse slot
+          viewerToOwner = "spouse";
+          ownerToViewer = "spouse";
+        } else {
+          viewerToOwner = "unknown";
+          ownerToViewer = "family member";
+        }
+      } else {
+        viewerToOwner = "unknown";
+        ownerToViewer = "family member";
+      }
     }
 
     const whoLine = viewerDisplayName
@@ -337,30 +380,33 @@ serve(async (req) => {
 
     const viewerContextLine = isOwnerAsking
       ? `The person asking is the VAULT OWNER.\n${whoLine}`
-      : `The person asking is the viewer/visitor.\nRelationship (viewer → owner): ${prettyRel(viewerToOwner)}\nRelationship (owner → viewer): ${prettyRel(ownerToViewer)}\nSlot key (viewer): ${viewerSlotKey || "(unknown)"}\nRole (viewer): ${viewerRole}\n${whoLine}`;
+      : `The person asking is the viewer/visitor.\nRelationship (viewer → owner): ${prettyRel(viewerToOwner)}\nRelationship (owner → viewer): ${prettyRel(ownerToViewer)}\nSlot key (viewer): ${viewerSlotKey || "(null)"}\nSlot key (owner): ${ownerSlotKey || "(null)"}\nRole (viewer): ${viewerRole}\n${whoLine}`;
 
+    // ✅ Deterministic relationship answer
     if (isRelationshipQuestion(question)) {
       if (isOwnerAsking) {
-        return json(
-          { answer: "You are the vault owner (this is your own vault)." },
-          200
-        );
+        return json({ answer: "You are the vault owner (this is your own vault)." }, 200);
       }
 
-      if (!familyId || !viewerSlotKey || viewerToOwner === "unknown") {
+      if (viewerToOwner === "unknown") {
         return json(
           {
             answer:
-              "I can’t tell your exact relationship yet (your family slot isn’t set), but you do have access to this vault.",
+              "I can’t tell your exact relationship yet, but you do have access to this vault.",
           },
           200
         );
       }
 
+      // AI speaks as VAULT OWNER.
+      // So we respond using owner→viewer first.
       const a = `I am your ${prettyRel(ownerToViewer)}. You are my ${prettyRel(viewerToOwner)}.`;
       return json({ answer: a }, 200);
     }
 
+    // =========================
+    // Context fetch: memory_chunks first, then fallback to memories
+    // =========================
     let contextParts: string[] = [];
 
     try {
