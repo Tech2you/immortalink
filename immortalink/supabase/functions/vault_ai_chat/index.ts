@@ -3,8 +3,13 @@
 // ✅ Uses caller JWT so RLS applies (secure)
 // ✅ Uses memory_chunks.chunk_text + chunk_index (matches your schema)
 // ✅ Viewer context: owner vs visitor + relationship (relative to vault owner)
-// ✅ Forces correct “speaker” perspective: AI speaks as vault owner (“I/me”), visitor is “you”
+// ✅ Forces correct “speaker” perspective: AI speaks as vault owner (“I/me”), viewer is “you”
 // ✅ Strict grounding + labeled Era context
+//
+// FIXES:
+// - vaults SELECT now ONLY uses real columns (id, owner_id, family_id, name, display_name)
+// - slot_key mapping supports parent_left/right and child_left/right
+// - relationship questions return deterministic answer (no hallucination)
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -41,6 +46,31 @@ async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise
   return res as T;
 }
 
+/** Detect “relationship” questions so we can answer deterministically. */
+function isRelationshipQuestion(qRaw: string): boolean {
+  const q = (qRaw || "").toLowerCase();
+  return (
+    q.includes("how are we related") ||
+    q.includes("who am i to you") ||
+    q.includes("who are you to me") ||
+    q.includes("are you my") ||
+    q.includes("am i your") ||
+    q.includes("relationship") ||
+    q.includes("related") ||
+    q.includes("dad") ||
+    q.includes("father") ||
+    q.includes("mom") ||
+    q.includes("mother") ||
+    q.includes("grand") ||
+    q.includes("grandson") ||
+    q.includes("grandchild") ||
+    q.includes("great grandson") ||
+    q.includes("great-grandson") ||
+    q.includes("great granddaughter") ||
+    q.includes("great-granddaughter")
+  );
+}
+
 /**
  * Viewer relation to OWNER from the viewer's slot_key.
  * IMPORTANT: slot_key is assigned to the *viewer* in family_members.
@@ -49,15 +79,20 @@ function viewerRelationFromSlotKey(slotKeyRaw: string): string {
   const slotKey = (slotKeyRaw || "").toLowerCase().trim();
   if (!slotKey) return "unknown";
 
+  // ✅ common “tree slots”
+  if (slotKey === "parent_left" || slotKey === "parent_right") return "parent";
+  if (slotKey === "child_left" || slotKey === "child_right") return "child";
+
   // Parents of the owner
   if (slotKey === "mother" || slotKey === "father") return "parent";
 
-  // Children of the owner
-  if (slotKey.startsWith("child_") || slotKey === "child_left" || slotKey === "child_right") return "child";
+  // Children of the owner (supports child_1, child_a, etc)
+  if (slotKey.startsWith("child_")) return "child";
 
   // Descendants layers (children of children etc)
   if (slotKey.startsWith("grandchild_")) return "grandchild";
-  if (slotKey.startsWith("greatgrandchild_")) return "great-grandchild";
+  if (slotKey.startsWith("greatgrandchild_") || slotKey.startsWith("great_grandchild_")) return "great-grandchild";
+  if (slotKey === "greatgrandchild_left" || slotKey === "greatgrandchild_right") return "great-grandchild";
 
   // Grandparents of the owner
   if (
@@ -67,7 +102,7 @@ function viewerRelationFromSlotKey(slotKeyRaw: string): string {
     slotKey === "paternal_gf"
   ) return "grandparent";
 
-  // Great-grandparents of the owner (your slot keys)
+  // Great-grandparents of the owner
   if (
     slotKey === "maternal_ggm" ||
     slotKey === "maternal_ggf" ||
@@ -75,7 +110,7 @@ function viewerRelationFromSlotKey(slotKeyRaw: string): string {
     slotKey === "paternal_ggf"
   ) return "great-grandparent";
 
-  if (slotKey === "spouse_1") return "spouse";
+  if (slotKey === "spouse_1" || slotKey.startsWith("spouse_")) return "spouse";
   if (slotKey.startsWith("sibling_")) return "sibling";
 
   return "unknown";
@@ -83,7 +118,6 @@ function viewerRelationFromSlotKey(slotKeyRaw: string): string {
 
 /**
  * Invert viewer->owner relation into owner->viewer relation.
- * Example: viewer is "great-grandchild" => owner is "great-grandparent"
  */
 function invertRelation(viewerRel: string): string {
   const r = (viewerRel || "").toLowerCase().trim();
@@ -102,6 +136,14 @@ function invertRelation(viewerRel: string): string {
   if (r === "spouse") return "spouse";
 
   return "family member";
+}
+
+function prettyRel(r: string): string {
+  const x = (r || "").trim();
+  if (!x) return "family member";
+  if (x === "great grandchild") return "great-grandchild";
+  if (x === "great grandparent") return "great-grandparent";
+  return x;
 }
 
 async function openaiChat({
@@ -123,41 +165,56 @@ async function openaiChat({
     };
   }
 
+  // ✅ FIX: ancestor-first conversation. Never ask the viewer to “teach you about them”.
   const system = `
 You are the ImmortaLink "Vault Companion".
 
-CRITICAL ROLE RULE:
-- You are speaking AS ${displayName} (the vault owner).
-- The person chatting is the viewer/visitor ("you").
-- Never describe yourself as the viewer (do NOT say "as your grandchild..." if the viewer is the grandchild).
-- If relationship is known, use one of these exact patterns:
-  1) "I am your <owner_to_viewer_relation>."
-  2) "You are my <viewer_to_owner_relation>."
-- If relationship is unknown, say: "You are a family member with access to this vault."
+IDENTITY:
+- You speak AS ${displayName} (the vault owner): use "I/me/my".
+- The user is the viewer: refer to them as "you".
 
-Viewer context:
-${viewerContextLine}
+CRITICAL:
+- DO NOT ask the viewer to describe themselves or what they want to learn about themselves.
+- The viewer is here to learn about ME (the vault owner / ancestor).
+- If you need missing info, ask what they want to know about ME, or suggest what to add ABOUT ME.
 
-Grounding rules:
-- Use ONLY the vault context for personal facts, memories, life events, names, dates, places, sports, hobbies.
-- If it is not explicitly in vault context, say you’re not sure and suggest what memory to add.
-- You MAY give general historical context, but label it as "Era context" and never claim it as a personal memory unless it's in the vault.
-- Be warm, human, and concise. Avoid long essays.
-- Never invent details.
+RELATIONSHIP RULE:
+- Do NOT mention relationship/roles/slot_key unless the user explicitly asked a relationship question.
+
+GROUNDING:
+- Only answer personal facts that are present in Vault context.
+- If the vault context doesn't contain the answer:
+  1) Say: "I'm not sure yet from what's saved here."
+  2) Offer 2–4 example topics ABOUT ME you could talk about next (choose only generic ones unless context supports specific ones):
+     - where I lived
+     - what I did for work/study
+     - my personality/values
+     - my family stories / big life lessons
+  3) Ask ONE follow-up question that is ancestor-focused, e.g.:
+     "What would you like to know about my life next?"
+  4) Optionally suggest: "If you add a memory/voice note about <topic>, I can answer better."
+
+STYLE:
+- 1–3 short sentences, then one follow-up question.
+- Do not dump multiple paragraphs.
+- Do not say "From the vault:" unless asked "how do you know?"
 `;
 
   const user = `
-Vault context (may be empty):
+Vault context (the only source of personal truth):
 ${context || "(no saved memories found)"}
 
 User question:
 ${question}
+
+Viewer context (do NOT mention unless asked about relationship):
+${viewerContextLine}
 `;
 
   const body = {
     model: "gpt-4o-mini",
-    temperature: 0.4,
-    max_tokens: 260,
+    temperature: 0.35,
+    max_tokens: 220,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -215,19 +272,17 @@ serve(async (req) => {
     const payload = await req.json().catch(() => ({}));
     const vaultId = textClean(payload?.vaultId || payload?.vault_id || "");
     const question = textClean(payload?.question || payload?.prompt || payload?.message || "");
-    const displayName = textClean(payload?.displayName || payload?.display_name || "this person");
+    const displayNameFromClient = textClean(payload?.displayName || payload?.display_name || "");
 
-    // Optional future (safe now): viewerDisplayName
     const viewerDisplayName = textClean(payload?.viewerDisplayName || payload?.viewer_display_name || "");
 
     if (!vaultId) return json({ error: "vaultId is required" }, 400);
     if (!question) return json({ error: "question is required" }, 400);
 
-    // Fetch vault owner + family_id (RLS must allow viewer to see this vault)
     const { data: vaultRow, error: vErr } = await withTimeout(
       supabase
         .from("vaults")
-        .select("id, owner_id, family_id")
+        .select("id, owner_id, family_id, name, display_name")
         .eq("id", vaultId)
         .maybeSingle(),
       4_000,
@@ -237,11 +292,18 @@ serve(async (req) => {
     if (vErr) return json({ error: `DB error: ${vErr.message}` }, 500);
     if (!vaultRow) return json({ error: "Vault not found or not allowed" }, 403);
 
-    const vaultOwnerUserId = textClean(vaultRow.owner_id || "");
-    const familyId = textClean(vaultRow.family_id || "");
-    const isOwnerAsking = viewerUserId === vaultOwnerUserId;
+    const vaultOwnerUserId = textClean((vaultRow as any).owner_id || "");
+    const familyId = textClean((vaultRow as any).family_id || "");
 
-    // Relationship relative to vault owner (MVP reliable source: family_members.slot_key)
+    const ownerDisplayName =
+      textClean((vaultRow as any).display_name || "") ||
+      textClean((vaultRow as any).name || "") ||
+      "this person";
+
+    const displayName = displayNameFromClient || ownerDisplayName;
+
+    const isOwnerAsking = !!vaultOwnerUserId && viewerUserId === vaultOwnerUserId;
+
     let viewerRole = isOwnerAsking ? "owner" : "visitor";
     let viewerSlotKey = "";
     let viewerToOwner = isOwnerAsking ? "owner" : "unknown";
@@ -261,14 +323,12 @@ serve(async (req) => {
         );
 
         if (!fmErr && fm) {
-          viewerRole = textClean(fm.role || viewerRole) || viewerRole;
-          viewerSlotKey = textClean(fm.slot_key || "");
+          viewerRole = textClean((fm as any).role || viewerRole) || viewerRole;
+          viewerSlotKey = textClean((fm as any).slot_key || "");
           viewerToOwner = viewerRelationFromSlotKey(viewerSlotKey);
           ownerToViewer = invertRelation(viewerToOwner);
         }
-      } catch (_) {
-        // ignore MVP
-      }
+      } catch (_) {}
     }
 
     const whoLine = viewerDisplayName
@@ -277,9 +337,30 @@ serve(async (req) => {
 
     const viewerContextLine = isOwnerAsking
       ? `The person asking is the VAULT OWNER.\n${whoLine}`
-      : `The person asking is the viewer/visitor.\nRelationship (viewer → owner): ${viewerToOwner}\nRelationship (owner → viewer): ${ownerToViewer}\nSlot key (viewer): ${viewerSlotKey || "(unknown)"}\nRole (viewer): ${viewerRole}\n${whoLine}`;
+      : `The person asking is the viewer/visitor.\nRelationship (viewer → owner): ${prettyRel(viewerToOwner)}\nRelationship (owner → viewer): ${prettyRel(ownerToViewer)}\nSlot key (viewer): ${viewerSlotKey || "(unknown)"}\nRole (viewer): ${viewerRole}\n${whoLine}`;
 
-    // Context fetch: memory_chunks first (chunk_text), then fallback to memories
+    if (isRelationshipQuestion(question)) {
+      if (isOwnerAsking) {
+        return json(
+          { answer: "You are the vault owner (this is your own vault)." },
+          200
+        );
+      }
+
+      if (!familyId || !viewerSlotKey || viewerToOwner === "unknown") {
+        return json(
+          {
+            answer:
+              "I can’t tell your exact relationship yet (your family slot isn’t set), but you do have access to this vault.",
+          },
+          200
+        );
+      }
+
+      const a = `I am your ${prettyRel(ownerToViewer)}. You are my ${prettyRel(viewerToOwner)}.`;
+      return json({ answer: a }, 200);
+    }
+
     let contextParts: string[] = [];
 
     try {
@@ -301,9 +382,7 @@ serve(async (req) => {
           if (content) contextParts.push(content);
         }
       }
-    } catch (_) {
-      // ignore, fallback below
-    }
+    } catch (_) {}
 
     if (contextParts.length === 0) {
       const { data: memories, error: memErr } = await withTimeout(
