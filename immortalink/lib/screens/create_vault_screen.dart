@@ -18,6 +18,33 @@ class _CreateVaultScreenState extends State<CreateVaultScreen> {
 
   Map<String, dynamic>? _existingVault;
 
+  // ✅ Added: human-friendly "10 May 2026" (no time)
+  String _formatCreatedDate(dynamic createdAtRaw) {
+    final s = (createdAtRaw ?? '').toString().trim();
+    if (s.isEmpty) return '';
+
+    final dt = DateTime.tryParse(s);
+    if (dt == null) return '';
+
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+
+    final d = dt.toLocal();
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -111,9 +138,8 @@ class _CreateVaultScreenState extends State<CreateVaultScreen> {
       await _ensureSession();
 
       await _client.from('vaults').insert({
-  'name': name,
-});
-
+        'name': name,
+      });
 
       if (!mounted) return;
       Navigator.pop(context, true); // created
@@ -169,11 +195,10 @@ class _CreateVaultScreenState extends State<CreateVaultScreen> {
                       Card(
                         child: ListTile(
                           title: Text((_existingVault!['name'] ?? 'Vault').toString()),
-                          subtitle: Text(
-                            ((_existingVault!['created_at'] ?? '').toString().isEmpty)
-                                ? ''
-                                : 'Created: ${_existingVault!['created_at']}',
-                          ),
+                          subtitle: Text(() {
+                            final created = _formatCreatedDate(_existingVault!['created_at']);
+                            return created.isEmpty ? '' : 'Created: $created';
+                          }()),
                         ),
                       ),
                       const SizedBox(height: 16),

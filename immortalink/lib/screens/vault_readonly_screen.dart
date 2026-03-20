@@ -34,7 +34,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   String? _avatarUrl; // signed url
   String? _displayName;
 
-  // ✅ NEW: Owner id (needed to locate highlights folder)
+  // Owner id (needed to locate highlights folder)
   String? _ownerId;
 
   // Buckets (same as VaultHomeScreen)
@@ -44,12 +44,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   static const String _voiceBucket = 'vault_voice';
   static const String _memoryVoiceBucket = 'memory_voice';
 
-  // ✅ NEW: Featured photos (highlights)
+  // Featured photos (highlights)
   bool _loadingHighlights = true;
   String? _highlightsError;
   List<Map<String, String>> _featuredPhotos = []; // {path,url}
 
-  // ✅ NEW: Carousel state
+  // Carousel state
   final PageController _highlightController = PageController();
   Timer? _autoSlideTimer;
   int _highlightIndex = 0;
@@ -129,7 +129,6 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     });
 
     try {
-      // Meta
       final meta = await _client
           .from('vaults')
           .select('owner_id, avatar_path, display_name, name')
@@ -145,7 +144,6 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         signed = await _signedAvatarUrl(path);
       }
 
-      // Memories (read only)
       final data = await _client
           .from('memories')
           .select('id, life_stage, prompt_text, body, created_at')
@@ -162,8 +160,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         _loading = false;
       });
 
-      // Load extras (don’t block UI)
-      unawaited(_loadHighlights()); // ✅ NEW
+      unawaited(_loadHighlights());
       unawaited(_loadCoreVoice());
       unawaited(_loadMemoryPhotosForVault());
       unawaited(_loadMemoryVoiceForVault());
@@ -181,25 +178,41 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   }
 
   /* =========================
-     ✅ OWNER HIGHLIGHTS (READ ONLY)
+     OWNER HIGHLIGHTS (READ ONLY)
   ========================== */
 
   String _featuredPrefix(String ownerId) => '$ownerId/${widget.vaultId}/featured';
 
   int get _highlightsCount => _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
 
+  // ✅ continuous random carousel (shuffle on loop)
   void _setupAutoSlide() {
     _autoSlideTimer?.cancel();
     final n = _highlightsCount;
     if (n <= 1) return;
 
     _highlightIndex = 0;
+
     _autoSlideTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
       final nn = _highlightsCount;
       if (nn <= 1) return;
 
-      _highlightIndex = (_highlightIndex + 1) % nn;
+      final next = (_highlightIndex + 1) % nn;
+
+      if (next == 0) {
+        setState(() {
+          _featuredPhotos.shuffle();
+          _highlightIndex = 0;
+        });
+
+        if (_highlightController.hasClients) {
+          _highlightController.jumpToPage(0);
+        }
+        return;
+      }
+
+      _highlightIndex = next;
       _highlightController.animateToPage(
         _highlightIndex,
         duration: const Duration(milliseconds: 450),
@@ -242,11 +255,19 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         items.add({'path': fullPath, 'url': url});
       }
 
+      // ✅ random order every load
+      items.shuffle();
+
       if (!mounted) return;
       setState(() {
         _featuredPhotos = items;
         _loadingHighlights = false;
+        _highlightIndex = 0;
       });
+
+      if (_highlightController.hasClients) {
+        _highlightController.jumpToPage(0);
+      }
 
       _setupAutoSlide();
     } catch (e) {
@@ -297,7 +318,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                           onPageChanged: (v) => setInner(() => idx = v),
                           itemBuilder: (_, i) {
                             final url = _featuredPhotos[i]['url'] ?? '';
-                            return Positioned.fill(child: Image.network(url, fit: BoxFit.cover));
+                            return Image.network(
+                              url,
+                              fit: BoxFit.cover,
+                              alignment: Alignment.center,
+                              gaplessPlayback: true,
+                            );
                           },
                         ),
                       ),
@@ -346,7 +372,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     );
   }
 
+  // ✅ bigger + no squish (fixed height + BoxFit.cover)
   Widget _highlightsSection() {
+    const double previewHeight = 264; // ~1.2x from 220
+
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(14),
@@ -395,8 +424,9 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               onTap: _openHighlightsGallery,
               child: Column(
                 children: [
-                  AspectRatio(
-                    aspectRatio: 16 / 9,
+                  SizedBox(
+                    height: previewHeight,
+                    width: double.infinity,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
                       child: PageView.builder(
@@ -407,7 +437,14 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                           final url = _featuredPhotos[i]['url'] ?? '';
                           return Stack(
                             children: [
-                              Positioned.fill(child: Image.network(url, fit: BoxFit.cover, gaplessPlayback: true)),
+                              Positioned.fill(
+                                child: Image.network(
+                                  url,
+                                  fit: BoxFit.cover,
+                                  alignment: Alignment.center,
+                                  gaplessPlayback: true,
+                                ),
+                              ),
                               const Positioned(
                                 left: 12,
                                 bottom: 12,
@@ -700,7 +737,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                           onPageChanged: (v) => setInner(() => idx = v),
                           itemBuilder: (_, i) {
                             final p = photos[i];
-                            return Positioned.fill(child: Image.network(p.url, fit: BoxFit.cover));
+                            return Image.network(
+                              p.url,
+                              fit: BoxFit.cover,
+                              alignment: Alignment.center,
+                              gaplessPlayback: true,
+                            );
                           },
                         ),
                       ),
@@ -955,12 +997,11 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               : _error != null
                   ? Center(child: Text('Load failed: $_error'))
                   : ListView.separated(
-                      // ✅ header + highlights + core voice + memories
                       itemCount: _memories.isEmpty ? 4 : _memories.length + 3,
                       separatorBuilder: (_, __) => const Divider(),
                       itemBuilder: (context, i) {
                         if (i == 0) return _headerCard();
-                        if (i == 1) return _highlightsSection(); // ✅ NEW
+                        if (i == 1) return _highlightsSection();
                         if (i == 2) return _coreVoiceSection();
 
                         if (_memories.isEmpty && i == 3) {

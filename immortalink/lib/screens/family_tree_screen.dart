@@ -752,7 +752,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                     children: [
                                       Expanded(
                                         child: _GroupCard(
-                                          title: 'Maternal Great-grandparents',
+                                          title: 'Great-grandparents',
                                           child: Row(
                                             children: [
                                               Expanded(
@@ -764,11 +764,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kMaternalGgm,
-                                                    title: 'Maternal Great-Grandmom',
+                                                    title: 'Great-grandparent',
                                                   ),
                                                   onOpen: (v) =>
                                                       _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add great-grandmom',
+                                                  showAddLabel: 'Add great-grandparent',
                                                 ),
                                               ),
                                               const SizedBox(width: 10),
@@ -781,11 +781,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kMaternalGgf,
-                                                    title: 'Maternal Great-Granddad',
+                                                    title: ' Great-grandparent',
                                                   ),
                                                   onOpen: (v) =>
                                                       _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add great-granddad',
+                                                  showAddLabel: 'Add great-grandparent',
                                                 ),
                                               ),
                                             ],
@@ -795,7 +795,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: _GroupCard(
-                                          title: 'Paternal Great-grandparents',
+                                          title: 'Great-grandparents',
                                           child: Row(
                                             children: [
                                               Expanded(
@@ -807,11 +807,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kPaternalGgm,
-                                                    title: 'Paternal Great-Grandmom',
+                                                    title: 'Great-grandparent',
                                                   ),
                                                   onOpen: (v) =>
                                                       _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add great-grandmom',
+                                                  showAddLabel: 'Add great-grandparent',
                                                 ),
                                               ),
                                               const SizedBox(width: 10),
@@ -824,11 +824,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kPaternalGgf,
-                                                    title: 'Paternal Great-Granddad',
+                                                    title: ' Great-grandparent',
                                                   ),
                                                   onOpen: (v) =>
                                                       _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add great-granddad',
+                                                  showAddLabel: 'Add great-grandparent',
                                                 ),
                                               ),
                                             ],
@@ -852,7 +852,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                     children: [
                                       Expanded(
                                         child: _GroupCard(
-                                          title: 'Maternal Grandparents',
+                                          title: ' Grandparents',
                                           child: Row(
                                             children: [
                                               Expanded(
@@ -864,11 +864,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kMaternalGm,
-                                                    title: 'Maternal Grandmom',
+                                                    title: 'Grandparent',
                                                   ),
                                                   onOpen: (v) =>
                                                       _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add grandmom',
+                                                  showAddLabel: 'Add grandparent',
                                                 ),
                                               ),
                                               const SizedBox(width: 10),
@@ -881,11 +881,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kMaternalGf,
-                                                    title: 'Maternal Granddad',
+                                                    title: 'Grand-parent',
                                                   ),
                                                   onOpen: (v) =>
                                                       _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add granddad',
+                                                  showAddLabel: 'Add grandparent',
                                                 ),
                                               ),
                                             ],
@@ -895,7 +895,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: _GroupCard(
-                                          title: 'Paternal Grandparents',
+                                          title: ' Grandparents',
                                           child: Row(
                                             children: [
                                               Expanded(
@@ -907,11 +907,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kPaternalGm,
-                                                    title: 'Paternal Grandmom',
+                                                    title: 'Grandparent',
                                                   ),
                                                   onOpen: (v) =>
                                                       _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add grandmom',
+                                                  showAddLabel: 'Add grandparent',
                                                 ),
                                               ),
                                               const SizedBox(width: 10),
@@ -924,11 +924,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           .toString()],
                                                   onInvite: () => _createInvite(
                                                     slotKey: kPaternalGf,
-                                                    title: 'Paternal Granddad',
+                                                    title: ' grandparent',
                                                   ),
                                                   onOpen: (v) =>
                                                       _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add granddad',
+                                                  showAddLabel: 'Add grandparent',
                                                 ),
                                               ),
                                             ],
@@ -954,9 +954,9 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               (slotVault[kMother]?['id'] ?? '')
                                                   .toString()],
                                           onInvite: () =>
-                                              _createInvite(slotKey: kMother, title: 'Mom'),
+                                              _createInvite(slotKey: kMother, title: 'Parent'),
                                           onOpen: (v) => _openVaultFromTree(data, v),
-                                          showAddLabel: 'Add mom',
+                                          showAddLabel: 'Add parent',
                                         ),
                                       ),
                                       const SizedBox(width: 14),
@@ -969,9 +969,9 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               (slotVault[kFather]?['id'] ?? '')
                                                   .toString()],
                                           onInvite: () =>
-                                              _createInvite(slotKey: kFather, title: 'Dad'),
+                                              _createInvite(slotKey: kFather, title: 'Parent'),
                                           onOpen: (v) => _openVaultFromTree(data, v),
-                                          showAddLabel: 'Add dad',
+                                          showAddLabel: 'Add parent',
                                         ),
                                       ),
                                     ],

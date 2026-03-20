@@ -448,6 +448,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     );
   }
 
+  // ✅ FIX #1: removed weird "Text + Photos + Voice" line entirely
   Widget _vaultAvatarHeader() {
     final name = (_displayName ?? _vaultName).trim().isNotEmpty ? (_displayName ?? _vaultName).trim() : 'Your vault';
     final hasAvatar = _avatarUrl != null && _avatarUrl!.trim().isNotEmpty;
@@ -474,25 +475,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 4),
-                Text(
-                  'Text + Photos + Voice',
-                  style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.60)),
-                ),
                 const SizedBox(height: 10),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    SizedBox(
-                      height: 40,
-                      child: OutlinedButton.icon(
-                        onPressed: _openAskAI,
-                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                        label: const Text('Ask (AI)'),
-                      ),
-                    ),
-                  ],
+                SizedBox(
+                  height: 40,
+                  child: OutlinedButton.icon(
+                    onPressed: _openAskAI,
+                    icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                    label: const Text('Ask (AI)'),
+                  ),
                 ),
               ],
             ),
@@ -514,18 +504,34 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   String _featuredPrefix(String userId) => '$userId/${widget.vaultId}/featured';
   int get _highlightsCount => _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
 
+  // ✅ FIX #2: continuous random carousel (shuffle on loop)
   void _setupAutoSlide() {
     _autoSlideTimer?.cancel();
     final n = _highlightsCount;
     if (n <= 1) return;
 
     _highlightIndex = 0;
+
     _autoSlideTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
       final nn = _highlightsCount;
       if (nn <= 1) return;
 
-      _highlightIndex = (_highlightIndex + 1) % nn;
+      final next = (_highlightIndex + 1) % nn;
+
+      // reshuffle when loop completes
+      if (next == 0) {
+        setState(() {
+          _featuredPhotos.shuffle();
+          _highlightIndex = 0;
+        });
+        if (_highlightController.hasClients) {
+          _highlightController.jumpToPage(0);
+        }
+        return;
+      }
+
+      _highlightIndex = next;
       _highlightController.animateToPage(
         _highlightIndex,
         duration: const Duration(milliseconds: 450),
@@ -566,12 +572,20 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         items.add({'path': fullPath, 'url': url});
       }
 
+      // ✅ random order every load
+      items.shuffle();
+
       if (!mounted) return;
 
       setState(() {
         _featuredPhotos = items;
         _loadingPhotos = false;
+        _highlightIndex = 0;
       });
+
+      if (_highlightController.hasClients) {
+        _highlightController.jumpToPage(0);
+      }
 
       _setupAutoSlide();
     } catch (e) {
@@ -684,7 +698,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             final path = _featuredPhotos[i]['path'] ?? '';
                             return Stack(
                               children: [
-                                Positioned.fill(child: Image.network(url, fit: BoxFit.cover)),
+                                Positioned.fill(
+                                  child: Image.network(
+                                    url,
+                                    fit: BoxFit.cover,
+                                    alignment: Alignment.center,
+                                    gaplessPlayback: true,
+                                  ),
+                                ),
                                 Positioned(
                                   top: 10,
                                   right: 10,
@@ -752,7 +773,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     );
   }
 
+  // ✅ FIX #3: bigger + no squish (fixed height + BoxFit.cover)
   Widget _featuredPhotosSection() {
+    const double previewHeight = 264; // ~1.2x from 220
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -805,8 +829,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               onTap: _openHighlightsGallery,
               child: Column(
                 children: [
-                  AspectRatio(
-                    aspectRatio: 16 / 9,
+                  SizedBox(
+                    height: previewHeight,
+                    width: double.infinity,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
                       child: PageView.builder(
@@ -818,7 +843,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                           final path = _featuredPhotos[i]['path'] ?? '';
                           return Stack(
                             children: [
-                              Positioned.fill(child: Image.network(url, fit: BoxFit.cover, gaplessPlayback: true)),
+                              Positioned.fill(
+                                child: Image.network(
+                                  url,
+                                  fit: BoxFit.cover,
+                                  alignment: Alignment.center,
+                                  gaplessPlayback: true,
+                                ),
+                              ),
                               Positioned(
                                 top: 10,
                                 right: 10,
@@ -834,8 +866,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                               const Positioned(
                                 left: 12,
                                 bottom: 12,
-                                child: Text('Tap to view all',
-                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                                child: Text(
+                                  'Tap to view all',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                ),
                               ),
                             ],
                           );
@@ -855,7 +889,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   /* =========================
      CORE VOICE NOTE
-     Table: vault_core_voice_note (one row per vault)
   ========================== */
 
   String _voicePrefix(String userId) => '$userId/${widget.vaultId}/voice';
@@ -1304,7 +1337,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             final p = photos[i];
                             return Stack(
                               children: [
-                                Positioned.fill(child: Image.network(p.url, fit: BoxFit.cover)),
+                                Positioned.fill(
+                                  child: Image.network(
+                                    p.url,
+                                    fit: BoxFit.cover,
+                                    alignment: Alignment.center,
+                                    gaplessPlayback: true,
+                                  ),
+                                ),
                                 Positioned(
                                   top: 10,
                                   right: 10,
@@ -1443,7 +1483,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   /* =========================
      MEMORY VOICE NOTES
-     Table: memory_voice_notes (many per memory)
   ========================== */
 
   String _memoryVoicePrefix(String userId, String memoryId) => '$userId/${widget.vaultId}/memories/$memoryId/voice';
@@ -1503,155 +1542,137 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
- Future<void> _uploadMemoryVoice(String memoryId) async {
-  try {
-    final userId = _client.auth.currentUser?.id;
-    if (userId == null) throw Exception('Not signed in');
+  Future<void> _uploadMemoryVoice(String memoryId) async {
+    try {
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) throw Exception('Not signed in');
 
-    final picked = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'webm'],
-      withData: true,
-    );
-    if (picked == null || picked.files.isEmpty) return;
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['m4a', 'mp3', 'wav', 'aac', 'ogg', 'webm'],
+        withData: true,
+      );
+      if (picked == null || picked.files.isEmpty) return;
 
-    final file = picked.files.first;
-    final bytes = file.bytes;
-    if (bytes == null) throw Exception('No file bytes received');
+      final file = picked.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) throw Exception('No file bytes received');
 
-    final ext = _extFromName(file.name);
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.$ext';
+      final ext = _extFromName(file.name);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.$ext';
 
-    // 1) upload audio
-    await _client.storage.from(_memoryVoiceBucket).uploadBinary(
-          path,
-          bytes,
-          fileOptions: FileOptions(upsert: false, contentType: _contentTypeFromExt(ext)),
-        );
+      await _client.storage.from(_memoryVoiceBucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(upsert: false, contentType: _contentTypeFromExt(ext)),
+          );
 
-    // 2) insert DB row + fetch id
-    final inserted = await _client
-        .from('memory_voice_notes')
-        .insert({
-          'vault_id': widget.vaultId,
-          'memory_id': memoryId,
-          'path': path,
-          'title': file.name,
-        })
-        .select('id')
-        .maybeSingle();
+      final inserted = await _client
+          .from('memory_voice_notes')
+          .insert({
+            'vault_id': widget.vaultId,
+            'memory_id': memoryId,
+            'path': path,
+            'title': file.name,
+          })
+          .select('id')
+          .maybeSingle();
 
-    final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
+      final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
 
-    // 3) call Edge Function to transcribe + index
-    if (memoryVoiceNoteId.isNotEmpty) {
-      final token = _client.auth.currentSession?.accessToken?.trim();
-      if (token == null || token.isEmpty) {
-        throw Exception('Missing session token. Please sign in again.');
-      }
-
-   
-if (token == null || token.isEmpty) {
-  throw Exception('Missing session token. Please sign in again.');
-}
-
-final res = await _client.functions.invoke(
-  'index_voice_note',
-  headers: {
-    'Authorization': 'Bearer $token',
-    'authorization': 'Bearer $token',
-  },
-  body: {
-    'vault_id': widget.vaultId,
-    // ✅ function expects THIS key
-    'memory_voice_note_id': memoryVoiceNoteId,
-  },
-);
-
-if (res.status != 200) {
-  throw Exception('index_voice_note failed: HTTP ${res.status}: ${res.data}');
-}
-    }
-
-    await _loadMemoryVoiceForVault();
-    _toast('Voice added to memory.');
-  } catch (e) {
-    _toast('Add voice failed: $e');
-  }
-}
-
- Future<void> _recordMemoryVoice(String memoryId) async {
-  await _openRecordDialog(
-    title: 'Record memory voice',
-    subtitle: 'Add a voice note that belongs to this memory.',
-    onSave: (rec) async {
-      try {
-        final userId = _client.auth.currentUser?.id;
-        if (userId == null) throw Exception('Not signed in');
-
-        final ts = DateTime.now().millisecondsSinceEpoch;
-        final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.${rec.extension}';
-
-        // 1) upload audio
-        await _client.storage.from(_memoryVoiceBucket).uploadBinary(
-              path,
-              Uint8List.fromList(rec.bytes),
-              fileOptions: FileOptions(upsert: false, contentType: rec.mimeType),
-            );
-
-        // 2) insert DB row + fetch id
-        final inserted = await _client
-            .from('memory_voice_notes')
-            .insert({
-              'vault_id': widget.vaultId,
-              'memory_id': memoryId,
-              'path': path,
-              'title': 'Recorded $ts.${rec.extension}',
-            })
-            .select('id')
-            .maybeSingle();
-
-        final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
-
-        // 3) call Edge Function to transcribe + index
-        if (memoryVoiceNoteId.isNotEmpty) {
-          final token = _client.auth.currentSession?.accessToken?.trim();
-          if (token == null || token.isEmpty) {
-            throw Exception('Missing session token. Please sign in again.');
-          }
-
-         
-if (token == null || token.isEmpty) {
-  throw Exception('Missing session token. Please sign in again.');
-}
-
-final res = await _client.functions.invoke(
-  'index_voice_note',
-  headers: {
-    'Authorization': 'Bearer $token',
-    'authorization': 'Bearer $token',
-  },
-  body: {
-    'vault_id': widget.vaultId,
-    // ✅ function expects THIS key
-    'memory_voice_note_id': memoryVoiceNoteId,
-  },
-);
-
-if (res.status != 200) {
-  throw Exception('index_voice_note failed: HTTP ${res.status}: ${res.data}');
-}
+      if (memoryVoiceNoteId.isNotEmpty) {
+        final token = _client.auth.currentSession?.accessToken?.trim();
+        if (token == null || token.isEmpty) {
+          throw Exception('Missing session token. Please sign in again.');
         }
 
-        await _loadMemoryVoiceForVault();
-        _toast('Voice added to memory.');
-      } catch (e) {
-        _toast('Add voice failed: $e');
+        final res = await _client.functions.invoke(
+          'index_voice_note',
+          headers: {
+            'Authorization': 'Bearer $token',
+            'authorization': 'Bearer $token',
+          },
+          body: {
+            'vault_id': widget.vaultId,
+            'memory_voice_note_id': memoryVoiceNoteId,
+          },
+        );
+
+        if (res.status != 200) {
+          throw Exception('index_voice_note failed: HTTP ${res.status}: ${res.data}');
+        }
       }
-    },
-  );
-}
+
+      await _loadMemoryVoiceForVault();
+      _toast('Voice added to memory.');
+    } catch (e) {
+      _toast('Add voice failed: $e');
+    }
+  }
+
+  Future<void> _recordMemoryVoice(String memoryId) async {
+    await _openRecordDialog(
+      title: 'Record memory voice',
+      subtitle: 'Add a voice note that belongs to this memory.',
+      onSave: (rec) async {
+        try {
+          final userId = _client.auth.currentUser?.id;
+          if (userId == null) throw Exception('Not signed in');
+
+          final ts = DateTime.now().millisecondsSinceEpoch;
+          final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.${rec.extension}';
+
+          await _client.storage.from(_memoryVoiceBucket).uploadBinary(
+                path,
+                Uint8List.fromList(rec.bytes),
+                fileOptions: FileOptions(upsert: false, contentType: rec.mimeType),
+              );
+
+          final inserted = await _client
+              .from('memory_voice_notes')
+              .insert({
+                'vault_id': widget.vaultId,
+                'memory_id': memoryId,
+                'path': path,
+                'title': 'Recorded $ts.${rec.extension}',
+              })
+              .select('id')
+              .maybeSingle();
+
+          final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
+
+          if (memoryVoiceNoteId.isNotEmpty) {
+            final token = _client.auth.currentSession?.accessToken?.trim();
+            if (token == null || token.isEmpty) {
+              throw Exception('Missing session token. Please sign in again.');
+            }
+
+            final res = await _client.functions.invoke(
+              'index_voice_note',
+              headers: {
+                'Authorization': 'Bearer $token',
+                'authorization': 'Bearer $token',
+              },
+              body: {
+                'vault_id': widget.vaultId,
+                'memory_voice_note_id': memoryVoiceNoteId,
+              },
+            );
+
+            if (res.status != 200) {
+              throw Exception('index_voice_note failed: HTTP ${res.status}: ${res.data}');
+            }
+          }
+
+          await _loadMemoryVoiceForVault();
+          _toast('Voice added to memory.');
+        } catch (e) {
+          _toast('Add voice failed: $e');
+        }
+      },
+    );
+  }
 
   Future<void> _deleteMemoryVoice(String memoryId, _VoiceNote v) async {
     final ok = await showDialog<bool>(
@@ -1713,10 +1734,12 @@ if (res.status != 200) {
                 Row(
                   children: [
                     Expanded(
-                      child: Text('Voice notes • $prompt',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis),
+                      child: Text(
+                        'Voice notes • $prompt',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                     IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
                   ],
@@ -1890,7 +1913,6 @@ if (res.status != 200) {
     });
 
     try {
-      // If session is missing, show a real error instead of hanging forever.
       final session = _client.auth.currentSession;
       if (session == null) {
         throw Exception('No active session. Please sign in again.');
@@ -1901,7 +1923,7 @@ if (res.status != 200) {
           .select('id, vault_id, life_stage, prompt_text, body, created_at')
           .eq('vault_id', widget.vaultId)
           .order('created_at', ascending: false)
-          .timeout(const Duration(seconds: 12)); // ✅ prevents infinite spinner
+          .timeout(const Duration(seconds: 12));
 
       if (!mounted) return;
 
@@ -1909,7 +1931,6 @@ if (res.status != 200) {
         _memories = List<Map<String, dynamic>>.from(data);
       });
 
-      // These load “extras” and should not block the whole screen
       unawaited(_loadMemoryPhotosForVault());
       unawaited(_loadMemoryVoiceForVault());
     } on TimeoutException {
@@ -1929,7 +1950,7 @@ if (res.status != 200) {
       });
     } finally {
       if (!mounted) return;
-      setState(() => _loading = false); // ✅ always stops spinner
+      setState(() => _loading = false);
     }
   }
 
@@ -1944,7 +1965,6 @@ if (res.status != 200) {
     if (saved == true) {
       await _loadMemories();
       _toast('Memory saved.');
-      // indexing happens inside CreateMemoryScreen
     }
   }
 
@@ -2039,7 +2059,6 @@ if (res.status != 200) {
     try {
       await _client.from('memories').update({'prompt_text': newPromptText, 'body': newBody}).eq('id', memoryId);
 
-      // ✅ re-index after edit (Edge Function only)
       await IndexingService.indexMemory(vaultId: widget.vaultId, memoryId: memoryId);
 
       await _loadMemories();
