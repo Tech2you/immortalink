@@ -318,10 +318,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           const Spacer(),
-                          Text(
-                            mmss(seconds),
-                            style: TextStyle(color: Colors.black.withOpacity(0.65)),
-                          ),
+                          Text(mmss(seconds), style: TextStyle(color: Colors.black.withOpacity(0.65))),
                         ],
                       ),
                     ),
@@ -339,10 +336,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      'Tip: speak naturally.',
-                      style: TextStyle(color: Colors.black.withOpacity(0.55), fontSize: 12),
-                    ),
+                    Text('Tip: speak naturally.', style: TextStyle(color: Colors.black.withOpacity(0.55), fontSize: 12)),
                   ],
                 ),
               ),
@@ -448,7 +442,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     );
   }
 
-  // ✅ FIX #1: removed weird "Text + Photos + Voice" line entirely
   Widget _vaultAvatarHeader() {
     final name = (_displayName ?? _vaultName).trim().isNotEmpty ? (_displayName ?? _vaultName).trim() : 'Your vault';
     final hasAvatar = _avatarUrl != null && _avatarUrl!.trim().isNotEmpty;
@@ -504,7 +497,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   String _featuredPrefix(String userId) => '$userId/${widget.vaultId}/featured';
   int get _highlightsCount => _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
 
-  // ✅ FIX #2: continuous random carousel (shuffle on loop)
+  // keep simple autoslide (guard controller)
   void _setupAutoSlide() {
     _autoSlideTimer?.cancel();
     final n = _highlightsCount;
@@ -514,24 +507,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
     _autoSlideTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
+      if (!_highlightController.hasClients) return;
+
       final nn = _highlightsCount;
       if (nn <= 1) return;
 
-      final next = (_highlightIndex + 1) % nn;
-
-      // reshuffle when loop completes
-      if (next == 0) {
-        setState(() {
-          _featuredPhotos.shuffle();
-          _highlightIndex = 0;
-        });
-        if (_highlightController.hasClients) {
-          _highlightController.jumpToPage(0);
-        }
-        return;
-      }
-
-      _highlightIndex = next;
+      _highlightIndex = (_highlightIndex + 1) % nn;
       _highlightController.animateToPage(
         _highlightIndex,
         duration: const Duration(milliseconds: 450),
@@ -571,9 +552,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
         items.add({'path': fullPath, 'url': url});
       }
-
-      // ✅ random order every load
-      items.shuffle();
 
       if (!mounted) return;
 
@@ -657,6 +635,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
+  // ✅ FIX: dialog overflow + no zoom/crop
   void _openHighlightsGallery() {
     if (_featuredPhotos.isEmpty) return;
 
@@ -666,85 +645,96 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         final pc = PageController();
         int idx = 0;
 
+        final maxH = MediaQuery.of(ctx).size.height * 0.85;
+        final maxW = MediaQuery.of(ctx).size.width * 0.95;
+
         return StatefulBuilder(
           builder: (ctx, setInner) {
             final total = _featuredPhotos.length;
 
             return Dialog(
               insetPadding: const EdgeInsets.all(16),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        const Text('All photos', style: TextStyle(fontWeight: FontWeight.w800)),
-                        const Spacer(),
-                        IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: PageView.builder(
-                          controller: pc,
-                          itemCount: total,
-                          onPageChanged: (v) => setInner(() => idx = v),
-                          itemBuilder: (_, i) {
-                            final url = _featuredPhotos[i]['url'] ?? '';
-                            final path = _featuredPhotos[i]['path'] ?? '';
-                            return Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: Image.network(
-                                    url,
-                                    fit: BoxFit.cover,
-                                    alignment: Alignment.center,
-                                    gaplessPlayback: true,
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 10,
-                                  right: 10,
-                                  child: InkWell(
-                                    onTap: () async {
-                                      if (path.trim().isEmpty) return;
-                                      await _deleteFeaturedPhoto(path);
-                                      if (!ctx.mounted) return;
-                                      Navigator.pop(ctx);
-                                    },
-                                    child: CircleAvatar(
-                                      radius: 16,
-                                      backgroundColor: Colors.black.withOpacity(0.55),
-                                      child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxH, maxWidth: maxW),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Text('All photos', style: TextStyle(fontWeight: FontWeight.w800)),
+                          const Spacer(),
+                          IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
-                        const Spacer(),
-                        SizedBox(
-                          height: 40,
-                          child: OutlinedButton.icon(
-                            onPressed: _uploadingPhoto ? null : _uploadFeaturedPhoto,
-                            icon: const Icon(Icons.add_photo_alternate_outlined),
-                            label: Text(_uploadingPhoto ? 'Uploading…' : 'Add'),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            color: Colors.black,
+                            child: PageView.builder(
+                              controller: pc,
+                              itemCount: total,
+                              onPageChanged: (v) => setInner(() => idx = v),
+                              itemBuilder: (_, i) {
+                                final url = _featuredPhotos[i]['url'] ?? '';
+                                final path = _featuredPhotos[i]['path'] ?? '';
+                                return Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: InteractiveViewer(
+                                        minScale: 1,
+                                        maxScale: 4,
+                                        child: Image.network(
+                                          url,
+                                          fit: BoxFit.contain, // ✅ no crop
+                                          alignment: Alignment.center,
+                                          gaplessPlayback: true,
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      top: 10,
+                                      right: 10,
+                                      child: InkWell(
+                                        onTap: () async {
+                                          if (path.trim().isEmpty) return;
+                                          await _deleteFeaturedPhoto(path);
+                                          if (!ctx.mounted) return;
+                                          Navigator.pop(ctx);
+                                        },
+                                        child: CircleAvatar(
+                                          radius: 16,
+                                          backgroundColor: Colors.black.withOpacity(0.55),
+                                          child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
                           ),
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                          const Spacer(),
+                          SizedBox(
+                            height: 40,
+                            child: OutlinedButton.icon(
+                              onPressed: _uploadingPhoto ? null : _uploadFeaturedPhoto,
+                              icon: const Icon(Icons.add_photo_alternate_outlined),
+                              label: Text(_uploadingPhoto ? 'Uploading…' : 'Add'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -773,9 +763,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     );
   }
 
-  // ✅ FIX #3: bigger + no squish (fixed height + BoxFit.cover)
+  // ✅ FIX: no zoom/crop in carousel (contain + black bg)
   Widget _featuredPhotosSection() {
-    const double previewHeight = 264; // ~1.2x from 220
+    const double previewHeight = 264;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -834,46 +824,49 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     width: double.infinity,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: PageView.builder(
-                        controller: _highlightController,
-                        itemCount: _highlightsCount,
-                        onPageChanged: (i) => setState(() => _highlightIndex = i),
-                        itemBuilder: (_, i) {
-                          final url = _featuredPhotos[i]['url'] ?? '';
-                          final path = _featuredPhotos[i]['path'] ?? '';
-                          return Stack(
-                            children: [
-                              Positioned.fill(
-                                child: Image.network(
-                                  url,
-                                  fit: BoxFit.cover,
-                                  alignment: Alignment.center,
-                                  gaplessPlayback: true,
-                                ),
-                              ),
-                              Positioned(
-                                top: 10,
-                                right: 10,
-                                child: InkWell(
-                                  onTap: () => _deleteFeaturedPhoto(path),
-                                  child: CircleAvatar(
-                                    radius: 16,
-                                    backgroundColor: Colors.black.withOpacity(0.55),
-                                    child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
+                      child: Container(
+                        color: Colors.black, // ✅ helps “contain” look clean
+                        child: PageView.builder(
+                          controller: _highlightController,
+                          itemCount: _highlightsCount,
+                          onPageChanged: (i) => setState(() => _highlightIndex = i),
+                          itemBuilder: (_, i) {
+                            final url = _featuredPhotos[i]['url'] ?? '';
+                            final path = _featuredPhotos[i]['path'] ?? '';
+                            return Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: Image.network(
+                                    url,
+                                    fit: BoxFit.contain, // ✅ no crop/zoom
+                                    alignment: Alignment.center,
+                                    gaplessPlayback: true,
                                   ),
                                 ),
-                              ),
-                              const Positioned(
-                                left: 12,
-                                bottom: 12,
-                                child: Text(
-                                  'Tap to view all',
-                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                Positioned(
+                                  top: 10,
+                                  right: 10,
+                                  child: InkWell(
+                                    onTap: () => _deleteFeaturedPhoto(path),
+                                    child: CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor: Colors.black.withOpacity(0.55),
+                                      child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          );
-                        },
+                                const Positioned(
+                                  left: 12,
+                                  bottom: 12,
+                                  child: Text(
+                                    'Tap to view all',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ),
@@ -888,7 +881,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   /* =========================
-     CORE VOICE NOTE
+     ABOUT ME (Core voice note table stays the same)
   ========================== */
 
   String _voicePrefix(String userId) => '$userId/${widget.vaultId}/voice';
@@ -936,7 +929,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         _coreVoice = _VoiceNote(
           id: id,
           path: path,
-          title: title.isEmpty ? 'Core message' : title,
+          title: title.isEmpty ? 'About me voice note' : title,
           url: url,
           createdAt: createdAt,
         );
@@ -980,12 +973,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           );
 
       await _client.from('vault_core_voice_note').upsert(
-        {'vault_id': widget.vaultId, 'path': path, 'title': 'Core message'},
+        {'vault_id': widget.vaultId, 'path': path, 'title': 'About me voice note'},
         onConflict: 'vault_id',
       );
 
       await _loadCoreVoice();
-      _toast('Core voice note saved.');
+      _toast('Saved.');
     } catch (e) {
       _toast('Save failed: $e');
     } finally {
@@ -995,8 +988,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   Future<void> _recordCoreVoice() async {
     await _openRecordDialog(
-      title: 'Record your core message',
-      subtitle: 'If they only hear one thing — what should they know about you?',
+      title: 'Record “About me” voice',
+      subtitle: 'Optional: share a quick intro, fun fact, moral code, or biggest achievement.',
       onSave: (rec) async {
         setState(() => _savingCoreVoice = true);
 
@@ -1013,13 +1006,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             );
 
         await _client.from('vault_core_voice_note').upsert(
-          {'vault_id': widget.vaultId, 'path': path, 'title': 'Core message'},
+          {'vault_id': widget.vaultId, 'path': path, 'title': 'About me voice note'},
           onConflict: 'vault_id',
         );
 
         await _loadCoreVoice();
         if (mounted) setState(() => _savingCoreVoice = false);
-        _toast('Core voice note saved.');
+        _toast('Saved.');
       },
     );
   }
@@ -1031,8 +1024,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete core message?'),
-        content: const Text('This will permanently delete your core voice note.'),
+        title: const Text('Delete voice note?'),
+        content: const Text('This will permanently delete this voice note.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
@@ -1050,7 +1043,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _client.storage.from(_voiceBucket).remove([v.path]);
       await _client.from('vault_core_voice_note').delete().eq('vault_id', widget.vaultId);
       await _loadCoreVoice();
-      _toast('Core voice note deleted.');
+      _toast('Deleted.');
     } catch (e) {
       _toast('Delete failed: $e');
     }
@@ -1061,9 +1054,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (v == null) return;
 
     final newTitle = await _promptRename(
-      title: 'Rename core message',
+      title: 'Rename voice note',
       initial: v.title,
-      hint: 'Core message title',
+      hint: 'Voice note title',
     );
     if (newTitle == null || newTitle.isEmpty) return;
 
@@ -1126,13 +1119,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(tooltip: 'Rename', icon: const Icon(Icons.edit_outlined), onPressed: onRename),
-            IconButton(tooltip: 'Delete voice note', icon: const Icon(Icons.delete_outline), onPressed: onDelete),
+            IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline), onPressed: onDelete),
           ],
         ),
       ),
     );
   }
 
+  // ✅ renamed section only (logic unchanged)
   Widget _coreVoiceSection() {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1147,14 +1141,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         children: [
           Row(
             children: [
-              const Text('Core voice note', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Text('About me', style: TextStyle(fontWeight: FontWeight.w800)),
               const Spacer(),
               SizedBox(
                 height: 40,
                 child: OutlinedButton.icon(
                   onPressed: _savingCoreVoice ? null : _uploadCoreVoiceFile,
                   icon: const Icon(Icons.file_upload_outlined),
-                  label: Text(_savingCoreVoice ? 'Saving…' : 'Upload'),
+                  label: Text(_savingCoreVoice ? 'Saving…' : 'Upload VN'),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1163,23 +1157,23 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 child: OutlinedButton.icon(
                   onPressed: (_savingCoreVoice || !_recorder.isSupported) ? null : _recordCoreVoice,
                   icon: const Icon(Icons.mic_none),
-                  label: const Text('Record'),
+                  label: const Text('Record VN'),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 6),
           Text(
-            'If they only look at one thing — this is what you want your family to know about you.',
+            'Optional: add quick details (height, eye colour, birthdate, fun fact) + a short voice intro.',
             style: TextStyle(color: Colors.black.withOpacity(0.65)),
           ),
           const SizedBox(height: 10),
           if (_loadingCoreVoice)
             const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
           else if (_coreVoiceError != null)
-            Text('Core voice load issue (MVP): $_coreVoiceError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text('About me load issue (MVP): $_coreVoiceError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else if (_coreVoice == null)
-            Text('No core message yet. Record a short 30–90s clip.', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text('No voice yet. Record a short 20–60s intro.', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else
             _voiceTile(_coreVoice!, playKey: 'core:${widget.vaultId}', onDelete: _deleteCoreVoice, onRename: _renameCoreVoice),
         ],
@@ -1296,6 +1290,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
+  // ✅ FIX: no overflow + no crop
   void _openMemoryGallery(String memoryId) {
     final photos = _memoryPhotosById[memoryId] ?? [];
     if (photos.isEmpty) return;
@@ -1306,83 +1301,94 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         final pc = PageController();
         int idx = 0;
 
+        final maxH = MediaQuery.of(ctx).size.height * 0.85;
+        final maxW = MediaQuery.of(ctx).size.width * 0.95;
+
         return StatefulBuilder(
           builder: (ctx, setInner) {
             final total = photos.length;
 
             return Dialog(
               insetPadding: const EdgeInsets.all(16),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        const Text('Memory photos', style: TextStyle(fontWeight: FontWeight.w800)),
-                        const Spacer(),
-                        IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: PageView.builder(
-                          controller: pc,
-                          itemCount: total,
-                          onPageChanged: (v) => setInner(() => idx = v),
-                          itemBuilder: (_, i) {
-                            final p = photos[i];
-                            return Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: Image.network(
-                                    p.url,
-                                    fit: BoxFit.cover,
-                                    alignment: Alignment.center,
-                                    gaplessPlayback: true,
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 10,
-                                  right: 10,
-                                  child: InkWell(
-                                    onTap: () async {
-                                      await _deleteMemoryPhoto(p);
-                                      if (!ctx.mounted) return;
-                                      Navigator.pop(ctx);
-                                    },
-                                    child: CircleAvatar(
-                                      radius: 16,
-                                      backgroundColor: Colors.black.withOpacity(0.55),
-                                      child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxH, maxWidth: maxW),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Text('Memory photos', style: TextStyle(fontWeight: FontWeight.w800)),
+                          const Spacer(),
+                          IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
-                        const Spacer(),
-                        SizedBox(
-                          height: 40,
-                          child: OutlinedButton.icon(
-                            onPressed: () => _uploadMemoryPhoto(memoryId),
-                            icon: const Icon(Icons.add_photo_alternate_outlined),
-                            label: const Text('Add'),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            color: Colors.black,
+                            child: PageView.builder(
+                              controller: pc,
+                              itemCount: total,
+                              onPageChanged: (v) => setInner(() => idx = v),
+                              itemBuilder: (_, i) {
+                                final p = photos[i];
+                                return Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: InteractiveViewer(
+                                        minScale: 1,
+                                        maxScale: 4,
+                                        child: Image.network(
+                                          p.url,
+                                          fit: BoxFit.contain, // ✅ no crop
+                                          alignment: Alignment.center,
+                                          gaplessPlayback: true,
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      top: 10,
+                                      right: 10,
+                                      child: InkWell(
+                                        onTap: () async {
+                                          await _deleteMemoryPhoto(p);
+                                          if (!ctx.mounted) return;
+                                          Navigator.pop(ctx);
+                                        },
+                                        child: CircleAvatar(
+                                          radius: 16,
+                                          backgroundColor: Colors.black.withOpacity(0.55),
+                                          child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
                           ),
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                          const Spacer(),
+                          SizedBox(
+                            height: 40,
+                            child: OutlinedButton.icon(
+                              onPressed: () => _uploadMemoryPhoto(memoryId),
+                              icon: const Icon(Icons.add_photo_alternate_outlined),
+                              label: const Text('Add'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -1406,7 +1412,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (_memoryPhotoError != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text('Photo load issue (MVP): $_memoryPhotoError', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
+        child: Text('Photo load issue (MVP): $_memoryPhotoError',
+            style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
       );
     }
 
@@ -1583,9 +1590,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       if (memoryVoiceNoteId.isNotEmpty) {
         final token = _client.auth.currentSession?.accessToken?.trim();
-        if (token == null || token.isEmpty) {
-          throw Exception('Missing session token. Please sign in again.');
-        }
+        if (token == null || token.isEmpty) throw Exception('Missing session token. Please sign in again.');
 
         final res = await _client.functions.invoke(
           'index_voice_note',
@@ -1593,10 +1598,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             'Authorization': 'Bearer $token',
             'authorization': 'Bearer $token',
           },
-          body: {
-            'vault_id': widget.vaultId,
-            'memory_voice_note_id': memoryVoiceNoteId,
-          },
+          body: {'vault_id': widget.vaultId, 'memory_voice_note_id': memoryVoiceNoteId},
         );
 
         if (res.status != 200) {
@@ -1644,9 +1646,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
           if (memoryVoiceNoteId.isNotEmpty) {
             final token = _client.auth.currentSession?.accessToken?.trim();
-            if (token == null || token.isEmpty) {
-              throw Exception('Missing session token. Please sign in again.');
-            }
+            if (token == null || token.isEmpty) throw Exception('Missing session token. Please sign in again.');
 
             final res = await _client.functions.invoke(
               'index_voice_note',
@@ -1654,10 +1654,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 'Authorization': 'Bearer $token',
                 'authorization': 'Bearer $token',
               },
-              body: {
-                'vault_id': widget.vaultId,
-                'memory_voice_note_id': memoryVoiceNoteId,
-              },
+              body: {'vault_id': widget.vaultId, 'memory_voice_note_id': memoryVoiceNoteId},
             );
 
             if (res.status != 200) {
@@ -1761,7 +1758,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         child: ListTile(
                           dense: true,
                           leading: IconButton(
-                            icon: Icon((_playingKey == 'mem:${v.id}' && _isPlaying) ? Icons.pause_circle_outline : Icons.play_circle_outline),
+                            icon: Icon((_playingKey == 'mem:${v.id}' && _isPlaying)
+                                ? Icons.pause_circle_outline
+                                : Icons.play_circle_outline),
                             onPressed: () => _togglePlay(v, playKey: 'mem:${v.id}'),
                           ),
                           title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -1822,7 +1821,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     if (_memoryVoiceError != null) {
       return Padding(
         padding: const EdgeInsets.only(top: 8),
-        child: Text('Voice load issue (MVP): $_memoryVoiceError', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
+        child: Text('Voice load issue (MVP): $_memoryVoiceError',
+            style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
       );
     }
 
@@ -1880,7 +1880,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   child: ListTile(
                     dense: true,
                     leading: IconButton(
-                      icon: Icon((_playingKey == 'mem:${v.id}' && _isPlaying) ? Icons.pause_circle_outline : Icons.play_circle_outline),
+                      icon: Icon((_playingKey == 'mem:${v.id}' && _isPlaying)
+                          ? Icons.pause_circle_outline
+                          : Icons.play_circle_outline),
                       onPressed: () => _togglePlay(v, playKey: 'mem:${v.id}'),
                     ),
                     title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -1935,19 +1937,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       unawaited(_loadMemoryVoiceForVault());
     } on TimeoutException {
       if (!mounted) return;
-      setState(() {
-        _error = 'Timed out loading memories. Check internet / Supabase URL / auth.';
-      });
+      setState(() => _error = 'Timed out loading memories. Check internet / Supabase URL / auth.');
     } on PostgrestException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = 'Postgrest: ${e.message}';
-      });
+      setState(() => _error = 'Postgrest: ${e.message}');
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-      });
+      setState(() => _error = e.toString());
     } finally {
       if (!mounted) return;
       setState(() => _loading = false);
