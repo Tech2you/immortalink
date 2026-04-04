@@ -62,6 +62,9 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   String? _memoryVoiceError;
   final Map<String, List<_VoiceNote>> _memoryVoiceById = {};
 
+  // Debug: surfaces Storage/RLS failures
+  String? _storageErrorHint;
+
   final AudioPlayer _player = AudioPlayer();
   String? _playingKey;
   bool _isPlaying = false;
@@ -100,7 +103,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       final signed = await _client.storage.from(bucket).createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
-    } catch (_) {
+    } catch (e) {
+      // NOTE: Storage policies/RLS failures show up here.
+      // Keep it lightweight but leave a breadcrumb for debugging.
+      _storageErrorHint = 'Signed URL failed for bucket="$bucket" path="$path" → $e';
       return null;
     }
   }
@@ -109,7 +115,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     try {
       final signed = await _client.storage.from(_avatarBucket).createSignedUrl(path, 60 * 60);
       return '$signed&t=${DateTime.now().millisecondsSinceEpoch}';
-    } catch (_) {
+    } catch (e) {
+      _storageErrorHint = 'Signed avatar URL failed for path="$path" → $e';
       return null;
     }
   }
@@ -225,7 +232,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
         final fullPath = '$prefix/$name';
         final url = await _signedUrl(_featuredPhotosBucket, fullPath);
-        if (url == null || url.trim().isEmpty) continue;
+        if (url == null || url.trim().isEmpty) {
+          _highlightsError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_featuredPhotosBucket".';
+          continue;
+        }
 
         items.add({'path': fullPath, 'url': url});
       }
@@ -478,7 +488,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       final url = await _signedUrl(_voiceBucket, path);
       if (url == null || url.trim().isEmpty) {
         if (!mounted) return;
-        setState(() => _loadingCoreVoice = false);
+        setState(() {
+          _loadingCoreVoice = false;
+          _coreVoiceError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_voiceBucket".';
+        });
         return;
       }
 
@@ -530,7 +543,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
 
         final url = await _signedUrl(_memoryPhotosBucket, path);
-        if (url == null || url.trim().isEmpty) return null;
+        if (url == null || url.trim().isEmpty) {
+          _memoryPhotoError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_memoryPhotosBucket".';
+          return null;
+        }
 
         return _MemPhoto(id: id, memoryId: memoryId, path: path, url: url);
       }).toList();
@@ -583,7 +599,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
 
         final url = await _signedUrl(_memoryVoiceBucket, path);
-        if (url == null || url.trim().isEmpty) continue;
+        if (url == null || url.trim().isEmpty) {
+          _memoryVoiceError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_memoryVoiceBucket".';
+          continue;
+        }
 
         _memoryVoiceById.putIfAbsent(memoryId, () => []).add(
               _VoiceNote(
@@ -755,10 +774,263 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     );
   }
 
-  // (these two are unchanged except fit tweaks are already above)
-  void _openMemoryGallery(String memoryId) {/* left as-is in your version */ }
-  Widget _memoryPhotoStrip(String memoryId) {/* left as-is in your version */ return const SizedBox.shrink(); }
-  Widget _memoryVoiceStrip(String memoryId) {/* left as-is in your version */ return const SizedBox.shrink(); }
+  // =========================
+  // Memory detail (photos + voice)
+  // =========================
+
+  void _openMemoryDetail(Map<String, dynamic> m) {
+    final memoryId = (m['id'] ?? '').toString();
+    final prompt = (m['prompt_text'] ?? '').toString();
+    final body = (m['body'] ?? '').toString();
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final maxH = MediaQuery.of(ctx).size.height * 0.88;
+        final maxW = MediaQuery.of(ctx).size.width * 0.95;
+
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxH, maxWidth: maxW),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          prompt.isEmpty ? 'Memory' : prompt,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        if (body.trim().isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: Colors.black.withOpacity(0.08)),
+                              color: Colors.white.withOpacity(0.35),
+                            ),
+                            child: Text(body),
+                          )
+                        else
+                          Text('No answer text.', style: TextStyle(color: Colors.black.withOpacity(0.60))),
+
+                        const SizedBox(height: 12),
+                        Text('Photos', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black.withOpacity(0.85))),
+                        const SizedBox(height: 8),
+                        _memoryPhotoStrip(memoryId),
+
+                        const SizedBox(height: 14),
+                        Text('Voice notes', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black.withOpacity(0.85))),
+                        const SizedBox(height: 8),
+                        _memoryVoiceStrip(memoryId, prompt),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ✅ FIX: overflow + no crop
+  void _openMemoryGallery(String memoryId) {
+    final photos = _memoryPhotosById[memoryId] ?? [];
+    if (photos.isEmpty) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final pc = PageController();
+        int idx = 0;
+
+        final maxH = MediaQuery.of(ctx).size.height * 0.85;
+        final maxW = MediaQuery.of(ctx).size.width * 0.95;
+
+        return StatefulBuilder(
+          builder: (ctx, setInner) {
+            final total = photos.length;
+
+            return Dialog(
+              insetPadding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxH, maxWidth: maxW),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Text('Memory photos', style: TextStyle(fontWeight: FontWeight.w800)),
+                          const Spacer(),
+                          IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            color: Colors.black,
+                            child: PageView.builder(
+                              controller: pc,
+                              itemCount: total,
+                              onPageChanged: (v) => setInner(() => idx = v),
+                              itemBuilder: (_, i) {
+                                final p = photos[i];
+                                return Positioned.fill(
+                                  child: InteractiveViewer(
+                                    minScale: 1,
+                                    maxScale: 4,
+                                    child: Image.network(
+                                      p.url,
+                                      fit: BoxFit.contain,
+                                      alignment: Alignment.center,
+                                      gaplessPlayback: true,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                          const Spacer(),
+                          SizedBox(
+                            height: 40,
+                            child: OutlinedButton.icon(
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: const Icon(Icons.check),
+                              label: const Text('Done'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _memoryPhotoStrip(String memoryId) {
+    final photos = _memoryPhotosById[memoryId] ?? [];
+    final preview = photos.take(4).toList();
+
+    if (_loadingMemoryPhotos) {
+      return Text('Loading photos…', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)));
+    }
+
+    if (_memoryPhotoError != null) {
+      return Text(
+        'Photo load issue (MVP): $_memoryPhotoError',
+        style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+      );
+    }
+
+    if (photos.isEmpty) {
+      return Text('No photos on this memory.', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)));
+    }
+
+    return SizedBox(
+      height: 66,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: preview.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, i) {
+          final p = preview[i];
+          return InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => _openMemoryGallery(memoryId),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.network(
+                p.url,
+                width: 92,
+                height: 66,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _memoryVoiceStrip(String memoryId, String prompt) {
+    final notes = _memoryVoiceById[memoryId] ?? [];
+    final preview = notes.take(3).toList();
+
+    if (_loadingMemoryVoice) {
+      return Text('Loading voice…', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)));
+    }
+
+    if (_memoryVoiceError != null) {
+      return Text(
+        'Voice load issue (MVP): $_memoryVoiceError',
+        style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+      );
+    }
+
+    if (notes.isEmpty) {
+      return Text('No voice notes on this memory yet.', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)));
+    }
+
+    return Column(
+      children: preview.map((v) {
+        final key = 'mem:${v.id}';
+        final icon = (_playingKey == key && _isPlaying) ? Icons.pause_circle_outline : Icons.play_circle_outline;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.black.withOpacity(0.08)),
+            color: Colors.white.withOpacity(0.35),
+          ),
+          child: ListTile(
+            dense: true,
+            leading: IconButton(
+              icon: Icon(icon),
+              onPressed: () => _togglePlay(v, playKey: key),
+            ),
+            title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: Text(v.createdAt.isEmpty ? '' : 'Added: ${v.createdAt}', maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        );
+      }).toList(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -785,22 +1057,62 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               : _error != null
                   ? Center(child: Text('Load failed: $_error'))
                   : ListView.separated(
-                      itemCount: _memories.isEmpty ? 4 : _memories.length + 3,
+                      // Base sections: header, highlights, about
+                      // Optional: storage debug hint
+                      // Then: either 1 empty-state row OR N memory rows
+                      itemCount: () {
+                        final hasHint = _storageErrorHint != null;
+                        final base = 3 + (hasHint ? 1 : 0);
+                        final mem = _memories.isEmpty ? 1 : _memories.length;
+                        return base + mem;
+                      }(),
                       separatorBuilder: (_, __) => const Divider(),
                       itemBuilder: (context, i) {
+                        final hasHint = _storageErrorHint != null;
+
                         if (i == 0) return _headerCard();
                         if (i == 1) return _highlightsSection();
                         if (i == 2) return _aboutMeSection();
 
-                        if (_memories.isEmpty && i == 3) {
-                          return const Padding(
-                            padding: EdgeInsets.only(top: 10),
-                            child: Center(child: Text('No memories yet.')),
+                        // Debug hint (only shows if Storage signed-URL creation failed)
+                        if (hasHint && i == 3) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: Colors.black.withOpacity(0.08)),
+                              color: Colors.white.withOpacity(0.35),
+                            ),
+                            child: Text(
+                              _storageErrorHint!,
+                              style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.65)),
+                            ),
                           );
                         }
 
-                        final m = _memories[i - 3];
-                        final memoryId = (m['id'] ?? '').toString();
+                        // Where memory rows begin
+                        final memStart = 3 + (hasHint ? 1 : 0);
+
+                        // Empty state
+                        if (_memories.isEmpty) {
+                          if (i == memStart) {
+                            return const Padding(
+                              padding: EdgeInsets.only(top: 10),
+                              child: Center(child: Text('No memories yet.')),
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        }
+
+                        // Memory row
+                        final idx = i - memStart;
+                        if (idx < 0 || idx >= _memories.length) {
+                          // Safety guard (should never hit)
+                          return const SizedBox.shrink();
+                        }
+
+                        final m = _memories[idx];
                         final stage = (m['life_stage'] ?? '').toString();
                         final prompt = (m['prompt_text'] ?? '').toString();
                         final body = (m['body'] ?? '').toString();
@@ -813,12 +1125,20 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(body, maxLines: 4, overflow: TextOverflow.ellipsis),
-                              // keep your original strips if you want them here:
-                              // _memoryPhotoStrip(memoryId),
-                              // _memoryVoiceStrip(memoryId),
+                              Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Tap to open • photos + voice',
+                                style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+                              ),
                             ],
                           ),
+                          trailing: IconButton(
+                            tooltip: 'Open memory',
+                            icon: const Icon(Icons.chevron_right),
+                            onPressed: () => _openMemoryDetail(m),
+                          ),
+                          onTap: () => _openMemoryDetail(m),
                         );
                       },
                     ),

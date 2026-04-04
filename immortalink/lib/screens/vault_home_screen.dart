@@ -218,6 +218,31 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
+  // Index the core "About me" voice note so the AI can use it.
+  // Requires Edge Function `index_voice_note` to support: { vault_id, core_voice: true }
+  Future<void> _indexCoreVoiceNote() async {
+    final token = _client.auth.currentSession?.accessToken?.trim();
+    if (token == null || token.isEmpty) {
+      throw Exception('Missing session token. Please sign in again.');
+    }
+
+    final res = await _client.functions.invoke(
+      'index_voice_note',
+      headers: {
+        'Authorization': 'Bearer $token',
+        'authorization': 'Bearer $token',
+      },
+      body: {
+        'vault_id': widget.vaultId,
+        'core_voice': true,
+      },
+    );
+
+    if (res.status != 200) {
+      throw Exception('index_voice_note (core_voice) failed: HTTP ${res.status}: ${res.data}');
+    }
+  }
+
   /* =========================
      UNIVERSAL RECORD DIALOG
   ========================== */
@@ -1458,6 +1483,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         onConflict: 'vault_id',
       );
 
+      await _indexCoreVoiceNote();
+
       await _loadCoreVoice();
       _toast('Saved.');
     } catch (e) {
@@ -1490,6 +1517,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           {'vault_id': widget.vaultId, 'path': path, 'title': 'About me voice note'},
           onConflict: 'vault_id',
         );
+
+        await _indexCoreVoiceNote();
 
         await _loadCoreVoice();
         if (mounted) setState(() => _savingCoreVoice = false);
