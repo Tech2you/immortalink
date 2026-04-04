@@ -1,6 +1,8 @@
+// lib/screens/vaults_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../widgets/logo_watermark.dart';
 import 'create_vault_screen.dart';
 import 'vault_home_screen.dart';
 
@@ -25,27 +27,32 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   Future<void> _loadVaults() async {
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
+      // ✅ include display_name so your “vault name” can be nicer everywhere
       final data = await _client
           .from('vaults')
-          .select('id, name, created_at')
+          .select('id, name, display_name, created_at')
           .order('created_at', ascending: false);
 
+      if (!mounted) return;
       setState(() {
         _vaults = List<Map<String, dynamic>>.from(data);
         _loading = false;
       });
     } on PostgrestException catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.message;
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -69,8 +76,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   Future<void> _openVault(Map<String, dynamic> v) async {
-    final vaultId = (v['id'] ?? '').toString();
-    final vaultName = (v['name'] ?? 'Vault').toString();
+    final vaultId = (v['id'] ?? '').toString().trim();
+    final displayName = (v['display_name'] ?? '').toString().trim();
+    final name = (v['name'] ?? 'Vault').toString().trim();
+    final vaultName = displayName.isNotEmpty ? displayName : (name.isNotEmpty ? name : 'Vault');
 
     await Navigator.push(
       context,
@@ -87,7 +96,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Future<void> _deleteVault(Map<String, dynamic> v) async {
     final vaultId = (v['id'] ?? '').toString();
-    final vaultName = (v['name'] ?? 'Vault').toString();
+    final displayName = (v['display_name'] ?? '').toString().trim();
+    final name = (v['name'] ?? 'Vault').toString().trim();
+    final vaultName = displayName.isNotEmpty ? displayName : (name.isNotEmpty ? name : 'Vault');
 
     final ok = await showDialog<bool>(
       context: context,
@@ -139,6 +150,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         title: const Text('Your Vaults'),
         actions: [
           IconButton(
+            tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
             onPressed: _loadVaults,
           ),
@@ -148,66 +160,71 @@ class _VaultsScreenState extends State<VaultsScreen> {
         onPressed: _openCreateVault,
         child: const Icon(Icons.add),
       ),
-
-      // ✅ forced watermark background (same feel as vault page)
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Center(
-                child: Opacity(
-                  opacity: 0.06, // stronger so you actually SEE it
-                  child: Image.asset(
-                    'assets/images/immortalink_logo.png',
-                    width: 820,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // foreground content
-          Padding(
+      body: LogoWatermark(
+        opacity: 0.06,
+        size: 820,
+        child: RefreshIndicator(
+          onRefresh: _loadVaults,
+          child: Padding(
             padding: const EdgeInsets.all(16),
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                    ? Center(
-                        child: Text(
-                          'Load failed: $_error',
-                          textAlign: TextAlign.center,
-                        ),
+                    ? ListView(
+                        children: [
+                          const SizedBox(height: 80),
+                          Center(
+                            child: Text(
+                              'Load failed: $_error',
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Center(
+                            child: OutlinedButton.icon(
+                              onPressed: _loadVaults,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Try again'),
+                            ),
+                          ),
+                        ],
                       )
                     : _vaults.isEmpty
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text('No vaults yet.'),
-                                const SizedBox(height: 12),
-                                ElevatedButton(
-                                  onPressed: _openCreateVault,
-                                  child: const Text('Create your first vault'),
+                        ? ListView(
+                            children: [
+                              const SizedBox(height: 90),
+                              Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Text('No vaults yet.'),
+                                    const SizedBox(height: 12),
+                                    ElevatedButton(
+                                      onPressed: _openCreateVault,
+                                      child: const Text('Create your first vault'),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           )
                         : ListView.separated(
+                            physics: const AlwaysScrollableScrollPhysics(),
                             itemCount: _vaults.length,
                             separatorBuilder: (_, __) => const Divider(),
                             itemBuilder: (context, index) {
                               final v = _vaults[index];
-                              final name = (v['name'] ?? 'Vault').toString();
-                              final createdAt =
-                                  (v['created_at'] ?? '').toString();
+                              final displayName = (v['display_name'] ?? '').toString().trim();
+                              final name = (v['name'] ?? 'Vault').toString().trim();
+                              final title = displayName.isNotEmpty ? displayName : (name.isNotEmpty ? name : 'Vault');
+                              final createdAt = (v['created_at'] ?? '').toString();
 
                               return ListTile(
                                 tileColor: tileBg,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                title: Text(name),
+                                title: Text(title),
                                 subtitle: Text(
                                   createdAt.isEmpty ? '' : 'Created: $createdAt',
                                 ),
@@ -227,7 +244,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                             },
                           ),
           ),
-        ],
+        ),
       ),
     );
   }

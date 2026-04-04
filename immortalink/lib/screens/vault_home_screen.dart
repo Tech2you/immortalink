@@ -52,6 +52,20 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   Timer? _autoSlideTimer;
   int _highlightIndex = 0;
 
+  // --- ABOUT ME (Text + Photos) ---
+  final TextEditingController _aboutMeController = TextEditingController();
+  bool _loadingAboutMe = true;
+  bool _savingAboutMe = false;
+  String? _aboutMeError;
+  String? _aboutMeMemoryId; // created by index_memory (prompt_key=about_me)
+
+  bool _loadingAboutPhotos = true;
+  bool _uploadingAboutPhoto = false;
+  String? _aboutPhotoError;
+  List<Map<String, String>> _aboutPhotos = []; // {path,url}
+  final PageController _aboutController = PageController();
+  int _aboutIndex = 0;
+
   // --- Memory photos ---
   bool _loadingMemoryPhotos = true;
   String? _memoryPhotoError;
@@ -83,6 +97,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   static const String _voiceBucket = 'vault_voice';
   static const String _memoryVoiceBucket = 'memory_voice';
 
+  // About photos: use SAME bucket as highlights for MVP (keeps infra simple)
+  static const String _aboutPhotosBucket = 'vault_photos';
+
   bool _reindexing = false;
 
   @override
@@ -107,12 +124,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     _loadMemories();
     _loadFeaturedPhotos();
     _loadCoreVoice();
+    _loadAboutMe(); // ✅ new
+    _loadAboutPhotos(); // ✅ new
   }
 
   @override
   void dispose() {
     _autoSlideTimer?.cancel();
     _highlightController.dispose();
+    _aboutController.dispose();
+    _aboutMeController.dispose();
     _player.dispose();
     _recorder.dispose();
     super.dispose();
@@ -497,7 +518,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   String _featuredPrefix(String userId) => '$userId/${widget.vaultId}/featured';
   int get _highlightsCount => _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
 
-  // keep simple autoslide (guard controller)
   void _setupAutoSlide() {
     _autoSlideTimer?.cancel();
     final n = _highlightsCount;
@@ -635,7 +655,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  // ✅ FIX: dialog overflow + no zoom/crop
   void _openHighlightsGallery() {
     if (_featuredPhotos.isEmpty) return;
 
@@ -688,7 +707,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                         maxScale: 4,
                                         child: Image.network(
                                           url,
-                                          fit: BoxFit.contain, // ✅ no crop
+                                          fit: BoxFit.contain,
                                           alignment: Alignment.center,
                                           gaplessPlayback: true,
                                         ),
@@ -763,7 +782,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     );
   }
 
-  // ✅ FIX: no zoom/crop in carousel (contain + black bg)
   Widget _featuredPhotosSection() {
     const double previewHeight = 264;
 
@@ -825,7 +843,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
                       child: Container(
-                        color: Colors.black, // ✅ helps “contain” look clean
+                        color: Colors.black,
                         child: PageView.builder(
                           controller: _highlightController,
                           itemCount: _highlightsCount,
@@ -838,7 +856,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                 Positioned.fill(
                                   child: Image.network(
                                     url,
-                                    fit: BoxFit.contain, // ✅ no crop/zoom
+                                    fit: BoxFit.contain,
                                     alignment: Alignment.center,
                                     gaplessPlayback: true,
                                   ),
@@ -881,7 +899,470 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   /* =========================
-     ABOUT ME (Core voice note table stays the same)
+     ABOUT ME (TEXT + PHOTOS) ✅ NEW
+  ========================== */
+
+  String _aboutPrefix(String userId) => '$userId/${widget.vaultId}/about_me';
+  int get _aboutCount => _aboutPhotos.length >= 3 ? 3 : _aboutPhotos.length;
+
+  Future<void> _loadAboutMe() async {
+    if (!mounted) return;
+    setState(() {
+      _loadingAboutMe = true;
+      _aboutMeError = null;
+      _aboutMeMemoryId = null;
+    });
+
+    try {
+      final row = await _client
+          .from('memories')
+          .select('id, body')
+          .eq('vault_id', widget.vaultId)
+          .eq('prompt_key', 'about_me')
+          .limit(1)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      final id = (row?['id'] ?? '').toString().trim();
+      final body = (row?['body'] ?? '').toString();
+
+      _aboutMeMemoryId = id.isEmpty ? null : id;
+
+      // Only set controller if user isn't actively editing
+      if (!_savingAboutMe) {
+        _aboutMeController.text = body;
+      }
+
+      setState(() => _loadingAboutMe = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingAboutMe = false;
+        _aboutMeError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _saveAboutMeText() async {
+    final text = _aboutMeController.text.trim();
+    if (text.isEmpty) {
+      _toast('About me text can’t be empty.');
+      return;
+    }
+
+    setState(() {
+      _savingAboutMe = true;
+      _aboutMeError = null;
+    });
+
+    try {
+      final token = _client.auth.currentSession?.accessToken?.trim();
+      if (token == null || token.isEmpty) throw Exception('Missing session token. Please sign in again.');
+
+      // ✅ Uses your updated index_memory Path B (source=about_me)
+      final res = await _client.functions.invoke(
+        'index_memory',
+        headers: {
+          'Authorization': 'Bearer $token',
+          'authorization': 'Bearer $token',
+        },
+        body: {
+          'vault_id': widget.vaultId,
+          'source': 'about_me',
+          'about_me_text': text,
+        },
+      );
+
+      if (res.status != 200) {
+        throw Exception('index_memory (about_me) failed: HTTP ${res.status}: ${res.data}');
+      }
+
+      // Reload to reflect created memory_id (and saved body)
+      await _loadAboutMe();
+      _toast('About me saved.');
+    } catch (e) {
+      _toast('Save failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _savingAboutMe = false);
+      }
+    }
+  }
+
+  Future<void> _loadAboutPhotos() async {
+    if (!mounted) return;
+
+    setState(() {
+      _loadingAboutPhotos = true;
+      _aboutPhotoError = null;
+      _aboutPhotos = [];
+      _aboutIndex = 0;
+    });
+
+    try {
+      final rows = await _client
+          .from('vault_about_photos')
+          .select('id, path, created_at')
+          .eq('vault_id', widget.vaultId)
+          .order('created_at', ascending: false);
+
+      final list = (rows as List).cast<Map<String, dynamic>>();
+
+      final items = <Map<String, String>>[];
+      for (final r in list) {
+        final path = (r['path'] ?? '').toString().trim();
+        if (path.isEmpty) continue;
+        final url = await _signedUrl(_aboutPhotosBucket, path);
+        if (url == null || url.trim().isEmpty) continue;
+        items.add({'path': path, 'url': url});
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _aboutPhotos = items;
+        _loadingAboutPhotos = false;
+      });
+
+      if (_aboutController.hasClients) {
+        _aboutController.jumpToPage(0);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingAboutPhotos = false;
+        _aboutPhotoError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _uploadAboutPhoto() async {
+    try {
+      setState(() => _uploadingAboutPhoto = true);
+
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) throw Exception('Not signed in');
+
+      final picked = await FilePicker.platform.pickFiles(type: FileType.image, withData: true);
+      if (picked == null || picked.files.isEmpty) return;
+
+      final file = picked.files.first;
+      final bytes = file.bytes;
+      if (bytes == null) throw Exception('No file bytes received.');
+
+      final ext = _extFromName(file.name);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final path = '${_aboutPrefix(userId)}/$ts.$ext';
+
+      await _client.storage.from(_aboutPhotosBucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
+
+      await _client.from('vault_about_photos').insert({
+        'vault_id': widget.vaultId,
+        'path': path,
+      });
+
+      await _loadAboutPhotos();
+      _toast('Added to About me.');
+    } catch (e) {
+      _toast('Upload failed: $e');
+    } finally {
+      if (mounted) setState(() => _uploadingAboutPhoto = false);
+    }
+  }
+
+  Future<void> _deleteAboutPhoto(String path) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete photo?'),
+        content: const Text('This will permanently delete this photo.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await _client.storage.from(_aboutPhotosBucket).remove([path]);
+      await _client.from('vault_about_photos').delete().eq('vault_id', widget.vaultId).eq('path', path);
+      await _loadAboutPhotos();
+      _toast('Photo deleted.');
+    } catch (e) {
+      _toast('Delete failed: $e');
+    }
+  }
+
+  void _openAboutGallery() {
+    if (_aboutPhotos.isEmpty) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final pc = PageController();
+        int idx = 0;
+
+        final maxH = MediaQuery.of(ctx).size.height * 0.85;
+        final maxW = MediaQuery.of(ctx).size.width * 0.95;
+
+        return StatefulBuilder(
+          builder: (ctx, setInner) {
+            final total = _aboutPhotos.length;
+
+            return Dialog(
+              insetPadding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxH, maxWidth: maxW),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Text('About me photos', style: TextStyle(fontWeight: FontWeight.w800)),
+                          const Spacer(),
+                          IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            color: Colors.black,
+                            child: PageView.builder(
+                              controller: pc,
+                              itemCount: total,
+                              onPageChanged: (v) => setInner(() => idx = v),
+                              itemBuilder: (_, i) {
+                                final url = _aboutPhotos[i]['url'] ?? '';
+                                final path = _aboutPhotos[i]['path'] ?? '';
+                                return Stack(
+                                  children: [
+                                    Positioned.fill(
+                                      child: InteractiveViewer(
+                                        minScale: 1,
+                                        maxScale: 4,
+                                        child: Image.network(
+                                          url,
+                                          fit: BoxFit.contain,
+                                          alignment: Alignment.center,
+                                          gaplessPlayback: true,
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      top: 10,
+                                      right: 10,
+                                      child: InkWell(
+                                        onTap: () async {
+                                          if (path.trim().isEmpty) return;
+                                          await _deleteAboutPhoto(path);
+                                          if (!ctx.mounted) return;
+                                          Navigator.pop(ctx);
+                                        },
+                                        child: CircleAvatar(
+                                          radius: 16,
+                                          backgroundColor: Colors.black.withOpacity(0.55),
+                                          child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                          const Spacer(),
+                          SizedBox(
+                            height: 40,
+                            child: OutlinedButton.icon(
+                              onPressed: _uploadingAboutPhoto ? null : _uploadAboutPhoto,
+                              icon: const Icon(Icons.add_photo_alternate_outlined),
+                              label: Text(_uploadingAboutPhoto ? 'Uploading…' : 'Add'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _aboutMeSection() {
+    const double previewHeight = 220;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        color: Colors.white.withOpacity(0.25),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('About me (Text)', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Spacer(),
+              SizedBox(
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: _savingAboutMe ? null : _saveAboutMeText,
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(_savingAboutMe ? 'Saving…' : 'Save'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Write details the AI should always know (birthdate, personality, values, fun facts, background).',
+            style: TextStyle(color: Colors.black.withOpacity(0.65)),
+          ),
+          const SizedBox(height: 10),
+          if (_loadingAboutMe)
+            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+          else if (_aboutMeError != null)
+            Text('About me load issue (MVP): $_aboutMeError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+          else
+            TextField(
+              controller: _aboutMeController,
+              minLines: 5,
+              maxLines: 10,
+              decoration: InputDecoration(
+                hintText: 'Example: I was born in… I value… People describe me as…',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.35),
+              ),
+            ),
+          const SizedBox(height: 12),
+
+          // Photos row
+          Row(
+            children: [
+              const Text('About me photos', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Spacer(),
+              SizedBox(
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: _uploadingAboutPhoto ? null : _uploadAboutPhoto,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  label: Text(_uploadingAboutPhoto ? 'Uploading…' : 'Add photo'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_loadingAboutPhotos)
+            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+          else if (_aboutPhotoError != null)
+            Text('Photo load issue (MVP): $_aboutPhotoError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+          else if (_aboutPhotos.isEmpty)
+            Row(
+              children: [
+                Icon(Icons.photo, color: Colors.black.withOpacity(0.45)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'No About me photos yet. Add 1–3 that represent you (portrait, favourite place, milestone).',
+                    style: TextStyle(color: Colors.black.withOpacity(0.60)),
+                  ),
+                ),
+              ],
+            )
+          else
+            InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: _openAboutGallery,
+              child: Column(
+                children: [
+                  SizedBox(
+                    height: previewHeight,
+                    width: double.infinity,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        color: Colors.black,
+                        child: PageView.builder(
+                          controller: _aboutController,
+                          itemCount: _aboutCount,
+                          onPageChanged: (i) => setState(() => _aboutIndex = i),
+                          itemBuilder: (_, i) {
+                            final url = _aboutPhotos[i]['url'] ?? '';
+                            final path = _aboutPhotos[i]['path'] ?? '';
+                            return Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: Image.network(
+                                    url,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.center,
+                                    gaplessPlayback: true,
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 10,
+                                  right: 10,
+                                  child: InkWell(
+                                    onTap: () => _deleteAboutPhoto(path),
+                                    child: CircleAvatar(
+                                      radius: 16,
+                                      backgroundColor: Colors.black.withOpacity(0.55),
+                                      child: const Icon(Icons.delete_outline, size: 18, color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                                const Positioned(
+                                  left: 12,
+                                  bottom: 12,
+                                  child: Text(
+                                    'Tap to view all',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _dots(_aboutCount, _aboutIndex.clamp(0, (_aboutCount - 1).clamp(0, 99))),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /* =========================
+     CORE VOICE NOTE (About me voice) – unchanged
   ========================== */
 
   String _voicePrefix(String userId) => '$userId/${widget.vaultId}/voice';
@@ -1126,7 +1607,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     );
   }
 
-  // ✅ renamed section only (logic unchanged)
   Widget _coreVoiceSection() {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1141,7 +1621,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         children: [
           Row(
             children: [
-              const Text('About me', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Text('About me (Voice)', style: TextStyle(fontWeight: FontWeight.w800)),
               const Spacer(),
               SizedBox(
                 height: 40,
@@ -1164,7 +1644,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Optional: add quick details (height, eye colour, birthdate, fun fact) + a short voice intro.',
+            'Optional: a short 20–60s voice intro helps the AI sound more “real”.',
             style: TextStyle(color: Colors.black.withOpacity(0.65)),
           ),
           const SizedBox(height: 10),
@@ -1175,14 +1655,19 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           else if (_coreVoice == null)
             Text('No voice yet. Record a short 20–60s intro.', style: TextStyle(color: Colors.black.withOpacity(0.60)))
           else
-            _voiceTile(_coreVoice!, playKey: 'core:${widget.vaultId}', onDelete: _deleteCoreVoice, onRename: _renameCoreVoice),
+            _voiceTile(
+              _coreVoice!,
+              playKey: 'core:${widget.vaultId}',
+              onDelete: _deleteCoreVoice,
+              onRename: _renameCoreVoice,
+            ),
         ],
       ),
     );
   }
 
   /* =========================
-     MEMORY PHOTOS
+     MEMORY PHOTOS (unchanged)
   ========================== */
 
   Future<void> _loadMemoryPhotosForVault() async {
@@ -1290,7 +1775,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  // ✅ FIX: no overflow + no crop
   void _openMemoryGallery(String memoryId) {
     final photos = _memoryPhotosById[memoryId] ?? [];
     if (photos.isEmpty) return;
@@ -1343,7 +1827,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                         maxScale: 4,
                                         child: Image.network(
                                           p.url,
-                                          fit: BoxFit.contain, // ✅ no crop
+                                          fit: BoxFit.contain,
                                           alignment: Alignment.center,
                                           gaplessPlayback: true,
                                         ),
@@ -1489,7 +1973,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   /* =========================
-     MEMORY VOICE NOTES
+     MEMORY VOICE NOTES (unchanged)
   ========================== */
 
   String _memoryVoicePrefix(String userId, String memoryId) => '$userId/${widget.vaultId}/memories/$memoryId/voice';
@@ -1865,7 +2349,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           if (notes.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 8),
-              child: Text('No voice on this memory yet.', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
+              child: Text('No voice on this memory yet.',
+                  style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55))),
             )
           else
             Column(
@@ -1889,8 +2374,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(tooltip: 'Rename', icon: const Icon(Icons.edit_outlined), onPressed: () => _renameMemoryVoice(memoryId, v)),
-                        IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline), onPressed: () => _deleteMemoryVoice(memoryId, v)),
+                        IconButton(
+                          tooltip: 'Rename',
+                          icon: const Icon(Icons.edit_outlined),
+                          onPressed: () => _renameMemoryVoice(memoryId, v),
+                        ),
+                        IconButton(
+                          tooltip: 'Delete',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _deleteMemoryVoice(memoryId, v),
+                        ),
                       ],
                     ),
                   ),
@@ -2145,6 +2638,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             onPressed: () async {
               await _loadVaultMeta();
               await _loadFeaturedPhotos();
+              await _loadAboutMe();
+              await _loadAboutPhotos();
               await _loadCoreVoice();
               await _loadMemories();
             },
@@ -2165,14 +2660,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               : _error != null
                   ? Center(child: Text('Load failed: $_error'))
                   : ListView.separated(
-                      itemCount: _memories.isEmpty ? 4 : _memories.length + 3,
+                      itemCount: _memories.isEmpty ? 6 : _memories.length + 4,
                       separatorBuilder: (_, __) => const Divider(),
                       itemBuilder: (context, i) {
                         if (i == 0) return _vaultAvatarHeader();
                         if (i == 1) return _featuredPhotosSection();
-                        if (i == 2) return _coreVoiceSection();
+                        if (i == 2) return _aboutMeSection(); // ✅ NEW
+                        if (i == 3) return _coreVoiceSection(); // voice stays separate
 
-                        if (_memories.isEmpty && i == 3) {
+                        if (_memories.isEmpty && i == 4) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 10),
                             child: Center(
@@ -2191,7 +2687,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                           );
                         }
 
-                        final m = _memories[i - 3];
+                        final m = _memories[i - 4];
                         final memoryId = (m['id'] ?? '').toString();
                         final stage = (m['life_stage'] ?? '').toString();
                         final prompt = (m['prompt_text'] ?? '').toString();
