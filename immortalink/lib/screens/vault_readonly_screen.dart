@@ -29,6 +29,17 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   String? _error;
 
   List<Map<String, dynamic>> _memories = [];
+
+  // --- ABOUT ME (read-only) ---
+  String? _aboutMeText;
+  bool _loadingAboutMeText = true;
+  String? _aboutMeTextError;
+
+  bool _loadingAboutPhotos = true;
+  String? _aboutPhotoError;
+  List<Map<String, String>> _aboutPhotos = []; // {path,url}
+  final PageController _aboutController = PageController();
+  int _aboutIndex = 0;
   String _vaultName = '';
 
   String? _avatarUrl; // signed url
@@ -41,6 +52,9 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   static const String _memoryPhotosBucket = 'memory_photos';
   static const String _voiceBucket = 'vault_voice';
   static const String _memoryVoiceBucket = 'memory_voice';
+  static const String _aboutPhotosBucket = 'vault_photos';
+  String _aboutPrefix(String ownerId) => '$ownerId/${widget.vaultId}/about_me';
+  int get _aboutCount => _aboutPhotos.length >= 3 ? 3 : _aboutPhotos.length;
 
   bool _loadingHighlights = true;
   String? _highlightsError;
@@ -94,6 +108,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   void dispose() {
     _autoSlideTimer?.cancel();
     _highlightController.dispose();
+    _aboutController.dispose();
     _player.dispose();
     super.dispose();
   }
@@ -114,7 +129,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   Future<String?> _signedAvatarUrl(String path) async {
     try {
       final signed = await _client.storage.from(_avatarBucket).createSignedUrl(path, 60 * 60);
-      return '$signed&t=${DateTime.now().millisecondsSinceEpoch}';
+      final sep = signed.contains('?') ? '&' : '?';
+      return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       _storageErrorHint = 'Signed avatar URL failed for path="$path" → $e';
       return null;
@@ -160,6 +176,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       });
 
       unawaited(_loadHighlights());
+      unawaited(_loadAboutMeText());
+      unawaited(_loadAboutPhotos());
       unawaited(_loadCoreVoice());
       unawaited(_loadMemoryPhotosForVault());
       unawaited(_loadMemoryVoiceForVault());
@@ -174,6 +192,285 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _loadAboutMeText() async {
+    if (!mounted) return;
+    setState(() {
+      _loadingAboutMeText = true;
+      _aboutMeTextError = null;
+      _aboutMeText = null;
+    });
+
+    try {
+      final row = await _client
+          .from('memories')
+          .select('body')
+          .eq('vault_id', widget.vaultId)
+          .eq('prompt_key', 'about_me')
+          .limit(1)
+          .maybeSingle();
+
+      if (!mounted) return;
+      setState(() {
+        _aboutMeText = (row?['body'] ?? '').toString();
+        _loadingAboutMeText = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingAboutMeText = false;
+        _aboutMeTextError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _loadAboutPhotos() async {
+    if (!mounted) return;
+    setState(() {
+      _loadingAboutPhotos = true;
+      _aboutPhotoError = null;
+      _aboutPhotos = [];
+      _aboutIndex = 0;
+    });
+
+    try {
+      final rows = await _client
+          .from('vault_about_photos')
+          .select('id, path, created_at')
+          .eq('vault_id', widget.vaultId)
+          .order('created_at', ascending: false);
+
+      final list = (rows as List).cast<Map<String, dynamic>>();
+
+      final items = <Map<String, String>>[];
+      for (final r in list) {
+        final path = (r['path'] ?? '').toString().trim();
+        if (path.isEmpty) continue;
+        final url = await _signedUrl(_aboutPhotosBucket, path);
+        if (url == null || url.trim().isEmpty) {
+          _aboutPhotoError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_aboutPhotosBucket".';
+          continue;
+        }
+        items.add({'path': path, 'url': url});
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _aboutPhotos = items;
+        _loadingAboutPhotos = false;
+      });
+
+      if (_aboutController.hasClients) {
+        _aboutController.jumpToPage(0);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingAboutPhotos = false;
+        _aboutPhotoError = e.toString();
+      });
+    }
+  }
+  Widget _aboutMeTextPhotosSection() {
+    const double previewHeight = 220;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        color: Colors.white.withOpacity(0.25),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('About me (Text)', style: TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text(
+            'Details the AI should always know (read-only).',
+            style: TextStyle(color: Colors.black.withOpacity(0.65)),
+          ),
+          const SizedBox(height: 10),
+          if (_loadingAboutMeText)
+            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+          else if (_aboutMeTextError != null)
+            Text('About me load issue (MVP): $_aboutMeTextError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+          else
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.black.withOpacity(0.08)),
+                color: Colors.white.withOpacity(0.35),
+              ),
+              child: Text(
+                (_aboutMeText ?? '').trim().isEmpty ? 'No About me text yet.' : (_aboutMeText ?? ''),
+                style: TextStyle(color: Colors.black.withOpacity(0.85)),
+              ),
+            ),
+
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Text('About me photos', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Spacer(),
+              Text(
+                'View only',
+                style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.55)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_loadingAboutPhotos)
+            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+          else if (_aboutPhotoError != null)
+            Text('Photo load issue (MVP): $_aboutPhotoError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+          else if (_aboutPhotos.isEmpty)
+            Row(
+              children: [
+                Icon(Icons.photo, color: Colors.black.withOpacity(0.45)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('No About me photos yet.', style: TextStyle(color: Colors.black.withOpacity(0.60))),
+                ),
+              ],
+            )
+          else
+            InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: _openAboutGallery,
+              child: Column(
+                children: [
+                  SizedBox(
+                    height: previewHeight,
+                    width: double.infinity,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        color: Colors.black,
+                        child: PageView.builder(
+                          controller: _aboutController,
+                          itemCount: _aboutCount,
+                          onPageChanged: (i) => setState(() => _aboutIndex = i),
+                          itemBuilder: (_, i) {
+                            final url = _aboutPhotos[i]['url'] ?? '';
+                            return Stack(
+                              children: [
+                                Positioned.fill(
+                                  child: Image.network(
+                                    url,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.center,
+                                    gaplessPlayback: true,
+                                  ),
+                                ),
+                                const Positioned(
+                                  left: 12,
+                                  bottom: 12,
+                                  child: Text('Tap to view all', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _dots(_aboutCount, _aboutIndex.clamp(0, (_aboutCount - 1).clamp(0, 99))),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _openAboutGallery() {
+    if (_aboutPhotos.isEmpty) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final pc = PageController();
+        int idx = 0;
+
+        final maxH = MediaQuery.of(ctx).size.height * 0.85;
+        final maxW = MediaQuery.of(ctx).size.width * 0.95;
+
+        return StatefulBuilder(
+          builder: (ctx, setInner) {
+            final total = _aboutPhotos.length;
+
+            return Dialog(
+              insetPadding: const EdgeInsets.all(16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxH, maxWidth: maxW),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const Text('About me photos', style: TextStyle(fontWeight: FontWeight.w800)),
+                          const Spacer(),
+                          IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            color: Colors.black,
+                            child: PageView.builder(
+                              controller: pc,
+                              itemCount: total,
+                              onPageChanged: (v) => setInner(() => idx = v),
+                              itemBuilder: (_, i) {
+                                final url = _aboutPhotos[i]['url'] ?? '';
+                                return InteractiveViewer(
+                                  minScale: 1,
+                                  maxScale: 4,
+                                  child: Image.network(
+                                    url,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.center,
+                                    gaplessPlayback: true,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                          const Spacer(),
+                          SizedBox(
+                            height: 40,
+                            child: OutlinedButton.icon(
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: const Icon(Icons.check),
+                              label: const Text('Done'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   String _featuredPrefix(String ownerId) => '$ownerId/${widget.vaultId}/featured';
@@ -898,16 +1195,14 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                               onPageChanged: (v) => setInner(() => idx = v),
                               itemBuilder: (_, i) {
                                 final p = photos[i];
-                                return Positioned.fill(
-                                  child: InteractiveViewer(
-                                    minScale: 1,
-                                    maxScale: 4,
-                                    child: Image.network(
-                                      p.url,
-                                      fit: BoxFit.contain,
-                                      alignment: Alignment.center,
-                                      gaplessPlayback: true,
-                                    ),
+                                return InteractiveViewer(
+                                  minScale: 1,
+                                  maxScale: 4,
+                                  child: Image.network(
+                                    p.url,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.center,
+                                    gaplessPlayback: true,
                                   ),
                                 );
                               },
@@ -1057,12 +1352,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               : _error != null
                   ? Center(child: Text('Load failed: $_error'))
                   : ListView.separated(
-                      // Base sections: header, highlights, about
+                      // Base sections: header, highlights, about text/photos, about voice
                       // Optional: storage debug hint
                       // Then: either 1 empty-state row OR N memory rows
                       itemCount: () {
                         final hasHint = _storageErrorHint != null;
-                        final base = 3 + (hasHint ? 1 : 0);
+                        final base = 4 + (hasHint ? 1 : 0);
                         final mem = _memories.isEmpty ? 1 : _memories.length;
                         return base + mem;
                       }(),
@@ -1072,10 +1367,11 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
                         if (i == 0) return _headerCard();
                         if (i == 1) return _highlightsSection();
-                        if (i == 2) return _aboutMeSection();
+                        if (i == 2) return _aboutMeTextPhotosSection();
+                        if (i == 3) return _aboutMeSection();
 
                         // Debug hint (only shows if Storage signed-URL creation failed)
-                        if (hasHint && i == 3) {
+                        if (hasHint && i == 4) {
                           return Container(
                             margin: const EdgeInsets.only(bottom: 10),
                             padding: const EdgeInsets.all(12),
@@ -1092,7 +1388,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                         }
 
                         // Where memory rows begin
-                        final memStart = 3 + (hasHint ? 1 : 0);
+                        final memStart = 4 + (hasHint ? 1 : 0);
 
                         // Empty state
                         if (_memories.isEmpty) {
