@@ -14,6 +14,33 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   final _controller = TextEditingController();
   bool _loading = false;
 
+  /// Ensures the signed-in user has a vault row.
+  /// This prevents RPCs like join_family_by_invite from failing with "No vault found".
+  Future<void> _ensureVaultExistsForUser(User user) async {
+    // If they already have a vault, do nothing.
+    final existing = await _supabase
+        .from('vaults')
+        .select('id')
+        .eq('owner_id', user.id)
+        .maybeSingle();
+
+    if (existing != null) return;
+
+    // Create a minimal vault.
+    // NOTE: this assumes vaults.about_me_memory_id is nullable (you already dropped NOT NULL).
+    final meta = user.userMetadata;
+    final fullName = meta == null ? null : meta['full_name'];
+    final fallbackName = (fullName ?? user.email ?? 'My Vault').toString().trim();
+    final name = fallbackName.isEmpty ? 'My Vault' : fallbackName;
+
+    await _supabase.from('vaults').insert({
+      'owner_id': user.id,
+      'name': name,
+      'display_name': name,
+      // family_id stays null until they join.
+    });
+  }
+
   Future<void> _finalizeMemberSlot({
     required String familyId,
     required String userId,
@@ -74,10 +101,28 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
       final user = _supabase.auth.currentUser;
       if (user == null) throw Exception('Not signed in');
 
-      final res = await _supabase.rpc(
-        'join_family_by_invite',
-        params: {'p_invite_code': code},
-      );
+      // ✅ Ensure the joining account has a vault BEFORE calling join RPC.
+      await _ensureVaultExistsForUser(user);
+
+      dynamic res;
+      try {
+        res = await _supabase.rpc(
+          'join_family_by_invite',
+          params: {'p_invite_code': code},
+        );
+      } catch (e) {
+        // If a legacy join RPC still throws P0001 for "no vault", try once more after ensuring.
+        final msg = e.toString();
+        if (msg.contains('P0001') || msg.toLowerCase().contains('no vault')) {
+          await _ensureVaultExistsForUser(user);
+          res = await _supabase.rpc(
+            'join_family_by_invite',
+            params: {'p_invite_code': code},
+          );
+        } else {
+          rethrow;
+        }
+      }
 
       final familyId = res?.toString().trim();
       if (familyId == null || familyId.isEmpty) {

@@ -286,12 +286,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('About me (Text)', style: TextStyle(fontWeight: FontWeight.w800)),
+          const Text('About me', style: TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 6),
-          Text(
-            'Details the AI should always know (read-only).',
-            style: TextStyle(color: Colors.black.withOpacity(0.65)),
-          ),
           const SizedBox(height: 10),
           if (_loadingAboutMeText)
             const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
@@ -1033,10 +1029,6 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         children: [
           const Text('About me', style: TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 6),
-          Text(
-            'Optional: quick details + a short voice intro.',
-            style: TextStyle(color: Colors.black.withOpacity(0.65)),
-          ),
           const SizedBox(height: 8),
           if (_loadingCoreVoice)
             const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
