@@ -91,6 +91,33 @@ class _VaultsScreenState extends State<VaultsScreen> {
     }
   }
 
+  String _formatCreatedAt(dynamic rawValue) {
+    final raw = (rawValue ?? '').toString().trim();
+    if (raw.isEmpty) return 'Created recently';
+
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return 'Created recently';
+
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    final local = parsed.toLocal();
+    final month = months[local.month - 1];
+    return 'Created on ${local.day} $month ${local.year}';
+  }
+
   Future<void> _loadVault() async {
     if (!mounted) return;
 
@@ -382,6 +409,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
     final hasAvatar =
         _vaultAvatarUrl != null && _vaultAvatarUrl!.trim().isNotEmpty;
+    final createdLabel = _formatCreatedAt(_vault?['created_at']);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F0F7),
@@ -493,7 +521,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                         : null,
                                   ),
                                   title: Text((_vault!['name'] ?? '').toString()),
-                                  subtitle: Text('Created: ${_vault!['created_at']}'),
+                                  subtitle: Text(createdLabel),
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
