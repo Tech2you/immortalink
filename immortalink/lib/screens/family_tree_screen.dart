@@ -828,7 +828,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                 leading: const CircleAvatar(
                   child: Icon(Icons.person_add_alt_1),
                 ),
-                title: const Text('Invite living relative'),
+                title: const Text('Invite relative'),
                 subtitle: const Text('Create an invite code for this slot'),
                 onTap: () {
                   Navigator.pop(ctx);
