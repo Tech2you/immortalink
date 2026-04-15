@@ -1,33 +1,26 @@
-// lib/screens/vault_companion_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class VaultCompanionScreen extends StatefulWidget {
-  final String? vaultId;
+class LegacyVaultCompanionScreen extends StatefulWidget {
+  final String legacyMemberId;
+  final String familyId;
   final String displayName;
 
-  // ✅ legacy support
-  final String? legacyMemberId;
-  final String? familyId;
-
-  const VaultCompanionScreen({
+  const LegacyVaultCompanionScreen({
     super.key,
-    this.vaultId,
+    required this.legacyMemberId,
+    required this.familyId,
     required this.displayName,
-    this.legacyMemberId,
-    this.familyId,
   });
 
-  bool get isLegacy =>
-      (legacyMemberId ?? '').trim().isNotEmpty &&
-      (familyId ?? '').trim().isNotEmpty;
-
   @override
-  State<VaultCompanionScreen> createState() => _VaultCompanionScreenState();
+  State<LegacyVaultCompanionScreen> createState() =>
+      _LegacyVaultCompanionScreenState();
 }
 
-class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
+class _LegacyVaultCompanionScreenState
+    extends State<LegacyVaultCompanionScreen> {
   final _client = Supabase.instance.client;
 
   final _controller = TextEditingController();
@@ -56,16 +49,6 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
   Future<void> _showDisclaimer() async {
     bool localAccept = false;
 
-    final intro = widget.isLegacy
-        ? 'This chat is an AI voice inspired by ${widget.displayName}\'s saved family memories, notes, and legacy profile.\n\n'
-            'It may be inaccurate or incomplete, and it is not the real person.\n\n'
-            'Only family members with access can use it.\n\n'
-            'By continuing, you agree to use it respectfully.'
-        : 'This chat is an AI voice inspired by ${widget.displayName}\'s vault content.\n\n'
-            'It may be inaccurate or incomplete, and it is not the real person.\n\n'
-            'Only people with vault access can use it.\n\n'
-            'By continuing, you agree to use it respectfully.';
-
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -75,7 +58,12 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(intro),
+              Text(
+                'This chat is an AI voice inspired by ${widget.displayName}\'s legacy profile and family memories.\n\n'
+                'It may be inaccurate or incomplete, and it is not the real person.\n\n'
+                'Only family members with access can use it.\n\n'
+                'By continuing, you agree to use it respectfully.',
+              ),
               const SizedBox(height: 12),
               CheckboxListTile(
                 value: localAccept,
@@ -163,31 +151,19 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     try {
       final headers = _authHeadersOrEmpty();
 
-      final body = widget.isLegacy
-          ? {
-              'legacyMemberId': widget.legacyMemberId,
-              'legacy_member_id': widget.legacyMemberId,
-              'familyId': widget.familyId,
-              'family_id': widget.familyId,
-              'question': text,
-              'prompt': text,
-              'message': text,
-              'displayName': widget.displayName,
-              'display_name': widget.displayName,
-            }
-          : {
-              'vaultId': widget.vaultId,
-              'vault_id': widget.vaultId,
-              'question': text,
-              'prompt': text,
-              'message': text,
-              'displayName': widget.displayName,
-              'display_name': widget.displayName,
-            };
+      final body = {
+        'legacy_member_id': widget.legacyMemberId,
+        'family_id': widget.familyId,
+        'question': text,
+        'displayName': widget.displayName,
+        'display_name': widget.displayName,
+        'message': text,
+        'prompt': text,
+      };
 
       final res = await _client.functions
           .invoke(
-            'vault_ai_chat',
+            'legacy_vault_ai_chat',
             headers: headers,
             body: body,
           )
@@ -210,7 +186,8 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         answer = _safeExtract(data['answer'] ?? data['reply']);
         debug = _safeExtract(data['debug']);
         if (answer.isEmpty) {
-          final err = _safeExtract(data['error'] ?? data['message'] ?? data['details']);
+          final err =
+              _safeExtract(data['error'] ?? data['message'] ?? data['details']);
           if (err.isNotEmpty) answer = 'Error: $err';
         }
       } else if (data is String) {
@@ -218,7 +195,9 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
       }
 
       if (answer.isEmpty) {
-        answer = debug.isNotEmpty ? 'No answer returned. Debug: $debug' : '(No answer returned)';
+        answer = debug.isNotEmpty
+            ? 'No answer returned. Debug: $debug'
+            : '(No answer returned)';
       }
 
       if (!mounted) return;
@@ -281,9 +260,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.isLegacy
-        ? 'Legacy Companion • ${widget.displayName}'
-        : 'Vault Companion • ${widget.displayName}';
+    final title = 'Vault Companion • ${widget.displayName}';
 
     final bgTop = Theme.of(context).colorScheme.surface;
     final bgBottom = Theme.of(context).colorScheme.surface.withOpacity(0.55);
@@ -327,10 +304,6 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
   }
 
   Widget _buildHeaderHint(BuildContext context) {
-    final hint = widget.isLegacy
-        ? 'Ask me anything. I’ll answer as thoughtfully as I can, based on the saved legacy memories, notes, and family context.'
-        : 'Ask me anything. I’ll answer as thoughtfully as I can, based on what’s in this vault.';
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
@@ -342,7 +315,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         children: [
           Expanded(
             child: Text(
-              hint,
+              'Ask me anything. I’ll answer as thoughtfully as I can, based on what your family has saved in this legacy vault.',
               style: TextStyle(color: Colors.black.withOpacity(0.70)),
             ),
           ),
@@ -523,10 +496,10 @@ class _QuickPrompts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <String>[
-      'Where did you grow up?',
       'What should I know about you?',
-      'What were you like as a child?',
-      'What mattered most to you?',
+      'What kind of person were you?',
+      'What did you value most?',
+      'What memories has the family saved about you?',
       'How are we related?',
     ];
 
