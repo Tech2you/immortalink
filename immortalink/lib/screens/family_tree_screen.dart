@@ -7,6 +7,7 @@ import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
 import 'vaults_screen.dart';
 import 'legacy_vault_screen.dart';
+
 class FamilyTreeScreen extends StatefulWidget {
   final String familyId;
 
@@ -20,10 +21,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   final _supabase = Supabase.instance.client;
 
   static const String _logoPath = 'assets/images/immortalink_logo.png';
-
-  // =========================
-  // Slots (absolute DB slot_key)
-  // =========================
 
   static const String kMaternalGgm = 'maternal_ggm';
   static const String kMaternalGgf = 'maternal_ggf';
@@ -66,6 +63,9 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   bool _showGrandkids = false;
   bool _showGreatGrandkids = false;
 
+  bool _showFutureAncestorBranches = false;
+  bool _showFutureDescendantBranches = false;
+
   final GlobalKey _stackKey = GlobalKey();
   final Map<String, GlobalKey> _nodeKeys = {};
   Map<String, _NodeGeom> _geom = {};
@@ -97,7 +97,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       );
 
       if (res is List && res.isNotEmpty && res.first is Map) {
-        final m = (res.first as Map);
+        final m = res.first as Map;
         final inviterVaultId =
             (m['inviter_vault_id'] ?? '').toString().trim();
         final slotKey = (m['slot_key'] ?? '').toString().trim();
@@ -332,29 +332,45 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     if (inviterVault == null) return base;
 
     void putInviterAsParent() {
-      if (base[kMother] == null) base[kMother] = inviterVault!;
-      else if (base[kFather] == null) base[kFather] = inviterVault!;
+      if (base[kMother] == null) {
+        base[kMother] = inviterVault!;
+      } else if (base[kFather] == null) {
+        base[kFather] = inviterVault!;
+      }
     }
 
     void putInviterAsSibling() {
-      if (base[kSibling1] == null) base[kSibling1] = inviterVault!;
-      else if (base[kSibling2] == null) base[kSibling2] = inviterVault!;
-      else if (base[kSibling3] == null) base[kSibling3] = inviterVault!;
+      if (base[kSibling1] == null) {
+        base[kSibling1] = inviterVault!;
+      } else if (base[kSibling2] == null) {
+        base[kSibling2] = inviterVault!;
+      } else if (base[kSibling3] == null) {
+        base[kSibling3] = inviterVault!;
+      }
     }
 
     void putInviterAsChild() {
-      if (base[kChild1] == null) base[kChild1] = inviterVault!;
-      else if (base[kChild2] == null) base[kChild2] = inviterVault!;
-      else if (base[kChild3] == null) base[kChild3] = inviterVault!;
-      else if (base[kChild4] == null) base[kChild4] = inviterVault!;
+      if (base[kChild1] == null) {
+        base[kChild1] = inviterVault!;
+      } else if (base[kChild2] == null) {
+        base[kChild2] = inviterVault!;
+      } else if (base[kChild3] == null) {
+        base[kChild3] = inviterVault!;
+      } else if (base[kChild4] == null) {
+        base[kChild4] = inviterVault!;
+      }
     }
 
     void putInviterAsGrandchild() {
-      if (base[kGrandchild1] == null) base[kGrandchild1] = inviterVault!;
-      else if (base[kGrandchild2] == null) base[kGrandchild2] = inviterVault!;
-      else if (base[kGrandchild3] == null) base[kGrandchild3] = inviterVault!;
-      else if (base[kGrandchild4] == null) base[kGrandchild4] = inviterVault!;
-      else {
+      if (base[kGrandchild1] == null) {
+        base[kGrandchild1] = inviterVault!;
+      } else if (base[kGrandchild2] == null) {
+        base[kGrandchild2] = inviterVault!;
+      } else if (base[kGrandchild3] == null) {
+        base[kGrandchild3] = inviterVault!;
+      } else if (base[kGrandchild4] == null) {
+        base[kGrandchild4] = inviterVault!;
+      } else {
         putInviterAsChild();
       }
     }
@@ -374,21 +390,29 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     }
 
     void putInviterAsGrandparent() {
-      if (base[kMaternalGm] == null) base[kMaternalGm] = inviterVault!;
-      else if (base[kMaternalGf] == null) base[kMaternalGf] = inviterVault!;
-      else if (base[kPaternalGm] == null) base[kPaternalGm] = inviterVault!;
-      else if (base[kPaternalGf] == null) base[kPaternalGf] = inviterVault!;
-      else {
+      if (base[kMaternalGm] == null) {
+        base[kMaternalGm] = inviterVault!;
+      } else if (base[kMaternalGf] == null) {
+        base[kMaternalGf] = inviterVault!;
+      } else if (base[kPaternalGm] == null) {
+        base[kPaternalGm] = inviterVault!;
+      } else if (base[kPaternalGf] == null) {
+        base[kPaternalGf] = inviterVault!;
+      } else {
         putInviterAsParent();
       }
     }
 
     void putInviterAsGreatGrandparent() {
-      if (base[kMaternalGgm] == null) base[kMaternalGgm] = inviterVault!;
-      else if (base[kMaternalGgf] == null) base[kMaternalGgf] = inviterVault!;
-      else if (base[kPaternalGgm] == null) base[kPaternalGgm] = inviterVault!;
-      else if (base[kPaternalGgf] == null) base[kPaternalGgf] = inviterVault!;
-      else {
+      if (base[kMaternalGgm] == null) {
+        base[kMaternalGgm] = inviterVault!;
+      } else if (base[kMaternalGgf] == null) {
+        base[kMaternalGgf] = inviterVault!;
+      } else if (base[kPaternalGgm] == null) {
+        base[kPaternalGgm] = inviterVault!;
+      } else if (base[kPaternalGgf] == null) {
+        base[kPaternalGgf] = inviterVault!;
+      } else {
         putInviterAsGrandparent();
       }
     }
@@ -794,6 +818,27 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     );
   }
 
+  Future<void> _showPerpetualTreeInfo({
+    required String title,
+    required String body,
+  }) async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openPredecessorAddOptions({
     required String slotKey,
     required String title,
@@ -867,7 +912,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     final vaultId = (v['id'] ?? '').toString();
     final vaultName = (v['name'] ?? 'Vault').toString();
 
-      final isLegacy = v['__legacy'] == true;
+    final isLegacy = v['__legacy'] == true;
     if (isLegacy) {
       final legacyId = (v['id'] ?? '').toString();
       if (legacyId.isEmpty) return;
@@ -1015,7 +1060,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                   const SizedBox(height: 10),
                   const Center(
                     child: Text(
-                      'Your Family Tree (MVP)',
+                      'Your Family Tree',
                       style:
                           TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
                       textAlign: TextAlign.center,
@@ -1671,6 +1716,50 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                   ],
                                 ],
                                 const SizedBox(height: 14),
+                                _SectionHeader(
+                                  title: 'Expand ancestor branches',
+                                  isOpen: _showFutureAncestorBranches,
+                                  onToggle: () => setState(() =>
+                                      _showFutureAncestorBranches =
+                                          !_showFutureAncestorBranches),
+                                ),
+                                if (_showFutureAncestorBranches) ...[
+                                  const SizedBox(height: 8),
+                                  _FutureBranchCard(
+                                    title: 'Older ancestors',
+                                    subtitle:
+                                        'In the next phase, each ancestor card can open its own branch so your tree keeps growing upward without replacing this main view.',
+                                    buttonText: 'How this will work',
+                                    onTap: () => _showPerpetualTreeInfo(
+                                      title: 'Ancestor branch expansion',
+                                      body:
+                                          'The main tree will stay simple and familiar. Later, tapping a parent, grandparent, or great-grandparent will open that person\'s own branch view so older generations can keep expanding upward without cramming everything onto one screen.',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
+                                _SectionHeader(
+                                  title: 'Expand descendant branches',
+                                  isOpen: _showFutureDescendantBranches,
+                                  onToggle: () => setState(() =>
+                                      _showFutureDescendantBranches =
+                                          !_showFutureDescendantBranches),
+                                ),
+                                if (_showFutureDescendantBranches) ...[
+                                  const SizedBox(height: 8),
+                                  _FutureBranchCard(
+                                    title: 'Future generations',
+                                    subtitle:
+                                        'Kids, grandkids, and great-grandkids will later be able to open their own branch views so descendants can keep extending downward over time.',
+                                    buttonText: 'How this will work',
+                                    onTap: () => _showPerpetualTreeInfo(
+                                      title: 'Descendant branch expansion',
+                                      body:
+                                          'Your current tree will remain the home view. Later, when a descendant branch gets large, tapping that child or grandchild line will open a focused branch view for that line, allowing perpetual family growth without forcing endless hardcoded slots into one screen.',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                ],
                                 SizedBox(
                                   height: 54,
                                   child: CustomPaint(
@@ -1680,7 +1769,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 const SizedBox(height: 10),
                                 Center(
                                   child: Text(
-                                    'Your tree grows as more people are added.',
+                                    'Your tree grows as more people are added. Branch expansion will let future generations keep unfolding from this view.',
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontStyle: FontStyle.italic,
@@ -1764,8 +1853,10 @@ class _GroupCard extends StatelessWidget {
               children: [
                 Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
                 const Spacer(),
-                Icon(Icons.keyboard_arrow_down,
-                    color: Colors.black.withOpacity(0.35)),
+                Icon(
+                  Icons.keyboard_arrow_down,
+                  color: Colors.black.withOpacity(0.35),
+                ),
               ],
             ),
             const SizedBox(height: 10),
@@ -1895,7 +1986,7 @@ class _PersonSlot extends StatelessWidget {
     final has = filled != null;
     final label = has
         ? (((filled!['display_name'] ?? '').toString().trim().isNotEmpty)
-            ? (filled!['display_name']).toString()
+            ? filled!['display_name'].toString()
             : ((filled!['name'] ?? 'Vault').toString()))
         : showAddLabel;
 
@@ -1961,7 +2052,7 @@ class _SmallInviteSlot extends StatelessWidget {
     final has = filled != null;
     final label = has
         ? (((filled!['display_name'] ?? '').toString().trim().isNotEmpty)
-            ? (filled!['display_name']).toString()
+            ? filled!['display_name'].toString()
             : ((filled!['name'] ?? 'Child').toString()))
         : text;
 
@@ -2008,6 +2099,72 @@ class _SmallInviteSlot extends StatelessWidget {
   }
 }
 
+class _FutureBranchCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String buttonText;
+  final VoidCallback onTap;
+
+  const _FutureBranchCard({
+    required this.title,
+    required this.subtitle,
+    required this.buttonText,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        color: Colors.white.withOpacity(0.28),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: Colors.black.withOpacity(0.06),
+              child: Icon(
+                Icons.account_tree_outlined,
+                color: Colors.black.withOpacity(0.70),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Colors.black.withOpacity(0.65),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: onTap,
+              child: Text(buttonText),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /* =======================
    Lines Painter
 ======================= */
@@ -2015,6 +2172,7 @@ class _SmallInviteSlot extends StatelessWidget {
 class _NodeGeom {
   final Offset center;
   final Size size;
+
   const _NodeGeom({required this.center, required this.size});
 }
 
@@ -2067,7 +2225,9 @@ class _TreeLinesPainter extends CustomPainter {
     }
 
     void line(String a, String b) {
-      if (c(a) == null || c(b) == null || s(a) == null || s(b) == null) return;
+      if (c(a) == null || c(b) == null || s(a) == null || s(b) == null) {
+        return;
+      }
       final p1 = edgePoint(a, b);
       final p2 = edgePoint(b, a);
       canvas.drawLine(p1, p2, paint);
@@ -2149,17 +2309,41 @@ class _BottomVinesPainter extends CustomPainter {
 
     final path1 = Path()
       ..moveTo(0, y1)
-      ..cubicTo(size.width * 0.22, y1 - 10, size.width * 0.38, y1 + 14,
-          size.width * 0.52, y1)
-      ..cubicTo(size.width * 0.70, y1 - 16, size.width * 0.84, y1 + 10,
-          size.width, y1);
+      ..cubicTo(
+        size.width * 0.22,
+        y1 - 10,
+        size.width * 0.38,
+        y1 + 14,
+        size.width * 0.52,
+        y1,
+      )
+      ..cubicTo(
+        size.width * 0.70,
+        y1 - 16,
+        size.width * 0.84,
+        y1 + 10,
+        size.width,
+        y1,
+      );
 
     final path2 = Path()
       ..moveTo(0, y2)
-      ..cubicTo(size.width * 0.18, y2 + 8, size.width * 0.42, y2 - 12,
-          size.width * 0.60, y2)
-      ..cubicTo(size.width * 0.78, y2 + 14, size.width * 0.92, y2 - 6,
-          size.width, y2);
+      ..cubicTo(
+        size.width * 0.18,
+        y2 + 8,
+        size.width * 0.42,
+        y2 - 12,
+        size.width * 0.60,
+        y2,
+      )
+      ..cubicTo(
+        size.width * 0.78,
+        y2 + 14,
+        size.width * 0.92,
+        y2 - 6,
+        size.width,
+        y2,
+      );
 
     canvas.drawPath(path1, p1);
     canvas.drawPath(path2, p2);
@@ -2185,10 +2369,8 @@ class _FamilyData {
   final List<Map<String, dynamic>> members;
   final Map<String, String> avatarUrlByVaultId;
   final List<Map<String, dynamic>> legacyMembers;
-
   final Map<String, dynamic>? yourVault;
   final String? yourAvatarUrl;
-
   final _JoinContext? joinContext;
 
   const _FamilyData({
