@@ -7,6 +7,7 @@ import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
 import 'vaults_screen.dart';
 import 'legacy_vault_screen.dart';
+import 'family_branch_screen.dart';
 
 class FamilyTreeScreen extends StatefulWidget {
   final String familyId;
@@ -62,9 +63,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   bool _showDescendants = true;
   bool _showGrandkids = false;
   bool _showGreatGrandkids = false;
-
-  bool _showFutureAncestorBranches = false;
-  bool _showFutureDescendantBranches = false;
 
   final GlobalKey _stackKey = GlobalKey();
   final Map<String, GlobalKey> _nodeKeys = {};
@@ -681,30 +679,13 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: birthYearController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Birth year',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: deathYearController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Death year',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                    ],
+                  TextField(
+                    controller: birthYearController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Birth year',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                   const SizedBox(height: 10),
                   TextField(
@@ -716,6 +697,25 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                       border: OutlineInputBorder(),
                       alignLabelWithHint: true,
                     ),
+                  ),
+                  const SizedBox(height: 10),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Optional extra details',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    children: [
+                      TextField(
+                        controller: deathYearController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Death year (optional)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -818,25 +818,24 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     );
   }
 
-  Future<void> _showPerpetualTreeInfo({
-    required String title,
-    required String body,
+  Future<void> _openBranchScreen({
+    required String rootLabel,
+    required String rootSlotKey,
+    required String direction,
   }) async {
-    if (!mounted) return;
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
-          ),
-        ],
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FamilyBranchScreen(
+          familyId: widget.familyId,
+          rootLabel: rootLabel,
+          rootSlotKey: rootSlotKey,
+          direction: direction,
+        ),
       ),
     );
+
+    _refresh();
   }
 
   Future<void> _openPredecessorAddOptions({
@@ -893,6 +892,139 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                   _showLegacyPredecessorComingSoon(
                     slotKey: slotKey,
                     title: title,
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _canOpenAncestorBranch(String slotKey) {
+    return slotKey == kMother ||
+        slotKey == kFather ||
+        slotKey == kMaternalGm ||
+        slotKey == kMaternalGf ||
+        slotKey == kPaternalGm ||
+        slotKey == kPaternalGf;
+  }
+
+  bool _canOpenDescendantBranch(String slotKey) {
+    return slotKey == kChild1 ||
+        slotKey == kChild2 ||
+        slotKey == kChild3 ||
+        slotKey == kChild4 ||
+        slotKey == kGrandchild1 ||
+        slotKey == kGrandchild2 ||
+        slotKey == kGrandchild3 ||
+        slotKey == kGrandchild4;
+  }
+
+  String _branchLabelForSlot(String slotKey) {
+    switch (slotKey) {
+      case kMother:
+        return 'Mother';
+      case kFather:
+        return 'Father';
+      case kMaternalGm:
+      case kPaternalGm:
+        return 'Grandmother';
+      case kMaternalGf:
+      case kPaternalGf:
+        return 'Grandfather';
+      case kChild1:
+      case kChild2:
+      case kChild3:
+      case kChild4:
+        return 'Child';
+      case kGrandchild1:
+      case kGrandchild2:
+      case kGrandchild3:
+      case kGrandchild4:
+        return 'Grandchild';
+      default:
+        return 'Branch';
+    }
+  }
+
+  String? _branchDirectionForSlot(String slotKey) {
+    if (_canOpenAncestorBranch(slotKey)) return 'ancestor';
+    if (_canOpenDescendantBranch(slotKey)) return 'descendant';
+    return null;
+  }
+
+  Future<void> _openTreePersonOptions({
+    required String slotKey,
+    required _FamilyData data,
+    required Map<String, dynamic> person,
+  }) async {
+    final direction = _branchDirectionForSlot(slotKey);
+
+    if (direction == null) {
+      await _openVaultFromTree(data, person);
+      return;
+    }
+
+    if (!mounted) return;
+
+    final label = _branchLabelForSlot(slotKey);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Choose whether to open this person\'s vault or their branch view.',
+                style: TextStyle(color: Colors.black.withOpacity(0.65)),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  child: Icon(Icons.lock_open_outlined),
+                ),
+                title: const Text('Open vault'),
+                subtitle: const Text('View this person\'s vault content'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _openVaultFromTree(data, person);
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  child: Icon(Icons.account_tree_outlined),
+                ),
+                title: const Text('Open branch'),
+                subtitle: Text(
+                  direction == 'ancestor'
+                      ? 'View the older ancestor line from here'
+                      : 'View the descendant line from here',
+                ),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await _openBranchScreen(
+                    rootLabel: label,
+                    rootSlotKey: slotKey,
+                    direction: direction,
                   );
                 },
               ),
@@ -1114,7 +1246,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kMaternalGgm),
-                                                  filled: slotVault[kMaternalGgm],
+                                                  filled:
+                                                      slotVault[kMaternalGgm],
                                                   avatarUrl: data
                                                       .avatarUrlByVaultId[
                                                           (slotVault[kMaternalGgm]
@@ -1126,8 +1259,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                     slotKey: kMaternalGgm,
                                                     title: 'Great-grandparent',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
+                                                  onOpen: () => _openVaultFromTree(
+                                                    data,
+                                                    slotVault[kMaternalGgm]!,
+                                                  ),
                                                   showAddLabel:
                                                       'Add great-grandparent',
                                                 ),
@@ -1136,7 +1271,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kMaternalGgf),
-                                                  filled: slotVault[kMaternalGgf],
+                                                  filled:
+                                                      slotVault[kMaternalGgf],
                                                   avatarUrl: data
                                                       .avatarUrlByVaultId[
                                                           (slotVault[kMaternalGgf]
@@ -1148,8 +1284,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                     slotKey: kMaternalGgf,
                                                     title: 'Great-grandparent',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
+                                                  onOpen: () => _openVaultFromTree(
+                                                    data,
+                                                    slotVault[kMaternalGgf]!,
+                                                  ),
                                                   showAddLabel:
                                                       'Add great-grandparent',
                                                 ),
@@ -1167,7 +1305,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kPaternalGgm),
-                                                  filled: slotVault[kPaternalGgm],
+                                                  filled:
+                                                      slotVault[kPaternalGgm],
                                                   avatarUrl: data
                                                       .avatarUrlByVaultId[
                                                           (slotVault[kPaternalGgm]
@@ -1179,8 +1318,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                     slotKey: kPaternalGgm,
                                                     title: 'Great-grandparent',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
+                                                  onOpen: () => _openVaultFromTree(
+                                                    data,
+                                                    slotVault[kPaternalGgm]!,
+                                                  ),
                                                   showAddLabel:
                                                       'Add great-grandparent',
                                                 ),
@@ -1189,7 +1330,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kPaternalGgf),
-                                                  filled: slotVault[kPaternalGgf],
+                                                  filled:
+                                                      slotVault[kPaternalGgf],
                                                   avatarUrl: data
                                                       .avatarUrlByVaultId[
                                                           (slotVault[kPaternalGgf]
@@ -1201,8 +1343,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                     slotKey: kPaternalGgf,
                                                     title: 'Great-grandparent',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
+                                                  onOpen: () => _openVaultFromTree(
+                                                    data,
+                                                    slotVault[kPaternalGgf]!,
+                                                  ),
                                                   showAddLabel:
                                                       'Add great-grandparent',
                                                 ),
@@ -1245,9 +1389,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                     slotKey: kMaternalGm,
                                                     title: 'Grandparent',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add grandparent',
+                                                  onOpen: () =>
+                                                      _openTreePersonOptions(
+                                                    slotKey: kMaternalGm,
+                                                    data: data,
+                                                    person:
+                                                        slotVault[kMaternalGm]!,
+                                                  ),
+                                                  showAddLabel:
+                                                      'Add grandparent',
                                                 ),
                                               ),
                                               const SizedBox(width: 10),
@@ -1266,9 +1416,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                     slotKey: kMaternalGf,
                                                     title: 'Grandparent',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add grandparent',
+                                                  onOpen: () =>
+                                                      _openTreePersonOptions(
+                                                    slotKey: kMaternalGf,
+                                                    data: data,
+                                                    person:
+                                                        slotVault[kMaternalGf]!,
+                                                  ),
+                                                  showAddLabel:
+                                                      'Add grandparent',
                                                 ),
                                               ),
                                             ],
@@ -1296,9 +1452,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                     slotKey: kPaternalGm,
                                                     title: 'Grandparent',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add grandparent',
+                                                  onOpen: () =>
+                                                      _openTreePersonOptions(
+                                                    slotKey: kPaternalGm,
+                                                    data: data,
+                                                    person:
+                                                        slotVault[kPaternalGm]!,
+                                                  ),
+                                                  showAddLabel:
+                                                      'Add grandparent',
                                                 ),
                                               ),
                                               const SizedBox(width: 10),
@@ -1317,9 +1479,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                     slotKey: kPaternalGf,
                                                     title: 'Grandparent',
                                                   ),
-                                                  onOpen: (v) =>
-                                                      _openVaultFromTree(data, v),
-                                                  showAddLabel: 'Add grandparent',
+                                                  onOpen: () =>
+                                                      _openTreePersonOptions(
+                                                    slotKey: kPaternalGf,
+                                                    data: data,
+                                                    person:
+                                                        slotVault[kPaternalGf]!,
+                                                  ),
+                                                  showAddLabel:
+                                                      'Add grandparent',
                                                 ),
                                               ),
                                             ],
@@ -1348,8 +1516,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                             slotKey: kMother,
                                             title: 'Parent',
                                           ),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                          onOpen: () => _openTreePersonOptions(
+                                            slotKey: kMother,
+                                            data: data,
+                                            person: slotVault[kMother]!,
+                                          ),
                                           showAddLabel: 'Add parent',
                                         ),
                                       ),
@@ -1367,8 +1538,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                             slotKey: kFather,
                                             title: 'Parent',
                                           ),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                          onOpen: () => _openTreePersonOptions(
+                                            slotKey: kFather,
+                                            data: data,
+                                            person: slotVault[kFather]!,
+                                          ),
                                           showAddLabel: 'Add parent',
                                         ),
                                       ),
@@ -1392,8 +1566,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                             slotKey: kSpouse1,
                                             title: 'Spouse',
                                           ),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                          onOpen: () => _openVaultFromTree(
+                                            data,
+                                            slotVault[kSpouse1]!,
+                                          ),
                                           showAddLabel: 'Add spouse',
                                         ),
                                       ),
@@ -1435,8 +1611,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 slotKey: kSibling1,
                                                 title: 'Sibling 1',
                                               ),
-                                              onOpen: (v) =>
-                                                  _openVaultFromTree(data, v),
+                                              onOpen: () => _openVaultFromTree(
+                                                data,
+                                                slotVault[kSibling1]!,
+                                              ),
                                               showAddLabel: 'Add sibling',
                                             ),
                                             const SizedBox(height: 10),
@@ -1451,8 +1629,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 slotKey: kSibling2,
                                                 title: 'Sibling 2',
                                               ),
-                                              onOpen: (v) =>
-                                                  _openVaultFromTree(data, v),
+                                              onOpen: () => _openVaultFromTree(
+                                                data,
+                                                slotVault[kSibling2]!,
+                                              ),
                                               showAddLabel: 'Add sibling',
                                             ),
                                             const SizedBox(height: 10),
@@ -1467,8 +1647,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 slotKey: kSibling3,
                                                 title: 'Sibling 3',
                                               ),
-                                              onOpen: (v) =>
-                                                  _openVaultFromTree(data, v),
+                                              onOpen: () => _openVaultFromTree(
+                                                data,
+                                                slotVault[kSibling3]!,
+                                              ),
                                               showAddLabel: 'Add sibling',
                                             ),
                                           ],
@@ -1503,8 +1685,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                             slotKey: kChild1,
                                             title: 'Child 1',
                                           ),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                          onOpen: () => _openTreePersonOptions(
+                                            slotKey: kChild1,
+                                            data: data,
+                                            person: slotVault[kChild1]!,
+                                          ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild2),
@@ -1517,8 +1702,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                             slotKey: kChild2,
                                             title: 'Child 2',
                                           ),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                          onOpen: () => _openTreePersonOptions(
+                                            slotKey: kChild2,
+                                            data: data,
+                                            person: slotVault[kChild2]!,
+                                          ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild3),
@@ -1531,8 +1719,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                             slotKey: kChild3,
                                             title: 'Child 3',
                                           ),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                          onOpen: () => _openTreePersonOptions(
+                                            slotKey: kChild3,
+                                            data: data,
+                                            person: slotVault[kChild3]!,
+                                          ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild4),
@@ -1545,8 +1736,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                             slotKey: kChild4,
                                             title: 'Child 4',
                                           ),
-                                          onOpen: (v) =>
-                                              _openVaultFromTree(data, v),
+                                          onOpen: () => _openTreePersonOptions(
+                                            slotKey: kChild4,
+                                            data: data,
+                                            person: slotVault[kChild4]!,
+                                          ),
                                         ),
                                       ],
                                     ),
@@ -1578,8 +1772,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               slotKey: kGrandchild1,
                                               title: 'Grandchild 1',
                                             ),
-                                            onOpen: (v) =>
-                                                _openVaultFromTree(data, v),
+                                            onOpen: () =>
+                                                _openTreePersonOptions(
+                                              slotKey: kGrandchild1,
+                                              data: data,
+                                              person: slotVault[kGrandchild1]!,
+                                            ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild2),
@@ -1593,8 +1791,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               slotKey: kGrandchild2,
                                               title: 'Grandchild 2',
                                             ),
-                                            onOpen: (v) =>
-                                                _openVaultFromTree(data, v),
+                                            onOpen: () =>
+                                                _openTreePersonOptions(
+                                              slotKey: kGrandchild2,
+                                              data: data,
+                                              person: slotVault[kGrandchild2]!,
+                                            ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild3),
@@ -1608,8 +1810,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               slotKey: kGrandchild3,
                                               title: 'Grandchild 3',
                                             ),
-                                            onOpen: (v) =>
-                                                _openVaultFromTree(data, v),
+                                            onOpen: () =>
+                                                _openTreePersonOptions(
+                                              slotKey: kGrandchild3,
+                                              data: data,
+                                              person: slotVault[kGrandchild3]!,
+                                            ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild4),
@@ -1623,8 +1829,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               slotKey: kGrandchild4,
                                               title: 'Grandchild 4',
                                             ),
-                                            onOpen: (v) =>
-                                                _openVaultFromTree(data, v),
+                                            onOpen: () =>
+                                                _openTreePersonOptions(
+                                              slotKey: kGrandchild4,
+                                              data: data,
+                                              person: slotVault[kGrandchild4]!,
+                                            ),
                                           ),
                                         ],
                                       ),
@@ -1649,7 +1859,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild1),
                                             text: 'Add great-grandchild',
-                                            filled: slotVault[kGreatGrandchild1],
+                                            filled:
+                                                slotVault[kGreatGrandchild1],
                                             avatarUrl: data.avatarUrlByVaultId[
                                                 (slotVault[kGreatGrandchild1]
                                                             ?['id'] ??
@@ -1659,13 +1870,16 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               slotKey: kGreatGrandchild1,
                                               title: 'Great-Grandchild 1',
                                             ),
-                                            onOpen: (v) =>
-                                                _openVaultFromTree(data, v),
+                                            onOpen: () => _openVaultFromTree(
+                                              data,
+                                              slotVault[kGreatGrandchild1]!,
+                                            ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild2),
                                             text: 'Add great-grandchild',
-                                            filled: slotVault[kGreatGrandchild2],
+                                            filled:
+                                                slotVault[kGreatGrandchild2],
                                             avatarUrl: data.avatarUrlByVaultId[
                                                 (slotVault[kGreatGrandchild2]
                                                             ?['id'] ??
@@ -1675,13 +1889,16 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               slotKey: kGreatGrandchild2,
                                               title: 'Great-Grandchild 2',
                                             ),
-                                            onOpen: (v) =>
-                                                _openVaultFromTree(data, v),
+                                            onOpen: () => _openVaultFromTree(
+                                              data,
+                                              slotVault[kGreatGrandchild2]!,
+                                            ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild3),
                                             text: 'Add great-grandchild',
-                                            filled: slotVault[kGreatGrandchild3],
+                                            filled:
+                                                slotVault[kGreatGrandchild3],
                                             avatarUrl: data.avatarUrlByVaultId[
                                                 (slotVault[kGreatGrandchild3]
                                                             ?['id'] ??
@@ -1691,13 +1908,16 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               slotKey: kGreatGrandchild3,
                                               title: 'Great-Grandchild 3',
                                             ),
-                                            onOpen: (v) =>
-                                                _openVaultFromTree(data, v),
+                                            onOpen: () => _openVaultFromTree(
+                                              data,
+                                              slotVault[kGreatGrandchild3]!,
+                                            ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild4),
                                             text: 'Add great-grandchild',
-                                            filled: slotVault[kGreatGrandchild4],
+                                            filled:
+                                                slotVault[kGreatGrandchild4],
                                             avatarUrl: data.avatarUrlByVaultId[
                                                 (slotVault[kGreatGrandchild4]
                                                             ?['id'] ??
@@ -1707,8 +1927,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               slotKey: kGreatGrandchild4,
                                               title: 'Great-Grandchild 4',
                                             ),
-                                            onOpen: (v) =>
-                                                _openVaultFromTree(data, v),
+                                            onOpen: () => _openVaultFromTree(
+                                              data,
+                                              slotVault[kGreatGrandchild4]!,
+                                            ),
                                           ),
                                         ],
                                       ),
@@ -1716,50 +1938,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                   ],
                                 ],
                                 const SizedBox(height: 14),
-                                _SectionHeader(
-                                  title: 'Expand ancestor branches',
-                                  isOpen: _showFutureAncestorBranches,
-                                  onToggle: () => setState(() =>
-                                      _showFutureAncestorBranches =
-                                          !_showFutureAncestorBranches),
-                                ),
-                                if (_showFutureAncestorBranches) ...[
-                                  const SizedBox(height: 8),
-                                  _FutureBranchCard(
-                                    title: 'Older ancestors',
-                                    subtitle:
-                                        'In the next phase, each ancestor card can open its own branch so your tree keeps growing upward without replacing this main view.',
-                                    buttonText: 'How this will work',
-                                    onTap: () => _showPerpetualTreeInfo(
-                                      title: 'Ancestor branch expansion',
-                                      body:
-                                          'The main tree will stay simple and familiar. Later, tapping a parent, grandparent, or great-grandparent will open that person\'s own branch view so older generations can keep expanding upward without cramming everything onto one screen.',
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
-                                _SectionHeader(
-                                  title: 'Expand descendant branches',
-                                  isOpen: _showFutureDescendantBranches,
-                                  onToggle: () => setState(() =>
-                                      _showFutureDescendantBranches =
-                                          !_showFutureDescendantBranches),
-                                ),
-                                if (_showFutureDescendantBranches) ...[
-                                  const SizedBox(height: 8),
-                                  _FutureBranchCard(
-                                    title: 'Future generations',
-                                    subtitle:
-                                        'Kids, grandkids, and great-grandkids will later be able to open their own branch views so descendants can keep extending downward over time.',
-                                    buttonText: 'How this will work',
-                                    onTap: () => _showPerpetualTreeInfo(
-                                      title: 'Descendant branch expansion',
-                                      body:
-                                          'Your current tree will remain the home view. Later, when a descendant branch gets large, tapping that child or grandchild line will open a focused branch view for that line, allowing perpetual family growth without forcing endless hardcoded slots into one screen.',
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                ],
                                 SizedBox(
                                   height: 54,
                                   child: CustomPaint(
@@ -1769,7 +1947,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 const SizedBox(height: 10),
                                 Center(
                                   child: Text(
-                                    'Your tree grows as more people are added. Branch expansion will let future generations keep unfolding from this view.',
+                                    'Your tree grows as more people are added.',
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontStyle: FontStyle.italic,
@@ -1969,7 +2147,7 @@ class _PersonSlot extends StatelessWidget {
   final Map<String, dynamic>? filled;
   final String? avatarUrl;
   final VoidCallback onInvite;
-  final void Function(Map<String, dynamic> v) onOpen;
+  final VoidCallback onOpen;
   final String showAddLabel;
 
   const _PersonSlot({
@@ -1992,7 +2170,7 @@ class _PersonSlot extends StatelessWidget {
 
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: () => has ? onOpen(filled!) : onInvite(),
+      onTap: has ? onOpen : onInvite,
       child: Container(
         height: 70,
         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -2036,7 +2214,7 @@ class _SmallInviteSlot extends StatelessWidget {
   final Map<String, dynamic>? filled;
   final String? avatarUrl;
   final VoidCallback onInvite;
-  final void Function(Map<String, dynamic> v) onOpen;
+  final VoidCallback onOpen;
 
   const _SmallInviteSlot({
     super.key,
@@ -2058,7 +2236,7 @@ class _SmallInviteSlot extends StatelessWidget {
 
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: () => has ? onOpen(filled!) : onInvite(),
+      onTap: has ? onOpen : onInvite,
       child: Container(
         width: 200,
         height: 52,
@@ -2091,72 +2269,6 @@ class _SmallInviteSlot extends StatelessWidget {
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FutureBranchCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final String buttonText;
-  final VoidCallback onTap;
-
-  const _FutureBranchCard({
-    required this.title,
-    required this.subtitle,
-    required this.buttonText,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
-        color: Colors.white.withOpacity(0.28),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: Colors.black.withOpacity(0.06),
-              child: Icon(
-                Icons.account_tree_outlined,
-                color: Colors.black.withOpacity(0.70),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Colors.black.withOpacity(0.65),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            OutlinedButton(
-              onPressed: onTap,
-              child: Text(buttonText),
             ),
           ],
         ),
