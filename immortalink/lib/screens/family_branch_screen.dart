@@ -27,6 +27,8 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   final _supabase = Supabase.instance.client;
 
   static const String _logoPath = 'assets/images/immortalink_logo.png';
+  static const String _vaultAvatarBucket = 'avatars';
+  static const String _legacyAvatarBucket = 'vault_photos';
 
   bool _loading = true;
   String? _error;
@@ -42,15 +44,63 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     _load();
   }
 
-  Future<String?> _signedAvatarUrl(String path) async {
+  Future<String?> _signedStorageUrl({
+    required String bucket,
+    required String path,
+  }) async {
     try {
       final signed =
-          await _supabase.storage.from('avatars').createSignedUrl(path, 60 * 60);
+          await _supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (_) {
       return null;
     }
+  }
+
+  Future<String?> _signedVaultAvatarUrl(String path) {
+    return _signedStorageUrl(bucket: _vaultAvatarBucket, path: path);
+  }
+
+  Future<String?> _signedLegacyAvatarUrl(String path) {
+    return _signedStorageUrl(bucket: _legacyAvatarBucket, path: path);
+  }
+
+  Future<Map<String, String>> _loadLegacyAvatarFallbackPaths() async {
+    final result = <String, String>{};
+
+    try {
+      final res = await _supabase
+          .from('legacy_member_photos')
+          .select('legacy_member_id, path, created_at')
+          .eq('family_id', widget.familyId)
+          .order('created_at', ascending: false);
+
+      final rows = (res as List).cast<Map<String, dynamic>>();
+
+      for (final row in rows) {
+        final legacyId = (row['legacy_member_id'] ?? '').toString().trim();
+        final path = (row['path'] ?? '').toString().trim();
+        if (legacyId.isEmpty || path.isEmpty) continue;
+
+        final existing = result[legacyId];
+        final isProfilePath = path.toLowerCase().contains('/profile_picture/');
+
+        if (existing == null) {
+          result[legacyId] = path;
+          continue;
+        }
+
+        final existingIsProfile =
+            existing.toLowerCase().contains('/profile_picture/');
+
+        if (!existingIsProfile && isProfilePath) {
+          result[legacyId] = path;
+        }
+      }
+    } catch (_) {}
+
+    return result;
   }
 
   Future<void> _load() async {
@@ -73,7 +123,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       final legacyRes = await _supabase
           .from('legacy_family_members')
           .select(
-            'id, family_id, slot_key, name, display_name, birth_year, death_year, created_at, updated_at, replaced_by_vault_id',
+            'id, family_id, slot_key, name, display_name, birth_year, death_year, created_at, updated_at, replaced_by_vault_id, about_me_text, avatar_path',
           )
           .eq('family_id', widget.familyId);
 
@@ -82,11 +132,31 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       final legacyMembers = (legacyRes as List).cast<Map<String, dynamic>>();
 
       final avatarMap = <String, String>{};
+
       for (final v in vaults) {
-        final id = (v['id'] ?? '').toString();
+        final id = (v['id'] ?? '').toString().trim();
         final path = (v['avatar_path'] ?? '').toString().trim();
         if (id.isEmpty || path.isEmpty) continue;
-        final url = await _signedAvatarUrl(path);
+
+        final url = await _signedVaultAvatarUrl(path);
+        if (url != null && url.trim().isNotEmpty) {
+          avatarMap[id] = url;
+        }
+      }
+
+      final legacyFallbackPathById = await _loadLegacyAvatarFallbackPaths();
+
+      for (final legacy in legacyMembers) {
+        final id = (legacy['id'] ?? '').toString().trim();
+        if (id.isEmpty) continue;
+
+        final dbPath = (legacy['avatar_path'] ?? '').toString().trim();
+        final fallbackPath = legacyFallbackPathById[id];
+        final chosenPath = dbPath.isNotEmpty ? dbPath : (fallbackPath ?? '');
+
+        if (chosenPath.isEmpty) continue;
+
+        final url = await _signedLegacyAvatarUrl(chosenPath);
         if (url != null && url.trim().isNotEmpty) {
           avatarMap[id] = url;
         }
@@ -134,11 +204,19 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
     for (final legacy in _legacyMembers) {
       final slotKey = (legacy['slot_key'] ?? '').toString().trim();
+      final replacedByVaultId =
+          (legacy['replaced_by_vault_id'] ?? '').toString().trim();
+
       if (slotKey.isEmpty) continue;
-      result.putIfAbsent(slotKey, () => {
-            ...legacy,
-            '__legacy': true,
-          });
+      if (replacedByVaultId.isNotEmpty) continue;
+
+      result.putIfAbsent(
+        slotKey,
+        () => {
+          ...legacy,
+          '__legacy': true,
+        },
+      );
     }
 
     return result;
@@ -206,7 +284,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         slotKey == 'maternal_gm' ||
         slotKey == 'maternal_gf' ||
         slotKey == 'paternal_gm' ||
-        slotKey == 'paternal_gf';
+        slotKey == 'paternal_gf' ||
+        slotKey == 'maternal_ggm' ||
+        slotKey == 'maternal_ggf' ||
+        slotKey == 'paternal_ggm' ||
+        slotKey == 'paternal_ggf';
   }
 
   bool _canOpenDescendantBranch(String slotKey) {
@@ -217,7 +299,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         slotKey == 'grandchild_1' ||
         slotKey == 'grandchild_2' ||
         slotKey == 'grandchild_3' ||
-        slotKey == 'grandchild_4';
+        slotKey == 'grandchild_4' ||
+        slotKey == 'greatgrandchild_1' ||
+        slotKey == 'greatgrandchild_2' ||
+        slotKey == 'greatgrandchild_3' ||
+        slotKey == 'greatgrandchild_4';
   }
 
   String? _branchDirectionForSlot(String slotKey) {
@@ -238,6 +324,12 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       case 'maternal_gf':
       case 'paternal_gf':
         return 'Grandfather';
+      case 'maternal_ggm':
+      case 'paternal_ggm':
+        return 'Great-grandmother';
+      case 'maternal_ggf':
+      case 'paternal_ggf':
+        return 'Great-grandfather';
       case 'child_1':
       case 'child_2':
       case 'child_3':
@@ -248,6 +340,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       case 'grandchild_3':
       case 'grandchild_4':
         return 'Grandchild';
+      case 'greatgrandchild_1':
+      case 'greatgrandchild_2':
+      case 'greatgrandchild_3':
+      case 'greatgrandchild_4':
+        return 'Great-grandchild';
       default:
         return 'Branch';
     }
@@ -350,7 +447,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
   String? _avatarFor(Map<String, dynamic>? person) {
     if (person == null) return null;
-    if (person['__legacy'] == true) return null;
     final id = (person['id'] ?? '').toString();
     if (id.isEmpty) return null;
     return _avatarUrlByVaultId[id];
@@ -421,6 +517,46 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
             secondarySlots: [],
             secondaryLabels: [],
           );
+        case 'maternal_ggm':
+          return const _BranchConfig(
+            title: 'Maternal great-grandmother branch',
+            centerSlot: 'maternal_ggm',
+            centerFallback: 'Great-grandmother',
+            primarySlots: [],
+            primaryLabels: [],
+            secondarySlots: [],
+            secondaryLabels: [],
+          );
+        case 'maternal_ggf':
+          return const _BranchConfig(
+            title: 'Maternal great-grandfather branch',
+            centerSlot: 'maternal_ggf',
+            centerFallback: 'Great-grandfather',
+            primarySlots: [],
+            primaryLabels: [],
+            secondarySlots: [],
+            secondaryLabels: [],
+          );
+        case 'paternal_ggm':
+          return const _BranchConfig(
+            title: 'Paternal great-grandmother branch',
+            centerSlot: 'paternal_ggm',
+            centerFallback: 'Great-grandmother',
+            primarySlots: [],
+            primaryLabels: [],
+            secondarySlots: [],
+            secondaryLabels: [],
+          );
+        case 'paternal_ggf':
+          return const _BranchConfig(
+            title: 'Paternal great-grandfather branch',
+            centerSlot: 'paternal_ggf',
+            centerFallback: 'Great-grandfather',
+            primarySlots: [],
+            primaryLabels: [],
+            secondarySlots: [],
+            secondaryLabels: [],
+          );
         default:
           return _BranchConfig(
             title: widget.rootLabel,
@@ -488,6 +624,19 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
             'Great-grandchild',
             'Great-grandchild',
           ],
+          secondarySlots: const [],
+          secondaryLabels: const [],
+        );
+      case 'greatgrandchild_1':
+      case 'greatgrandchild_2':
+      case 'greatgrandchild_3':
+      case 'greatgrandchild_4':
+        return _BranchConfig(
+          title: 'Great-grandchild branch',
+          centerSlot: widget.rootSlotKey,
+          centerFallback: 'Great-grandchild',
+          primarySlots: const [],
+          primaryLabels: const [],
           secondarySlots: const [],
           secondaryLabels: const [],
         );
@@ -640,8 +789,8 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                                             onTap: secondaryPeople[i] == null
                                                 ? null
                                                 : () => _openBranchOptions(
-                                                      slotKey:
-                                                          config.secondarySlots[i],
+                                                      slotKey: config
+                                                          .secondarySlots[i],
                                                       person:
                                                           secondaryPeople[i]!,
                                                     ),

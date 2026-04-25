@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'family_branch_screen.dart';
 import 'legacy_vault_companion_screen.dart';
 
 class LegacyVaultScreen extends StatefulWidget {
@@ -96,6 +97,108 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         ),
       ),
     );
+  }
+
+  bool _canOpenAncestorBranch(String slotKey) {
+    return slotKey == 'mother' ||
+        slotKey == 'father' ||
+        slotKey == 'maternal_gm' ||
+        slotKey == 'maternal_gf' ||
+        slotKey == 'paternal_gm' ||
+        slotKey == 'paternal_gf' ||
+        slotKey == 'maternal_ggm' ||
+        slotKey == 'maternal_ggf' ||
+        slotKey == 'paternal_ggm' ||
+        slotKey == 'paternal_ggf';
+  }
+
+  bool _canOpenDescendantBranch(String slotKey) {
+    return slotKey == 'child_1' ||
+        slotKey == 'child_2' ||
+        slotKey == 'child_3' ||
+        slotKey == 'child_4' ||
+        slotKey == 'grandchild_1' ||
+        slotKey == 'grandchild_2' ||
+        slotKey == 'grandchild_3' ||
+        slotKey == 'grandchild_4' ||
+        slotKey == 'greatgrandchild_1' ||
+        slotKey == 'greatgrandchild_2' ||
+        slotKey == 'greatgrandchild_3' ||
+        slotKey == 'greatgrandchild_4';
+  }
+
+  String? _branchDirectionForSlot(String slotKey) {
+    if (_canOpenAncestorBranch(slotKey)) return 'ancestor';
+    if (_canOpenDescendantBranch(slotKey)) return 'descendant';
+    return null;
+  }
+
+  String _branchLabelForSlot(String slotKey) {
+    switch (slotKey) {
+      case 'mother':
+        return 'Mother';
+      case 'father':
+        return 'Father';
+      case 'maternal_gm':
+      case 'paternal_gm':
+        return 'Grandmother';
+      case 'maternal_gf':
+      case 'paternal_gf':
+        return 'Grandfather';
+      case 'maternal_ggm':
+      case 'paternal_ggm':
+        return 'Great-grandmother';
+      case 'maternal_ggf':
+      case 'paternal_ggf':
+        return 'Great-grandfather';
+      case 'child_1':
+      case 'child_2':
+      case 'child_3':
+      case 'child_4':
+        return 'Child';
+      case 'grandchild_1':
+      case 'grandchild_2':
+      case 'grandchild_3':
+      case 'grandchild_4':
+        return 'Grandchild';
+      case 'greatgrandchild_1':
+      case 'greatgrandchild_2':
+      case 'greatgrandchild_3':
+      case 'greatgrandchild_4':
+        return 'Great-grandchild';
+      default:
+        return 'Branch';
+    }
+  }
+
+  Future<void> _openBranch() async {
+    final row = _row;
+    if (row == null) {
+      _toast('Profile is not loaded yet.');
+      return;
+    }
+
+    final slotKey = (row['slot_key'] ?? '').toString().trim();
+    final direction = _branchDirectionForSlot(slotKey);
+
+    if (slotKey.isEmpty || direction == null) {
+      _toast('This profile does not have a deeper branch view yet.');
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FamilyBranchScreen(
+          familyId: widget.familyId,
+          rootLabel: _branchLabelForSlot(slotKey),
+          rootSlotKey: slotKey,
+          direction: direction,
+        ),
+      ),
+    );
+
+    await _load();
   }
 
   int? _parseYear(String raw) {
@@ -196,7 +299,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final res = await _supabase
           .from('legacy_family_members')
           .select(
-            'id, family_id, slot_key, name, display_name, birth_year, death_year, about_me_text, created_by, created_at, updated_at, replaced_by_vault_id',
+            'id, family_id, slot_key, name, display_name, birth_year, death_year, about_me_text, avatar_path, created_by, created_at, updated_at, replaced_by_vault_id',
           )
           .eq('id', widget.legacyMemberId)
           .eq('family_id', widget.familyId)
@@ -259,6 +362,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     });
 
     try {
+      final currentRow = _row;
+      final dbAvatarPath = (currentRow?['avatar_path'] ?? '').toString().trim();
+
       final rows = await _supabase
           .from('legacy_member_photos')
           .select('id, path, created_at')
@@ -273,15 +379,33 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       String? profilePath;
       String? profileUrl;
 
+      if (dbAvatarPath.isNotEmpty) {
+        final url = await _signedUrl(_photosBucket, dbAvatarPath);
+        if (url != null && url.trim().isNotEmpty) {
+          profilePath = dbAvatarPath;
+          profileUrl = url;
+
+          for (final r in list) {
+            final candidateId = (r['id'] ?? '').toString();
+            final candidatePath = (r['path'] ?? '').toString().trim();
+            if (candidatePath == dbAvatarPath) {
+              profileId = candidateId;
+              break;
+            }
+          }
+        }
+      }
+
       for (final r in list) {
         final id = (r['id'] ?? '').toString();
         final path = (r['path'] ?? '').toString().trim();
         if (id.isEmpty || path.isEmpty) continue;
 
         final url = await _signedUrl(_photosBucket, path);
-        if (url == null || url.trim().isEmpty) continue;
+        if (url == null || url.trim().isNotEmpty == false) continue;
 
-        if (_isProfilePhotoPath(path)) {
+        final isProfile = path == profilePath || _isProfilePhotoPath(path);
+        if (isProfile) {
           if (profilePath == null) {
             profileId = id;
             profilePath = path;
@@ -476,25 +600,16 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final Uint8List? bytes = file.bytes;
       if (bytes == null) throw Exception('No image bytes received.');
 
-      if (_profilePhotoPath != null && _profilePhotoPath!.trim().isNotEmpty) {
-        await _supabase.storage.from(_photosBucket).remove([_profilePhotoPath!]);
-      }
-      if (_profilePhotoId != null && _profilePhotoId!.trim().isNotEmpty) {
-        await _supabase
-            .from('legacy_member_photos')
-            .delete()
-            .eq('id', _profilePhotoId!)
-            .eq('legacy_member_id', widget.legacyMemberId)
-            .eq('family_id', widget.familyId);
-      }
+      final oldProfilePath = (_profilePhotoPath ?? '').trim();
+      final oldProfileId = (_profilePhotoId ?? '').trim();
 
       final ext = _extFromName(file.name);
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final path =
+      final newPath =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/profile_picture/$ts.$ext';
 
       await _supabase.storage.from(_photosBucket).uploadBinary(
-            path,
+            newPath,
             bytes,
             fileOptions: FileOptions(
               upsert: false,
@@ -502,13 +617,35 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             ),
           );
 
+      await _supabase
+          .from('legacy_family_members')
+          .update({
+            'avatar_path': newPath,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', widget.legacyMemberId)
+          .eq('family_id', widget.familyId);
+
+      if (oldProfileId.isNotEmpty) {
+        await _supabase
+            .from('legacy_member_photos')
+            .delete()
+            .eq('id', oldProfileId)
+            .eq('legacy_member_id', widget.legacyMemberId)
+            .eq('family_id', widget.familyId);
+      }
+
       await _supabase.from('legacy_member_photos').insert({
         'legacy_member_id': widget.legacyMemberId,
         'family_id': widget.familyId,
-        'path': path,
+        'path': newPath,
       });
 
-      await _loadPhotos();
+      if (oldProfilePath.isNotEmpty && oldProfilePath != newPath) {
+        await _supabase.storage.from(_photosBucket).remove([oldProfilePath]);
+      }
+
+      await _load();
       _toast('Profile picture updated.');
     } catch (e) {
       _toast('Profile picture upload failed: $e');
@@ -641,11 +778,15 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         ..._photos
             .map((p) => (p['path'] ?? '').trim())
             .where((p) => p.isNotEmpty),
-        if ((_profilePhotoPath ?? '').trim().isNotEmpty) _profilePhotoPath!.trim(),
+        if ((_profilePhotoPath ?? '').trim().isNotEmpty)
+          _profilePhotoPath!.trim(),
       ];
 
       if (photoPaths.isNotEmpty) {
-        await _supabase.storage.from(_photosBucket).remove(photoPaths);
+        await _supabase
+            .storage
+            .from(_photosBucket)
+            .remove(photoPaths.toSet().toList());
       }
 
       await _supabase
@@ -1029,94 +1170,116 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   Widget _headerCard() {
     final title = _titleFromRow(_row);
     final subtitle = _subtitleFromRow(_row);
+    final slotKey = (_row?['slot_key'] ?? '').toString().trim();
+    final canOpenBranch = _branchDirectionForSlot(slotKey) != null;
 
     return _fieldCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
         children: [
-          ClipOval(
-            child: Container(
-              width: 72,
-              height: 72,
-              color: Colors.black.withOpacity(0.08),
-              child: _profilePhotoUrl == null || _profilePhotoUrl!.trim().isEmpty
-                  ? Icon(
-                      Icons.person,
-                      size: 30,
-                      color: Colors.black.withOpacity(0.65),
-                    )
-                  : Image.network(
-                      _profilePhotoUrl!,
-                      fit: BoxFit.cover,
-                      gaplessPlayback: true,
-                      errorBuilder: (_, __, ___) => Icon(
-                        Icons.person,
-                        size: 30,
-                        color: Colors.black.withOpacity(0.65),
-                      ),
-                    ),
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Spacer(),
+              if (canOpenBranch)
+                SizedBox(
+                  height: 40,
+                  child: OutlinedButton.icon(
+                    onPressed: _openBranch,
+                    icon: const Icon(Icons.account_tree_outlined, size: 18),
+                    label: const Text('Open branch'),
+                  ),
+                ),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              ClipOval(
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  color: Colors.black.withOpacity(0.08),
+                  child:
+                      _profilePhotoUrl == null || _profilePhotoUrl!.trim().isEmpty
+                          ? Icon(
+                              Icons.person,
+                              size: 30,
+                              color: Colors.black.withOpacity(0.65),
+                            )
+                          : Image.network(
+                              _profilePhotoUrl!,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                              errorBuilder: (_, __, ___) => Icon(
+                                Icons.person,
+                                size: 30,
+                                color: Colors.black.withOpacity(0.65),
+                              ),
+                            ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: Colors.black.withOpacity(0.60),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Family-owned predecessor profile',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.black.withOpacity(0.55),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
-                      height: 40,
-                      child: OutlinedButton.icon(
-                        onPressed: _uploadingProfilePhoto
-                            ? null
-                            : _uploadOrReplaceProfilePhoto,
-                        icon: const Icon(Icons.person_outline),
-                        label: Text(
-                          _uploadingProfilePhoto
-                              ? 'Uploading…'
-                              : ((_profilePhotoUrl ?? '').trim().isEmpty
-                                  ? 'Add profile picture'
-                                  : 'Change pfp'),
-                        ),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    SizedBox(
-                      height: 40,
-                      child: OutlinedButton.icon(
-                        onPressed: _openLegacyAi,
-                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                        label: const Text('Ask (AI)'),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.black.withOpacity(0.60),
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Family-owned predecessor profile',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black.withOpacity(0.55),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        SizedBox(
+                          height: 40,
+                          child: OutlinedButton.icon(
+                            onPressed: _uploadingProfilePhoto
+                                ? null
+                                : _uploadOrReplaceProfilePhoto,
+                            icon: const Icon(Icons.person_outline),
+                            label: Text(
+                              _uploadingProfilePhoto
+                                  ? 'Uploading…'
+                                  : ((_profilePhotoUrl ?? '').trim().isEmpty
+                                      ? 'Add profile picture'
+                                      : 'Change pfp'),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          height: 40,
+                          child: OutlinedButton.icon(
+                            onPressed: _openLegacyAi,
+                            icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                            label: const Text('Ask (AI)'),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),

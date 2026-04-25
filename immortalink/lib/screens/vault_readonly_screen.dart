@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../widgets/logo_watermark.dart';
+import 'family_branch_screen.dart';
 import 'vault_companion_screen.dart';
 
 class VaultReadOnlyScreen extends StatefulWidget {
@@ -46,6 +47,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   String? _displayName;
 
   String? _ownerId;
+  String? _familyId;
+  String? _slotKey;
 
   static const String _avatarBucket = 'avatars';
   static const String _featuredPhotosBucket = 'vault_photos';
@@ -115,26 +118,124 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
   Future<String?> _signedUrl(String bucket, String path) async {
     try {
-      final signed = await _client.storage.from(bucket).createSignedUrl(path, 60 * 60);
+      final signed =
+          await _client.storage.from(bucket).createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
-      // NOTE: Storage policies/RLS failures show up here.
-      // Keep it lightweight but leave a breadcrumb for debugging.
-      _storageErrorHint = 'Signed URL failed for bucket="$bucket" path="$path" → $e';
+      _storageErrorHint =
+          'Signed URL failed for bucket="$bucket" path="$path" → $e';
       return null;
     }
   }
 
   Future<String?> _signedAvatarUrl(String path) async {
     try {
-      final signed = await _client.storage.from(_avatarBucket).createSignedUrl(path, 60 * 60);
+      final signed = await _client.storage
+          .from(_avatarBucket)
+          .createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       _storageErrorHint = 'Signed avatar URL failed for path="$path" → $e';
       return null;
     }
+  }
+
+  bool _canOpenAncestorBranch(String slotKey) {
+    return slotKey == 'mother' ||
+        slotKey == 'father' ||
+        slotKey == 'maternal_gm' ||
+        slotKey == 'maternal_gf' ||
+        slotKey == 'paternal_gm' ||
+        slotKey == 'paternal_gf' ||
+        slotKey == 'maternal_ggm' ||
+        slotKey == 'maternal_ggf' ||
+        slotKey == 'paternal_ggm' ||
+        slotKey == 'paternal_ggf';
+  }
+
+  bool _canOpenDescendantBranch(String slotKey) {
+    return slotKey == 'child_1' ||
+        slotKey == 'child_2' ||
+        slotKey == 'child_3' ||
+        slotKey == 'child_4' ||
+        slotKey == 'grandchild_1' ||
+        slotKey == 'grandchild_2' ||
+        slotKey == 'grandchild_3' ||
+        slotKey == 'grandchild_4' ||
+        slotKey == 'greatgrandchild_1' ||
+        slotKey == 'greatgrandchild_2' ||
+        slotKey == 'greatgrandchild_3' ||
+        slotKey == 'greatgrandchild_4';
+  }
+
+  String? _branchDirectionForSlot(String slotKey) {
+    if (_canOpenAncestorBranch(slotKey)) return 'ancestor';
+    if (_canOpenDescendantBranch(slotKey)) return 'descendant';
+    return null;
+  }
+
+  String _branchLabelForSlot(String slotKey) {
+    switch (slotKey) {
+      case 'mother':
+        return 'Mother';
+      case 'father':
+        return 'Father';
+      case 'maternal_gm':
+      case 'paternal_gm':
+        return 'Grandmother';
+      case 'maternal_gf':
+      case 'paternal_gf':
+        return 'Grandfather';
+      case 'maternal_ggm':
+      case 'paternal_ggm':
+        return 'Great-grandmother';
+      case 'maternal_ggf':
+      case 'paternal_ggf':
+        return 'Great-grandfather';
+      case 'child_1':
+      case 'child_2':
+      case 'child_3':
+      case 'child_4':
+        return 'Child';
+      case 'grandchild_1':
+      case 'grandchild_2':
+      case 'grandchild_3':
+      case 'grandchild_4':
+        return 'Grandchild';
+      case 'greatgrandchild_1':
+      case 'greatgrandchild_2':
+      case 'greatgrandchild_3':
+      case 'greatgrandchild_4':
+        return 'Great-grandchild';
+      default:
+        return 'Branch';
+    }
+  }
+
+  Future<void> _openBranch() async {
+    final familyId = (_familyId ?? '').trim();
+    final slotKey = (_slotKey ?? '').trim();
+    final direction = _branchDirectionForSlot(slotKey);
+
+    if (familyId.isEmpty || slotKey.isEmpty || direction == null) {
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FamilyBranchScreen(
+          familyId: familyId,
+          rootLabel: _branchLabelForSlot(slotKey),
+          rootSlotKey: slotKey,
+          direction: direction,
+        ),
+      ),
+    );
+
+    await _loadAll();
   }
 
   Future<void> _loadAll() async {
@@ -146,17 +247,37 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     try {
       final meta = await _client
           .from('vaults')
-          .select('owner_id, avatar_path, display_name, name')
+          .select('owner_id, family_id, avatar_path, display_name, name')
           .eq('id', widget.vaultId)
           .maybeSingle();
 
       final ownerId = (meta?['owner_id'] as String?)?.trim();
+      final familyId = (meta?['family_id'] as String?)?.trim();
       final path = (meta?['avatar_path'] as String?)?.trim();
-      final dn = (meta?['display_name'] as String?) ?? (meta?['name'] as String?) ?? _vaultName;
+      final dn = (meta?['display_name'] as String?) ??
+          (meta?['name'] as String?) ??
+          _vaultName;
 
       String? signed;
       if (path != null && path.isNotEmpty) {
         signed = await _signedAvatarUrl(path);
+      }
+
+      String? slotKey;
+      if (ownerId != null &&
+          ownerId.isNotEmpty &&
+          familyId != null &&
+          familyId.isNotEmpty) {
+        try {
+          final member = await _client
+              .from('family_members')
+              .select('slot_key')
+              .eq('family_id', familyId)
+              .eq('user_id', ownerId)
+              .maybeSingle();
+
+          slotKey = (member?['slot_key'] as String?)?.trim();
+        } catch (_) {}
       }
 
       final data = await _client
@@ -169,6 +290,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
       setState(() {
         _ownerId = ownerId;
+        _familyId = familyId;
+        _slotKey = slotKey;
         _avatarUrl = signed;
         _displayName = (dn ?? _vaultName).toString();
         _memories = List<Map<String, dynamic>>.from(data);
@@ -249,7 +372,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         if (path.isEmpty) continue;
         final url = await _signedUrl(_aboutPhotosBucket, path);
         if (url == null || url.trim().isEmpty) {
-          _aboutPhotoError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_aboutPhotosBucket".';
+          _aboutPhotoError ??=
+              'Storage access blocked. Check Storage SELECT policy for bucket "$_aboutPhotosBucket".';
           continue;
         }
         items.add({'path': path, 'url': url});
@@ -272,6 +396,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       });
     }
   }
+
   Widget _aboutMeTextPhotosSection() {
     const double previewHeight = 220;
 
@@ -290,9 +415,17 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           const SizedBox(height: 6),
           const SizedBox(height: 10),
           if (_loadingAboutMeText)
-            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(8),
+                child: CircularProgressIndicator(),
+              ),
+            )
           else if (_aboutMeTextError != null)
-            Text('About me load issue (MVP): $_aboutMeTextError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text(
+              'About me load issue (MVP): $_aboutMeTextError',
+              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+            )
           else
             Container(
               width: double.infinity,
@@ -303,34 +436,52 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                 color: Colors.white.withOpacity(0.35),
               ),
               child: Text(
-                (_aboutMeText ?? '').trim().isEmpty ? 'No About me text yet.' : (_aboutMeText ?? ''),
+                (_aboutMeText ?? '').trim().isEmpty
+                    ? 'No About me text yet.'
+                    : (_aboutMeText ?? ''),
                 style: TextStyle(color: Colors.black.withOpacity(0.85)),
               ),
             ),
-
           const SizedBox(height: 14),
           Row(
             children: [
-              const Text('About me photos', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Text(
+                'About me photos',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
               const Spacer(),
               Text(
                 'View only',
-                style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.55)),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Colors.black.withOpacity(0.55),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 10),
           if (_loadingAboutPhotos)
-            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(8),
+                child: CircularProgressIndicator(),
+              ),
+            )
           else if (_aboutPhotoError != null)
-            Text('Photo load issue (MVP): $_aboutPhotoError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text(
+              'Photo load issue (MVP): $_aboutPhotoError',
+              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+            )
           else if (_aboutPhotos.isEmpty)
             Row(
               children: [
                 Icon(Icons.photo, color: Colors.black.withOpacity(0.45)),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text('No About me photos yet.', style: TextStyle(color: Colors.black.withOpacity(0.60))),
+                  child: Text(
+                    'No About me photos yet.',
+                    style: TextStyle(color: Colors.black.withOpacity(0.60)),
+                  ),
                 ),
               ],
             )
@@ -366,7 +517,13 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                                 const Positioned(
                                   left: 12,
                                   bottom: 12,
-                                  child: Text('Tap to view all', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                                  child: Text(
+                                    'Tap to view all',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ),
                               ],
                             );
@@ -376,7 +533,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _dots(_aboutCount, _aboutIndex.clamp(0, (_aboutCount - 1).clamp(0, 99))),
+                  _dots(
+                    _aboutCount,
+                    _aboutIndex.clamp(0, (_aboutCount - 1).clamp(0, 99)),
+                  ),
                 ],
               ),
             ),
@@ -411,9 +571,15 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                     children: [
                       Row(
                         children: [
-                          const Text('About me photos', style: TextStyle(fontWeight: FontWeight.w800)),
+                          const Text(
+                            'About me photos',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
                           const Spacer(),
-                          IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                          IconButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(Icons.close),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -446,7 +612,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                       const SizedBox(height: 10),
                       Row(
                         children: [
-                          Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                          Text(
+                            '${idx + 1} / $total',
+                            style: TextStyle(
+                              color: Colors.black.withOpacity(0.65),
+                            ),
+                          ),
                           const Spacer(),
                           SizedBox(
                             height: 40,
@@ -471,7 +642,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
   String _featuredPrefix(String ownerId) => '$ownerId/${widget.vaultId}/featured';
 
-  int get _highlightsCount => _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
+  int get _highlightsCount =>
+      _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
 
   void _setupAutoSlide() {
     _autoSlideTimer?.cancel();
@@ -514,9 +686,9 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       final prefix = _featuredPrefix(ownerId);
 
       final list = await _client.storage.from(_featuredPhotosBucket).list(
-            path: prefix,
-            searchOptions: const SearchOptions(limit: 200, offset: 0),
-          );
+        path: prefix,
+        searchOptions: const SearchOptions(limit: 200, offset: 0),
+      );
 
       final items = <Map<String, String>>[];
       for (final obj in list) {
@@ -526,7 +698,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         final fullPath = '$prefix/$name';
         final url = await _signedUrl(_featuredPhotosBucket, fullPath);
         if (url == null || url.trim().isEmpty) {
-          _highlightsError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_featuredPhotosBucket".';
+          _highlightsError ??=
+              'Storage access blocked. Check Storage SELECT policy for bucket "$_featuredPhotosBucket".';
           continue;
         }
 
@@ -555,7 +728,6 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     }
   }
 
-  // ✅ FIX: overflow + no crop
   void _openHighlightsGallery() {
     if (_featuredPhotos.isEmpty) return;
 
@@ -582,9 +754,15 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                     children: [
                       Row(
                         children: [
-                          const Text('Owner highlights', style: TextStyle(fontWeight: FontWeight.w800)),
+                          const Text(
+                            'Owner highlights',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
                           const Spacer(),
-                          IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                          IconButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(Icons.close),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -604,7 +782,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                                   maxScale: 4,
                                   child: Image.network(
                                     url,
-                                    fit: BoxFit.contain, // ✅ no crop
+                                    fit: BoxFit.contain,
                                     alignment: Alignment.center,
                                     gaplessPlayback: true,
                                   ),
@@ -617,7 +795,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                       const SizedBox(height: 10),
                       Row(
                         children: [
-                          Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                          Text(
+                            '${idx + 1} / $total',
+                            style: TextStyle(
+                              color: Colors.black.withOpacity(0.65),
+                            ),
+                          ),
                           const Spacer(),
                           SizedBox(
                             height: 40,
@@ -675,25 +858,44 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         children: [
           Row(
             children: [
-              const Text('Owner highlights', style: TextStyle(fontWeight: FontWeight.w800)),
+              const Text(
+                'Owner highlights',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
               const Spacer(),
               Text(
                 'Favourite photos / moments',
-                style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.55)),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Colors.black.withOpacity(0.55),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 10),
           if (_loadingHighlights)
-            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(8),
+                child: CircularProgressIndicator(),
+              ),
+            )
           else if (_highlightsError != null)
-            Text('Highlights load issue (MVP): $_highlightsError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text(
+              'Highlights load issue (MVP): $_highlightsError',
+              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+            )
           else if (_featuredPhotos.isEmpty)
             Row(
               children: [
                 Icon(Icons.photo, color: Colors.black.withOpacity(0.45)),
                 const SizedBox(width: 10),
-                Expanded(child: Text('No highlights yet.', style: TextStyle(color: Colors.black.withOpacity(0.60)))),
+                Expanded(
+                  child: Text(
+                    'No highlights yet.',
+                    style: TextStyle(color: Colors.black.withOpacity(0.60)),
+                  ),
+                ),
               ],
             )
           else
@@ -712,7 +914,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                         child: PageView.builder(
                           controller: _highlightController,
                           itemCount: _highlightsCount,
-                          onPageChanged: (i) => setState(() => _highlightIndex = i),
+                          onPageChanged: (i) =>
+                              setState(() => _highlightIndex = i),
                           itemBuilder: (_, i) {
                             final url = _featuredPhotos[i]['url'] ?? '';
                             return Stack(
@@ -720,7 +923,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                                 Positioned.fill(
                                   child: Image.network(
                                     url,
-                                    fit: BoxFit.contain, // ✅ no crop
+                                    fit: BoxFit.contain,
                                     alignment: Alignment.center,
                                     gaplessPlayback: true,
                                   ),
@@ -728,7 +931,13 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                                 const Positioned(
                                   left: 12,
                                   bottom: 12,
-                                  child: Text('Tap to view all', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                                  child: Text(
+                                    'Tap to view all',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
                                 ),
                               ],
                             );
@@ -738,7 +947,13 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _dots(_highlightsCount, _highlightIndex.clamp(0, (_highlightsCount - 1).clamp(0, 99))),
+                  _dots(
+                    _highlightsCount,
+                    _highlightIndex.clamp(
+                      0,
+                      (_highlightsCount - 1).clamp(0, 99),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -783,7 +998,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         if (!mounted) return;
         setState(() {
           _loadingCoreVoice = false;
-          _coreVoiceError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_voiceBucket".';
+          _coreVoiceError ??=
+              'Storage access blocked. Check Storage SELECT policy for bucket "$_voiceBucket".';
         });
         return;
       }
@@ -837,7 +1053,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
         final url = await _signedUrl(_memoryPhotosBucket, path);
         if (url == null || url.trim().isEmpty) {
-          _memoryPhotoError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_memoryPhotosBucket".';
+          _memoryPhotoError ??=
+              'Storage access blocked. Check Storage SELECT policy for bucket "$_memoryPhotosBucket".';
           return null;
         }
 
@@ -893,19 +1110,20 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
         final url = await _signedUrl(_memoryVoiceBucket, path);
         if (url == null || url.trim().isEmpty) {
-          _memoryVoiceError ??= 'Storage access blocked. Check Storage SELECT policy for bucket "$_memoryVoiceBucket".';
+          _memoryVoiceError ??=
+              'Storage access blocked. Check Storage SELECT policy for bucket "$_memoryVoiceBucket".';
           continue;
         }
 
         _memoryVoiceById.putIfAbsent(memoryId, () => []).add(
-              _VoiceNote(
-                id: id,
-                path: path,
-                title: title.isEmpty ? 'Voice note' : title,
-                url: url,
-                createdAt: createdAt,
-              ),
-            );
+          _VoiceNote(
+            id: id,
+            path: path,
+            title: title.isEmpty ? 'Voice note' : title,
+            url: url,
+            createdAt: createdAt,
+          ),
+        );
       }
 
       if (!mounted) return;
@@ -937,13 +1155,13 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       });
 
       await _player.play(UrlSource(v.url));
-    } catch (_) {
-      // silent
-    }
+    } catch (_) {}
   }
 
   void _openAskAI() {
-    final name = (_displayName ?? _vaultName).trim().isEmpty ? 'Vault' : (_displayName ?? _vaultName).trim();
+    final name = (_displayName ?? _vaultName).trim().isEmpty
+        ? 'Vault'
+        : (_displayName ?? _vaultName).trim();
 
     Navigator.push(
       context,
@@ -970,8 +1188,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   }
 
   Widget _headerCard() {
-    final name = (_displayName ?? _vaultName).trim().isEmpty ? _vaultName : (_displayName ?? _vaultName).trim();
+    final name = (_displayName ?? _vaultName).trim().isEmpty
+        ? _vaultName
+        : (_displayName ?? _vaultName).trim();
     final hasAvatar = _avatarUrl != null && _avatarUrl!.trim().isNotEmpty;
+    final slotKey = (_slotKey ?? '').trim();
+    final canOpenBranch = _branchDirectionForSlot(slotKey) != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -987,24 +1209,58 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
             radius: 28,
             backgroundColor: Colors.black.withOpacity(0.06),
             backgroundImage: hasAvatar ? NetworkImage(_avatarUrl!) : null,
-            child: !hasAvatar ? Icon(Icons.person, color: Colors.black.withOpacity(0.45), size: 28) : null,
+            child: !hasAvatar
+                ? Icon(
+                    Icons.person,
+                    color: Colors.black.withOpacity(0.45),
+                    size: 28,
+                  )
+                : null,
           ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 4),
-                Text('View only', style: TextStyle(fontSize: 12.5, color: Colors.black.withOpacity(0.60))),
-                const SizedBox(height: 10),
-                SizedBox(
-                  height: 40,
-                  child: OutlinedButton.icon(
-                    onPressed: _openAskAI,
-                    icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                    label: const Text('Ask (AI)'),
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
                   ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'View only',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: Colors.black.withOpacity(0.60),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    SizedBox(
+                      height: 40,
+                      child: OutlinedButton.icon(
+                        onPressed: _openAskAI,
+                        icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                        label: const Text('Ask (AI)'),
+                      ),
+                    ),
+                    if (canOpenBranch)
+                      SizedBox(
+                        height: 40,
+                        child: OutlinedButton.icon(
+                          onPressed: _openBranch,
+                          icon:
+                              const Icon(Icons.account_tree_outlined, size: 18),
+                          label: const Text('Open branch'),
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -1014,7 +1270,6 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     );
   }
 
-  // ✅ renamed title only
   Widget _aboutMeSection() {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -1031,41 +1286,56 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           const SizedBox(height: 6),
           const SizedBox(height: 8),
           if (_loadingCoreVoice)
-            const Center(child: Padding(padding: EdgeInsets.all(8), child: CircularProgressIndicator()))
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(8),
+                child: CircularProgressIndicator(),
+              ),
+            )
           else if (_coreVoiceError != null)
-            Text('About me load issue (MVP): $_coreVoiceError', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text(
+              'About me load issue (MVP): $_coreVoiceError',
+              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+            )
           else if (_coreVoice == null)
-            Text('No voice yet.', style: TextStyle(color: Colors.black.withOpacity(0.60)))
+            Text(
+              'No voice yet.',
+              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+            )
           else
-            Builder(builder: (_) {
-              final v = _coreVoice!;
-              final key = 'core:${widget.vaultId}';
-              final icon = (_playingKey == key && _isPlaying) ? Icons.pause_circle_outline : Icons.play_circle_outline;
+            Builder(
+              builder: (_) {
+                final v = _coreVoice!;
+                final key = 'core:${widget.vaultId}';
+                final icon = (_playingKey == key && _isPlaying)
+                    ? Icons.pause_circle_outline
+                    : Icons.play_circle_outline;
 
-              return Container(
-                margin: const EdgeInsets.only(top: 8),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.black.withOpacity(0.08)),
-                  color: Colors.white.withOpacity(0.35),
-                ),
-                child: ListTile(
-                  leading: IconButton(
-                    icon: Icon(icon),
-                    onPressed: () => _togglePlay(v, playKey: key),
+                return Container(
+                  margin: const EdgeInsets.only(top: 8),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.black.withOpacity(0.08)),
+                    color: Colors.white.withOpacity(0.35),
                   ),
-                  title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-              );
-            }),
+                  child: ListTile(
+                    leading: IconButton(
+                      icon: Icon(icon),
+                      onPressed: () => _togglePlay(v, playKey: key),
+                    ),
+                    title: Text(
+                      v.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );
   }
-
-  // =========================
-  // Memory detail (photos + voice)
-  // =========================
 
   void _openMemoryDetail(Map<String, dynamic> m) {
     final memoryId = (m['id'] ?? '').toString();
@@ -1113,21 +1383,38 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.black.withOpacity(0.08)),
+                              border: Border.all(
+                                color: Colors.black.withOpacity(0.08),
+                              ),
                               color: Colors.white.withOpacity(0.35),
                             ),
                             child: Text(body),
                           )
                         else
-                          Text('No answer text.', style: TextStyle(color: Colors.black.withOpacity(0.60))),
-
+                          Text(
+                            'No answer text.',
+                            style: TextStyle(
+                              color: Colors.black.withOpacity(0.60),
+                            ),
+                          ),
                         const SizedBox(height: 12),
-                        Text('Photos', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black.withOpacity(0.85))),
+                        Text(
+                          'Photos',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: Colors.black.withOpacity(0.85),
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         _memoryPhotoStrip(memoryId),
-
                         const SizedBox(height: 14),
-                        Text('Voice notes', style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black.withOpacity(0.85))),
+                        Text(
+                          'Voice notes',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: Colors.black.withOpacity(0.85),
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         _memoryVoiceStrip(memoryId, prompt),
                       ],
@@ -1142,7 +1429,6 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     );
   }
 
-  // ✅ FIX: overflow + no crop
   void _openMemoryGallery(String memoryId) {
     final photos = _memoryPhotosById[memoryId] ?? [];
     if (photos.isEmpty) return;
@@ -1170,9 +1456,15 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                     children: [
                       Row(
                         children: [
-                          const Text('Memory photos', style: TextStyle(fontWeight: FontWeight.w800)),
+                          const Text(
+                            'Memory photos',
+                            style: TextStyle(fontWeight: FontWeight.w800),
+                          ),
                           const Spacer(),
-                          IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                          IconButton(
+                            onPressed: () => Navigator.pop(ctx),
+                            icon: const Icon(Icons.close),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -1205,7 +1497,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                       const SizedBox(height: 10),
                       Row(
                         children: [
-                          Text('${idx + 1} / $total', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                          Text(
+                            '${idx + 1} / $total',
+                            style: TextStyle(
+                              color: Colors.black.withOpacity(0.65),
+                            ),
+                          ),
                           const Spacer(),
                           SizedBox(
                             height: 40,
@@ -1233,7 +1530,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     final preview = photos.take(4).toList();
 
     if (_loadingMemoryPhotos) {
-      return Text('Loading photos…', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)));
+      return Text(
+        'Loading photos…',
+        style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+      );
     }
 
     if (_memoryPhotoError != null) {
@@ -1244,7 +1544,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     }
 
     if (photos.isEmpty) {
-      return Text('No photos on this memory.', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)));
+      return Text(
+        'No photos on this memory.',
+        style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+      );
     }
 
     return SizedBox(
@@ -1279,7 +1582,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     final preview = notes.take(3).toList();
 
     if (_loadingMemoryVoice) {
-      return Text('Loading voice…', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)));
+      return Text(
+        'Loading voice…',
+        style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+      );
     }
 
     if (_memoryVoiceError != null) {
@@ -1290,13 +1596,18 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     }
 
     if (notes.isEmpty) {
-      return Text('No voice notes on this memory yet.', style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)));
+      return Text(
+        'No voice notes on this memory yet.',
+        style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+      );
     }
 
     return Column(
       children: preview.map((v) {
         final key = 'mem:${v.id}';
-        final icon = (_playingKey == key && _isPlaying) ? Icons.pause_circle_outline : Icons.play_circle_outline;
+        final icon = (_playingKey == key && _isPlaying)
+            ? Icons.pause_circle_outline
+            : Icons.play_circle_outline;
 
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
@@ -1312,7 +1623,11 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               onPressed: () => _togglePlay(v, playKey: key),
             ),
             title: Text(v.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text(v.createdAt.isEmpty ? '' : 'Added: ${v.createdAt}', maxLines: 1, overflow: TextOverflow.ellipsis),
+            subtitle: Text(
+              v.createdAt.isEmpty ? '' : 'Added: ${v.createdAt}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         );
       }).toList(),
@@ -1344,9 +1659,6 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               : _error != null
                   ? Center(child: Text('Load failed: $_error'))
                   : ListView.separated(
-                      // Base sections: header, highlights, about text/photos, about voice
-                      // Optional: storage debug hint
-                      // Then: either 1 empty-state row OR N memory rows
                       itemCount: () {
                         final hasHint = _storageErrorHint != null;
                         final base = 4 + (hasHint ? 1 : 0);
@@ -1362,27 +1674,28 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                         if (i == 2) return _aboutMeTextPhotosSection();
                         if (i == 3) return _aboutMeSection();
 
-                        // Debug hint (only shows if Storage signed-URL creation failed)
                         if (hasHint && i == 4) {
                           return Container(
                             margin: const EdgeInsets.only(bottom: 10),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.black.withOpacity(0.08)),
+                              border: Border.all(
+                                  color: Colors.black.withOpacity(0.08)),
                               color: Colors.white.withOpacity(0.35),
                             ),
                             child: Text(
                               _storageErrorHint!,
-                              style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.65)),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.black.withOpacity(0.65),
+                              ),
                             ),
                           );
                         }
 
-                        // Where memory rows begin
                         final memStart = 4 + (hasHint ? 1 : 0);
 
-                        // Empty state
                         if (_memories.isEmpty) {
                           if (i == memStart) {
                             return const Padding(
@@ -1393,10 +1706,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                           return const SizedBox.shrink();
                         }
 
-                        // Memory row
                         final idx = i - memStart;
                         if (idx < 0 || idx >= _memories.length) {
-                          // Safety guard (should never hit)
                           return const SizedBox.shrink();
                         }
 
@@ -1407,17 +1718,23 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
                         return ListTile(
                           tileColor: tileBg,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                           leading: Chip(label: Text(_prettyStage(stage))),
                           title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(body, maxLines: 3, overflow: TextOverflow.ellipsis),
+                              Text(body,
+                                  maxLines: 3, overflow: TextOverflow.ellipsis),
                               const SizedBox(height: 6),
                               Text(
                                 'Tap to open • photos + voice',
-                                style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.black.withOpacity(0.55),
+                                ),
                               ),
                             ],
                           ),
