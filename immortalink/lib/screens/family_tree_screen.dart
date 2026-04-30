@@ -310,6 +310,266 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     );
   }
 
+  Future<Map<String, _RelationshipNodeRef>> _loadCurrentSlotNodeRefs() async {
+    final result = <String, _RelationshipNodeRef>{};
+
+    try {
+      final vaultRes = await _supabase
+          .from('vaults')
+          .select('id, owner_id, family_id')
+          .eq('family_id', widget.familyId);
+
+      final memberRes = await _supabase
+          .from('family_members')
+          .select('user_id, slot_key')
+          .eq('family_id', widget.familyId);
+
+      final legacyRes = await _supabase
+          .from('legacy_family_members')
+          .select('id, slot_key, replaced_by_vault_id')
+          .eq('family_id', widget.familyId);
+
+      final vaults = (vaultRes as List).cast<Map<String, dynamic>>();
+      final members = (memberRes as List).cast<Map<String, dynamic>>();
+      final legacyMembers = (legacyRes as List).cast<Map<String, dynamic>>();
+
+      final vaultIdByUserId = <String, String>{};
+      for (final v in vaults) {
+        final vaultId = (v['id'] ?? '').toString().trim();
+        final ownerId = (v['owner_id'] ?? '').toString().trim();
+        if (vaultId.isEmpty || ownerId.isEmpty) continue;
+        vaultIdByUserId[ownerId] = vaultId;
+      }
+
+      for (final m in members) {
+        final slotKey = (m['slot_key'] ?? '').toString().trim();
+        final userId = (m['user_id'] ?? '').toString().trim();
+        if (slotKey.isEmpty || userId.isEmpty) continue;
+
+        final vaultId = vaultIdByUserId[userId];
+        if (vaultId == null || vaultId.isEmpty) continue;
+
+        result[slotKey] = _RelationshipNodeRef(
+          nodeType: 'vault',
+          nodeId: vaultId,
+        );
+      }
+
+      for (final legacy in legacyMembers) {
+        final slotKey = (legacy['slot_key'] ?? '').toString().trim();
+        final legacyId = (legacy['id'] ?? '').toString().trim();
+        final replacedByVaultId =
+            (legacy['replaced_by_vault_id'] ?? '').toString().trim();
+
+        if (slotKey.isEmpty || legacyId.isEmpty) continue;
+        if (replacedByVaultId.isNotEmpty) continue;
+
+        result.putIfAbsent(
+          slotKey,
+          () => _RelationshipNodeRef(
+            nodeType: 'legacy',
+            nodeId: legacyId,
+          ),
+        );
+      }
+    } catch (_) {}
+
+    return result;
+  }
+
+  _RelationshipAnchorSpec? _relationshipAnchorForSlot(String slotKey) {
+    switch (slotKey) {
+      case kMother:
+      case kFather:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: null,
+          anchorIsYourVault: true,
+          newNodeIsParent: true,
+          relationshipKind: 'parent_child',
+        );
+
+      case kMaternalGm:
+      case kMaternalGf:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kMother,
+          anchorIsYourVault: false,
+          newNodeIsParent: true,
+          relationshipKind: 'parent_child',
+        );
+
+      case kPaternalGm:
+      case kPaternalGf:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kFather,
+          anchorIsYourVault: false,
+          newNodeIsParent: true,
+          relationshipKind: 'parent_child',
+        );
+
+      case kMaternalGgm:
+      case kMaternalGgf:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kMaternalGm,
+          anchorIsYourVault: false,
+          newNodeIsParent: true,
+          relationshipKind: 'parent_child',
+        );
+
+      case kPaternalGgm:
+      case kPaternalGgf:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kPaternalGm,
+          anchorIsYourVault: false,
+          newNodeIsParent: true,
+          relationshipKind: 'parent_child',
+        );
+
+      case kChild1:
+      case kChild2:
+      case kChild3:
+      case kChild4:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: null,
+          anchorIsYourVault: true,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+
+      case kGrandchild1:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kChild1,
+          anchorIsYourVault: false,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+      case kGrandchild2:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kChild2,
+          anchorIsYourVault: false,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+      case kGrandchild3:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kChild3,
+          anchorIsYourVault: false,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+      case kGrandchild4:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kChild4,
+          anchorIsYourVault: false,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+
+      case kGreatGrandchild1:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kGrandchild1,
+          anchorIsYourVault: false,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+      case kGreatGrandchild2:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kGrandchild2,
+          anchorIsYourVault: false,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+      case kGreatGrandchild3:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kGrandchild3,
+          anchorIsYourVault: false,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+      case kGreatGrandchild4:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kGrandchild4,
+          anchorIsYourVault: false,
+          newNodeIsParent: false,
+          relationshipKind: 'parent_child',
+        );
+
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _linkNewNodeIntoRelationships({
+    required String slotKey,
+    required String newNodeType,
+    required String newNodeId,
+  }) async {
+    try {
+      final plan = _relationshipAnchorForSlot(slotKey);
+      if (plan == null) return;
+
+      _RelationshipNodeRef? anchorNode;
+
+      if (plan.anchorIsYourVault) {
+        final myVaultId = await _getMyVaultIdForInvite();
+        if (myVaultId == null || myVaultId.trim().isEmpty) return;
+        anchorNode = _RelationshipNodeRef(
+          nodeType: 'vault',
+          nodeId: myVaultId,
+        );
+      } else {
+        final slotNodeMap = await _loadCurrentSlotNodeRefs();
+        final anchorSlotKey = plan.anchorSlotKey;
+        if (anchorSlotKey == null || anchorSlotKey.trim().isEmpty) return;
+        anchorNode = slotNodeMap[anchorSlotKey];
+      }
+
+      if (anchorNode == null || anchorNode.nodeId.trim().isEmpty) return;
+
+      late final String parentType;
+      late final String parentId;
+      late final String childType;
+      late final String childId;
+
+      if (plan.newNodeIsParent) {
+        parentType = newNodeType;
+        parentId = newNodeId;
+        childType = anchorNode.nodeType;
+        childId = anchorNode.nodeId;
+      } else {
+        parentType = anchorNode.nodeType;
+        parentId = anchorNode.nodeId;
+        childType = newNodeType;
+        childId = newNodeId;
+      }
+
+      if (parentId.trim().isEmpty || childId.trim().isEmpty) return;
+
+      final existing = await _supabase
+          .from('family_relationships')
+          .select('id')
+          .eq('family_id', widget.familyId)
+          .eq('parent_type', parentType)
+          .eq('parent_id', parentId)
+          .eq('child_type', childType)
+          .eq('child_id', childId)
+          .limit(1);
+
+      final existingRows = (existing as List).cast<Map<String, dynamic>>();
+      if (existingRows.isNotEmpty) return;
+
+      await _supabase.from('family_relationships').insert({
+        'family_id': widget.familyId,
+        'parent_type': parentType,
+        'parent_id': parentId,
+        'child_type': childType,
+        'child_id': childId,
+        'relationship_kind': plan.relationshipKind,
+      });
+    } catch (_) {
+      // Best-effort only: do not block current slot-based UX.
+    }
+  }
+
   void _refresh() {
     setState(() {
       _future = _loadFamilyData();
@@ -645,14 +905,27 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
         throw Exception('You need a vault before creating an invite.');
       }
 
-      await _supabase.from('family_invites').insert({
-        'family_id': widget.familyId,
-        'created_by': user.id,
-        'invite_code': code,
-        'slot_key': slotKey,
-        'expires_at': expiresAt.toIso8601String(),
-        'inviter_vault_id': myVaultId,
-      });
+      final inserted = await _supabase
+          .from('family_invites')
+          .insert({
+            'family_id': widget.familyId,
+            'created_by': user.id,
+            'invite_code': code,
+            'slot_key': slotKey,
+            'expires_at': expiresAt.toIso8601String(),
+            'inviter_vault_id': myVaultId,
+          })
+          .select('id')
+          .maybeSingle();
+
+      final inviteId = (inserted?['id'] ?? '').toString().trim();
+      if (inviteId.isNotEmpty) {
+        await _linkNewNodeIntoRelationships(
+          slotKey: slotKey,
+          newNodeType: 'invite',
+          newNodeId: inviteId,
+        );
+      }
 
       if (!mounted) return;
 
@@ -877,6 +1150,26 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                             'p_about_me_text': about.isEmpty ? null : about,
                           },
                         );
+
+                        final created = await _supabase
+                            .from('legacy_family_members')
+                            .select('id')
+                            .eq('family_id', widget.familyId)
+                            .eq('slot_key', slotKey)
+                            .isFilter('replaced_by_vault_id', null)
+                            .order('created_at', ascending: false)
+                            .limit(1)
+                            .maybeSingle();
+
+                        final legacyId =
+                            (created?['id'] ?? '').toString().trim();
+                        if (legacyId.isNotEmpty) {
+                          await _linkNewNodeIntoRelationships(
+                            slotKey: slotKey,
+                            newNodeType: 'legacy',
+                            newNodeId: legacyId,
+                          );
+                        }
 
                         if (!ctx.mounted) return;
                         Navigator.pop(ctx);
@@ -2649,5 +2942,29 @@ class _FamilyData {
     required this.yourVault,
     required this.yourAvatarUrl,
     required this.joinContext,
+  });
+}
+
+class _RelationshipNodeRef {
+  final String nodeType;
+  final String nodeId;
+
+  const _RelationshipNodeRef({
+    required this.nodeType,
+    required this.nodeId,
+  });
+}
+
+class _RelationshipAnchorSpec {
+  final String? anchorSlotKey;
+  final bool anchorIsYourVault;
+  final bool newNodeIsParent;
+  final String relationshipKind;
+
+  const _RelationshipAnchorSpec({
+    required this.anchorSlotKey,
+    required this.anchorIsYourVault,
+    required this.newNodeIsParent,
+    required this.relationshipKind,
   });
 }
