@@ -1335,7 +1335,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     }
   }
 
-  Future<void> _openDirectBranchForSlot(String slotKey) async {
+  Future<void> _openDirectBranchForPerson({
+    required String slotKey,
+    required Map<String, dynamic> person,
+  }) async {
     final direction = _branchDirectionForSlot(slotKey);
     if (direction == null) return;
 
@@ -1596,8 +1599,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           null
                                                       ? null
                                                       : () =>
-                                                          _openDirectBranchForSlot(
-                                                              kMaternalGgm),
+                                                          _openDirectBranchForPerson(
+                                                            slotKey:
+                                                                kMaternalGgm,
+                                                            person: slotVault[
+                                                                kMaternalGgm]!,
+                                                          ),
                                                   showAddLabel:
                                                       'Add great-grandparent',
                                                 ),
@@ -1628,8 +1635,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           null
                                                       ? null
                                                       : () =>
-                                                          _openDirectBranchForSlot(
-                                                              kMaternalGgf),
+                                                          _openDirectBranchForPerson(
+                                                            slotKey:
+                                                                kMaternalGgf,
+                                                            person: slotVault[
+                                                                kMaternalGgf]!,
+                                                          ),
                                                   showAddLabel:
                                                       'Add great-grandparent',
                                                 ),
@@ -1669,8 +1680,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           null
                                                       ? null
                                                       : () =>
-                                                          _openDirectBranchForSlot(
-                                                              kPaternalGgm),
+                                                          _openDirectBranchForPerson(
+                                                            slotKey:
+                                                                kPaternalGgm,
+                                                            person: slotVault[
+                                                                kPaternalGgm]!,
+                                                          ),
                                                   showAddLabel:
                                                       'Add great-grandparent',
                                                 ),
@@ -1701,8 +1716,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           null
                                                       ? null
                                                       : () =>
-                                                          _openDirectBranchForSlot(
-                                                              kPaternalGgf),
+                                                          _openDirectBranchForPerson(
+                                                            slotKey:
+                                                                kPaternalGgf,
+                                                            person: slotVault[
+                                                                kPaternalGgf]!,
+                                                          ),
                                                   showAddLabel:
                                                       'Add great-grandparent',
                                                 ),
@@ -1733,7 +1752,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kMaternalGm),
-                                                  filled: slotVault[kMaternalGm],
+                                                  filled:
+                                                      slotVault[kMaternalGm],
                                                   avatarUrl: data.avatarUrlByVaultId[
                                                       (slotVault[kMaternalGm]
                                                                   ?['id'] ??
@@ -1754,8 +1774,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           null
                                                       ? null
                                                       : () =>
-                                                          _openDirectBranchForSlot(
-                                                              kMaternalGm),
+                                                          _openDirectBranchForPerson(
+                                                            slotKey:
+                                                                kMaternalGm,
+                                                            person: slotVault[
+                                                                kMaternalGm]!,
+                                                          ),
                                                   showAddLabel:
                                                       'Add grandparent',
                                                 ),
@@ -1764,7 +1788,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kMaternalGf),
-                                                  filled: slotVault[kMaternalGf],
+                                                  filled:
+                                                      slotVault[kMaternalGf],
                                                   avatarUrl: data.avatarUrlByVaultId[
                                                       (slotVault[kMaternalGf]
                                                                   ?['id'] ??
@@ -1785,8 +1810,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           null
                                                       ? null
                                                       : () =>
-                                                          _openDirectBranchForSlot(
-                                                              kMaternalGf),
+                                                          _openDirectBranchForPerson(
+                                                            slotKey:
+                                                                kMaternalGf,
+                                                            person: slotVault[
+                                                                kMaternalGf]!,
+                                                          ),
                                                   showAddLabel:
                                                       'Add grandparent',
                                                 ),
@@ -1804,7 +1833,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kPaternalGm),
-                                                  filled: slotVault[kPaternalGm],
+                                                  filled:
+                                                      slotVault[kPaternalGm],
                                                   avatarUrl: data.avatarUrlByVaultId[
                                                       (slotVault[kPaternalGm]
                                                                   ?['id'] ??
@@ -1825,8 +1855,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           null
                                                       ? null
                                                       : () =>
-                                                          _openDirectBranchForSlot(
-                                                              kPaternalGm),
+                                                          _openDirectBranchForPerson(
+                                                            slotKey:
+                                                                kPaternalGm,
+                                                            person: slotVault[
+                                                                kPaternalGm]!,
+                                                          ),
                                                   showAddLabel:
                                                       'Add grandparent',
                                                 ),
@@ -1835,7 +1869,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kPaternalGf),
-                                                  filled: slotVault[kPaternalGf],
+                                                  filled:
+                                                      slotVault[kPaternalGf],
                                                   avatarUrl: data.avatarUrlByVaultId[
                                                       (slotVault[kPaternalGf]
                                                                   ?['id'] ??
@@ -1856,8 +1891,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                           null
                                                       ? null
                                                       : () =>
-                                                          _openDirectBranchForSlot(
-                                                              kPaternalGf),
+                                                          _openDirectBranchForPerson(
+                                                            slotKey:
+                                                                kPaternalGf,
+                                                            person: slotVault[
+                                                                kPaternalGf]!,
+                                                          ),
                                                   showAddLabel:
                                                       'Add grandparent',
                                                 ),
@@ -1894,8 +1933,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           ),
                                           onBranchTap: slotVault[kMother] == null
                                               ? null
-                                              : () => _openDirectBranchForSlot(
-                                                  kMother),
+                                              : () =>
+                                                  _openDirectBranchForPerson(
+                                                    slotKey: kMother,
+                                                    person: slotVault[kMother]!,
+                                                  ),
                                           showAddLabel: 'Add parent',
                                         ),
                                       ),
@@ -1919,8 +1961,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           ),
                                           onBranchTap: slotVault[kFather] == null
                                               ? null
-                                              : () => _openDirectBranchForSlot(
-                                                  kFather),
+                                              : () =>
+                                                  _openDirectBranchForPerson(
+                                                    slotKey: kFather,
+                                                    person: slotVault[kFather]!,
+                                                  ),
                                           showAddLabel: 'Add parent',
                                         ),
                                       ),
@@ -2073,8 +2118,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           ),
                                           onBranchTap: slotVault[kChild1] == null
                                               ? null
-                                              : () => _openDirectBranchForSlot(
-                                                  kChild1),
+                                              : () =>
+                                                  _openDirectBranchForPerson(
+                                                    slotKey: kChild1,
+                                                    person: slotVault[kChild1]!,
+                                                  ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild2),
@@ -2093,8 +2141,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           ),
                                           onBranchTap: slotVault[kChild2] == null
                                               ? null
-                                              : () => _openDirectBranchForSlot(
-                                                  kChild2),
+                                              : () =>
+                                                  _openDirectBranchForPerson(
+                                                    slotKey: kChild2,
+                                                    person: slotVault[kChild2]!,
+                                                  ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild3),
@@ -2113,8 +2164,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           ),
                                           onBranchTap: slotVault[kChild3] == null
                                               ? null
-                                              : () => _openDirectBranchForSlot(
-                                                  kChild3),
+                                              : () =>
+                                                  _openDirectBranchForPerson(
+                                                    slotKey: kChild3,
+                                                    person: slotVault[kChild3]!,
+                                                  ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild4),
@@ -2133,8 +2187,11 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           ),
                                           onBranchTap: slotVault[kChild4] == null
                                               ? null
-                                              : () => _openDirectBranchForSlot(
-                                                  kChild4),
+                                              : () =>
+                                                  _openDirectBranchForPerson(
+                                                    slotKey: kChild4,
+                                                    person: slotVault[kChild4]!,
+                                                  ),
                                         ),
                                       ],
                                     ),
@@ -2174,8 +2231,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 slotVault[kGrandchild1] == null
                                                     ? null
                                                     : () =>
-                                                        _openDirectBranchForSlot(
-                                                            kGrandchild1),
+                                                        _openDirectBranchForPerson(
+                                                          slotKey:
+                                                              kGrandchild1,
+                                                          person: slotVault[
+                                                              kGrandchild1]!,
+                                                        ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild2),
@@ -2197,8 +2258,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 slotVault[kGrandchild2] == null
                                                     ? null
                                                     : () =>
-                                                        _openDirectBranchForSlot(
-                                                            kGrandchild2),
+                                                        _openDirectBranchForPerson(
+                                                          slotKey:
+                                                              kGrandchild2,
+                                                          person: slotVault[
+                                                              kGrandchild2]!,
+                                                        ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild3),
@@ -2220,8 +2285,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 slotVault[kGrandchild3] == null
                                                     ? null
                                                     : () =>
-                                                        _openDirectBranchForSlot(
-                                                            kGrandchild3),
+                                                        _openDirectBranchForPerson(
+                                                          slotKey:
+                                                              kGrandchild3,
+                                                          person: slotVault[
+                                                              kGrandchild3]!,
+                                                        ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild4),
@@ -2243,8 +2312,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 slotVault[kGrandchild4] == null
                                                     ? null
                                                     : () =>
-                                                        _openDirectBranchForSlot(
-                                                            kGrandchild4),
+                                                        _openDirectBranchForPerson(
+                                                          slotKey:
+                                                              kGrandchild4,
+                                                          person: slotVault[
+                                                              kGrandchild4]!,
+                                                        ),
                                           ),
                                         ],
                                       ),
@@ -2289,8 +2362,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                         null
                                                     ? null
                                                     : () =>
-                                                        _openDirectBranchForSlot(
-                                                            kGreatGrandchild1),
+                                                        _openDirectBranchForPerson(
+                                                          slotKey:
+                                                              kGreatGrandchild1,
+                                                          person: slotVault[
+                                                              kGreatGrandchild1]!,
+                                                        ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild2),
@@ -2315,8 +2392,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                         null
                                                     ? null
                                                     : () =>
-                                                        _openDirectBranchForSlot(
-                                                            kGreatGrandchild2),
+                                                        _openDirectBranchForPerson(
+                                                          slotKey:
+                                                              kGreatGrandchild2,
+                                                          person: slotVault[
+                                                              kGreatGrandchild2]!,
+                                                        ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild3),
@@ -2341,8 +2422,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                         null
                                                     ? null
                                                     : () =>
-                                                        _openDirectBranchForSlot(
-                                                            kGreatGrandchild3),
+                                                        _openDirectBranchForPerson(
+                                                          slotKey:
+                                                              kGreatGrandchild3,
+                                                          person: slotVault[
+                                                              kGreatGrandchild3]!,
+                                                        ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild4),
@@ -2367,8 +2452,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                         null
                                                     ? null
                                                     : () =>
-                                                        _openDirectBranchForSlot(
-                                                            kGreatGrandchild4),
+                                                        _openDirectBranchForPerson(
+                                                          slotKey:
+                                                              kGreatGrandchild4,
+                                                          person: slotVault[
+                                                              kGreatGrandchild4]!,
+                                                        ),
                                           ),
                                         ],
                                       ),

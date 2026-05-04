@@ -14,12 +14,18 @@ class FamilyBranchScreen extends StatefulWidget {
   final String rootSlotKey;
   final String direction; // 'ancestor' or 'descendant'
 
+  // Optional direct-node branch opening for perpetual lineage drilling
+  final String? rootNodeType; // 'vault' or 'legacy'
+  final String? rootNodeId;
+
   const FamilyBranchScreen({
     super.key,
     required this.familyId,
     required this.rootLabel,
     required this.rootSlotKey,
     required this.direction,
+    this.rootNodeType,
+    this.rootNodeId,
   });
 
   @override
@@ -33,7 +39,8 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   static const String _vaultAvatarBucket = 'avatars';
   static const String _legacyAvatarBucket = 'vault_photos';
 
-  static const int _maxAncestorDepth = 6;
+  // 3 generations further back = 2 + 4 + 8 = 14 slots
+  static const int _maxAncestorDepth = 3;
 
   bool _loading = true;
   String? _error;
@@ -263,6 +270,14 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     return null;
   }
 
+  _NodeRef? _nodeRefFromPerson(Map<String, dynamic>? person) {
+    if (person == null) return null;
+    final id = (person['id'] ?? '').toString().trim();
+    if (id.isEmpty) return null;
+    final isLegacy = person['__legacy'] == true;
+    return _NodeRef(type: isLegacy ? 'legacy' : 'vault', id: id);
+  }
+
   Future<void> _openPerson(Map<String, dynamic> person) async {
     final uid = _supabase.auth.currentUser?.id;
     final isLegacy = person['__legacy'] == true;
@@ -286,10 +301,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
     final vaultId = (person['id'] ?? '').toString();
     final ownerId = (person['owner_id'] ?? '').toString();
-    final vaultName = ((person['display_name'] ?? '').toString().trim().isNotEmpty
-            ? person['display_name']
-            : person['name'] ?? 'Vault')
-        .toString();
+    final vaultName =
+        ((person['display_name'] ?? '').toString().trim().isNotEmpty
+                ? person['display_name']
+                : person['name'] ?? 'Vault')
+            .toString();
 
     if (vaultId.isEmpty) return;
 
@@ -315,6 +331,31 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         ),
       );
     }
+
+    await _load();
+  }
+
+  Future<void> _openAncestorBranchForPerson(
+    Map<String, dynamic> person, {
+    required String fallbackLabel,
+  }) async {
+    final isLegacy = person['__legacy'] == true;
+    final id = (person['id'] ?? '').toString().trim();
+    if (id.isEmpty) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FamilyBranchScreen(
+          familyId: widget.familyId,
+          rootLabel: _personLabel(person, fallbackLabel),
+          rootSlotKey: widget.rootSlotKey,
+          direction: 'ancestor',
+          rootNodeType: isLegacy ? 'legacy' : 'vault',
+          rootNodeId: id,
+        ),
+      ),
+    );
 
     await _load();
   }
@@ -456,18 +497,26 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                 ),
                 onTap: () async {
                   Navigator.pop(ctx);
-                  await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => FamilyBranchScreen(
-                        familyId: widget.familyId,
-                        rootLabel: label,
-                        rootSlotKey: slotKey,
-                        direction: direction,
+
+                  if (direction == 'ancestor') {
+                    await _openAncestorBranchForPerson(
+                      person,
+                      fallbackLabel: label,
+                    );
+                  } else {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => FamilyBranchScreen(
+                          familyId: widget.familyId,
+                          rootLabel: label,
+                          rootSlotKey: slotKey,
+                          direction: direction,
+                        ),
                       ),
-                    ),
-                  );
-                  await _load();
+                    );
+                    await _load();
+                  }
                 },
               ),
             ],
@@ -500,99 +549,19 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       switch (widget.rootSlotKey) {
         case 'mother':
           return const _BranchConfig(
-            title: 'Maternal branch',
+            title: 'Mother branch',
             centerSlot: 'mother',
             centerFallback: 'Mother',
-            primarySlots: ['maternal_gm', 'maternal_gf'],
-            primaryLabels: ['Grandmother', 'Grandfather'],
-            secondarySlots: ['maternal_ggm', 'maternal_ggf'],
-            secondaryLabels: ['Great-grandmother', 'Great-grandfather'],
+            primarySlots: [],
+            primaryLabels: [],
+            secondarySlots: [],
+            secondaryLabels: [],
           );
         case 'father':
           return const _BranchConfig(
-            title: 'Paternal branch',
+            title: 'Father branch',
             centerSlot: 'father',
             centerFallback: 'Father',
-            primarySlots: ['paternal_gm', 'paternal_gf'],
-            primaryLabels: ['Grandmother', 'Grandfather'],
-            secondarySlots: ['paternal_ggm', 'paternal_ggf'],
-            secondaryLabels: ['Great-grandmother', 'Great-grandfather'],
-          );
-        case 'maternal_gm':
-          return const _BranchConfig(
-            title: 'Maternal grandmother branch',
-            centerSlot: 'maternal_gm',
-            centerFallback: 'Grandmother',
-            primarySlots: ['maternal_ggm', 'maternal_ggf'],
-            primaryLabels: ['Great-grandmother', 'Great-grandfather'],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        case 'maternal_gf':
-          return const _BranchConfig(
-            title: 'Maternal grandfather branch',
-            centerSlot: 'maternal_gf',
-            centerFallback: 'Grandfather',
-            primarySlots: ['maternal_ggm', 'maternal_ggf'],
-            primaryLabels: ['Great-grandmother', 'Great-grandfather'],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        case 'paternal_gm':
-          return const _BranchConfig(
-            title: 'Paternal grandmother branch',
-            centerSlot: 'paternal_gm',
-            centerFallback: 'Grandmother',
-            primarySlots: ['paternal_ggm', 'paternal_ggf'],
-            primaryLabels: ['Great-grandmother', 'Great-grandfather'],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        case 'paternal_gf':
-          return const _BranchConfig(
-            title: 'Paternal grandfather branch',
-            centerSlot: 'paternal_gf',
-            centerFallback: 'Grandfather',
-            primarySlots: ['paternal_ggm', 'paternal_ggf'],
-            primaryLabels: ['Great-grandmother', 'Great-grandfather'],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        case 'maternal_ggm':
-          return const _BranchConfig(
-            title: 'Maternal great-grandmother branch',
-            centerSlot: 'maternal_ggm',
-            centerFallback: 'Great-grandmother',
-            primarySlots: [],
-            primaryLabels: [],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        case 'maternal_ggf':
-          return const _BranchConfig(
-            title: 'Maternal great-grandfather branch',
-            centerSlot: 'maternal_ggf',
-            centerFallback: 'Great-grandfather',
-            primarySlots: [],
-            primaryLabels: [],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        case 'paternal_ggm':
-          return const _BranchConfig(
-            title: 'Paternal great-grandmother branch',
-            centerSlot: 'paternal_ggm',
-            centerFallback: 'Great-grandmother',
-            primarySlots: [],
-            primaryLabels: [],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        case 'paternal_ggf':
-          return const _BranchConfig(
-            title: 'Paternal great-grandfather branch',
-            centerSlot: 'paternal_ggf',
-            centerFallback: 'Great-grandfather',
             primarySlots: [],
             primaryLabels: [],
             secondarySlots: [],
@@ -600,7 +569,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
           );
         default:
           return _BranchConfig(
-            title: widget.rootLabel,
+            title: '${widget.rootLabel} branch',
             centerSlot: widget.rootSlotKey,
             centerFallback: widget.rootLabel,
             primarySlots: const [],
@@ -697,16 +666,14 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   _NodeRef? _rootNodeRefFromSlot() {
     final slotMap = _slotToPersonMap();
     final person = slotMap[widget.rootSlotKey];
-    if (person == null) return null;
+    return _nodeRefFromPerson(person);
+  }
 
-    final isLegacy = person['__legacy'] == true;
-    final id = (person['id'] ?? '').toString().trim();
-    if (id.isEmpty) return null;
-
-    return _NodeRef(
-      type: isLegacy ? 'legacy' : 'vault',
-      id: id,
-    );
+  _NodeRef? _explicitRootNodeRef() {
+    final type = (widget.rootNodeType ?? '').trim();
+    final id = (widget.rootNodeId ?? '').trim();
+    if (type.isEmpty || id.isEmpty) return null;
+    return _NodeRef(type: type, id: id);
   }
 
   List<_NodeRef> _parentsOf(_NodeRef child) {
@@ -724,6 +691,8 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       final parentId = (row['parent_id'] ?? '').toString().trim();
       if (parentType.isEmpty || parentId.isEmpty) continue;
 
+      if (parentType == 'invite') continue;
+
       final ref = _NodeRef(type: parentType, id: parentId);
       final exists = refs.any((e) => e.type == ref.type && e.id == ref.id);
       if (!exists) refs.add(ref);
@@ -732,18 +701,153 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     return refs;
   }
 
-  List<_AncestorGeneration> _buildAncestorGenerations(_NodeRef rootRef) {
-    final generations = <_AncestorGeneration>[];
-    List<_AncestorBranchNode> current = [_AncestorBranchNode(ref: rootRef)];
+  List<List<_NodeRef?>> _slotFallbackGroupsForBranch() {
+    final slotMap = _slotToPersonMap();
 
-    for (int depth = 1; depth <= _maxAncestorDepth; depth++) {
+    List<List<String>> slotGroups;
+    switch (widget.rootSlotKey) {
+      case 'mother':
+        slotGroups = const [
+          ['maternal_gm', 'maternal_gf'],
+          ['maternal_ggm', 'maternal_ggf'],
+        ];
+        break;
+      case 'father':
+        slotGroups = const [
+          ['paternal_gm', 'paternal_gf'],
+          ['paternal_ggm', 'paternal_ggf'],
+        ];
+        break;
+      case 'maternal_gm':
+      case 'maternal_gf':
+        slotGroups = const [
+          ['maternal_ggm', 'maternal_ggf'],
+        ];
+        break;
+      case 'paternal_gm':
+      case 'paternal_gf':
+        slotGroups = const [
+          ['paternal_ggm', 'paternal_ggf'],
+        ];
+        break;
+      default:
+        slotGroups = const [];
+    }
+
+    final groups = <List<_NodeRef?>>[];
+    for (final group in slotGroups) {
+      groups.add(
+        group.map((slot) => _nodeRefFromPerson(slotMap[slot])).toList(),
+      );
+    }
+    return groups;
+  }
+
+  Future<_AncestorViewModel> _buildAncestorViewModel() async {
+    final explicitRoot = _explicitRootNodeRef();
+
+    _NodeRef? focusRef;
+    _NodeRef? seedRef;
+    String focusFallback = widget.rootLabel;
+
+    if (explicitRoot != null) {
+      focusRef = explicitRoot;
+      seedRef = explicitRoot;
+      focusFallback = widget.rootLabel;
+    } else {
+      final slotRoot = _rootNodeRefFromSlot();
+      if (slotRoot != null) {
+        focusRef = slotRoot;
+        seedRef = slotRoot;
+        focusFallback = widget.rootLabel;
+      }
+    }
+
+    final focusPerson = focusRef == null ? null : _personForNode(focusRef);
+
+    final generations = <_AncestorGeneration>[];
+
+    List<_AncestorBranchNode> current = [
+      _AncestorBranchNode(
+        ref: seedRef,
+        childRefForAdd: focusRef,
+      ),
+    ];
+
+    int startDepth = 1;
+
+    // If a slot-root branch has no direct parent relationships yet,
+    // fall back to the visible family-tree lineage slots so the branch
+    // still follows the expected ancestor lane.
+    if (explicitRoot == null && seedRef != null && _parentsOf(seedRef).isEmpty) {
+      final fallbackGroups = _slotFallbackGroupsForBranch();
+
+      int firstNonEmptyIndex = -1;
+      for (int i = 0; i < fallbackGroups.length; i++) {
+        if (fallbackGroups[i].any((e) => e != null)) {
+          firstNonEmptyIndex = i;
+          break;
+        }
+      }
+
+      if (firstNonEmptyIndex != -1) {
+        final firstGroup = fallbackGroups[firstNonEmptyIndex];
+        final firstNodes = <_AncestorBranchNode>[];
+
+        for (final ref in firstGroup) {
+          firstNodes.add(
+            _AncestorBranchNode(
+              ref: ref,
+              childRefForAdd: seedRef,
+            ),
+          );
+        }
+
+        generations.add(
+          _AncestorGeneration(
+            depth: 1,
+            nodes: firstNodes,
+          ),
+        );
+
+        current = firstNodes;
+        startDepth = 2;
+
+        // If there are later slot groups, add them only while they contain data.
+        for (int i = firstNonEmptyIndex + 1; i < fallbackGroups.length; i++) {
+          final group = fallbackGroups[i];
+          if (!group.any((e) => e != null)) continue;
+
+          final nodes = <_AncestorBranchNode>[];
+          for (final ref in group) {
+            nodes.add(
+              _AncestorBranchNode(
+                ref: ref,
+                childRefForAdd: ref == null ? seedRef : ref,
+              ),
+            );
+          }
+
+          generations.add(
+            _AncestorGeneration(
+              depth: generations.length + 1,
+              nodes: nodes,
+            ),
+          );
+
+          current = nodes;
+          startDepth = generations.length + 1;
+        }
+
+        startDepth = generations.length + 1;
+      }
+    }
+
+    for (int depth = startDepth; depth <= _maxAncestorDepth; depth++) {
       final next = <_AncestorBranchNode>[];
 
       for (final child in current) {
-        final childPerson =
-            child.ref == null ? null : _personForNode(child.ref!);
-
-        if (child.ref == null || childPerson == null) {
+        if (child.ref == null) {
           next.add(
             _AncestorBranchNode(
               ref: null,
@@ -777,8 +881,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         );
       }
 
-      if (next.isEmpty) break;
-
       generations.add(
         _AncestorGeneration(
           depth: depth,
@@ -789,7 +891,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       current = next;
     }
 
-    return generations;
+    return _AncestorViewModel(
+      focusPerson: focusPerson,
+      focusFallback: focusFallback,
+      generations: generations,
+    );
   }
 
   String _generationTitle(int depth) {
@@ -857,7 +963,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       }
 
       String? inviteId;
-      String? code;
+      String code = '';
 
       for (int attempt = 0; attempt < 8; attempt++) {
         final nextCode = await _createUniqueInviteCode();
@@ -890,7 +996,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         }
       }
 
-      if (inviteId == null || inviteId.isEmpty || code == null || code.isEmpty) {
+      if (inviteId == null || inviteId.isEmpty || code.isEmpty) {
         throw Exception('Invite creation failed after multiple retries.');
       }
 
@@ -916,7 +1022,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
               const Text('Invite code (copy & share):'),
               const SizedBox(height: 6),
               SelectableText(
-                code!,
+                code,
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 10),
@@ -932,7 +1038,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
           actions: [
             TextButton(
               onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: code!));
+                await Clipboard.setData(ClipboardData(text: code));
                 if (!ctx.mounted) return;
                 Navigator.pop(ctx);
                 if (!mounted) return;
@@ -1228,114 +1334,111 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Widget _buildAncestorRelationshipView() {
-    final rootRef = _rootNodeRefFromSlot();
-    if (rootRef == null) {
-      return Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
-          child: _BranchIntroCard(
-            title: widget.rootLabel,
-            subtitle:
-                'This branch can load once the selected person exists in the family tree.',
-          ),
-        ),
-      );
-    }
+    return FutureBuilder<_AncestorViewModel>(
+      future: _buildAncestorViewModel(),
+      builder: (context, snapshot) {
+        final model = snapshot.data;
 
-    final rootPerson = _personForNode(rootRef);
-    final generations = _buildAncestorGenerations(rootRef);
+        if (model == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: IgnorePointer(
-            child: Center(
-              child: Opacity(
-                opacity: 0.06,
-                child: Image.asset(
-                  _logoPath,
-                  width: 520,
-                  fit: BoxFit.contain,
+        final rootPerson = model.focusPerson;
+        final generations = model.generations;
+
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: Opacity(
+                    opacity: 0.06,
+                    child: Image.asset(
+                      _logoPath,
+                      width: 520,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
-        ListView(
-          padding: const EdgeInsets.all(18),
-          children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 980),
-                child: Column(
-                  children: [
-                    _BranchIntroCard(
-                      title: widget.rootLabel.isEmpty
-                          ? 'Ancestor branch'
-                          : '${widget.rootLabel} branch',
-                      subtitle:
-                          'This branch focuses on one ancestral line and can continue further back generation by generation.',
-                    ),
-                    const SizedBox(height: 16),
-                    _BranchPersonCard(
-                      title: 'Branch focus',
-                      label: _personLabel(rootPerson, widget.rootLabel),
-                      avatarUrl: _avatarFor(rootPerson),
-                      onTap: rootPerson == null
-                          ? null
-                          : () async {
-                              await _openPerson(rootPerson);
-                            },
-                    ),
-                    for (final generation in generations) ...[
-                      const SizedBox(height: 22),
-                      _BranchSectionTitle(
-                        title: _generationTitle(generation.depth),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        alignment: WrapAlignment.center,
-                        children: generation.nodes.map((node) {
-                          final person =
-                              node.ref == null ? null : _personForNode(node.ref!);
-
-                          if (person == null) {
-                            return _MiniBranchAddCard(
-                              label: 'Add ancestor',
-                              onTap: node.childRefForAdd == null
+            ListView(
+              padding: const EdgeInsets.all(18),
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 980),
+                    child: Column(
+                      children: [
+                        _BranchIntroCard(
+                          title: widget.rootLabel.isEmpty
+                              ? 'Ancestor branch'
+                              : '${widget.rootLabel} branch',
+                          subtitle:
+                              'This branch focuses on one ancestral line and can continue further back generation by generation.',
+                        ),
+                        const SizedBox(height: 16),
+                        _BranchPersonCard(
+                          title: 'Branch focus',
+                          label: _personLabel(rootPerson, model.focusFallback),
+                          avatarUrl: _avatarFor(rootPerson),
+                          onTap: rootPerson == null
+                              ? null
+                              : () async {
+                                  await _openPerson(rootPerson);
+                                },
+                          onBranchTap: null,
+                        ),
+                        for (final generation in generations) ...[
+                          const SizedBox(height: 22),
+                          _BranchSectionTitle(
+                            title: _generationTitle(generation.depth),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            alignment: WrapAlignment.center,
+                            children: generation.nodes.map((node) {
+                              final person = node.ref == null
                                   ? null
-                                  : () => _openAncestorAddOptions(
-                                        childRef: node.childRefForAdd!,
-                                        title: 'Ancestor',
-                                      ),
-                            );
-                          }
+                                  : _personForNode(node.ref!);
 
-                          return _MiniBranchCard(
-                            label: _personLabel(person, 'Ancestor'),
-                            avatarUrl: _avatarFor(person),
-                            onTap: () async {
-                              await _openPerson(person);
-                            },
-                          );
-                        }).toList(),
-                      ),
-                    ],
-                    const SizedBox(height: 22),
-                    _BranchIntroCard(
-                      title: 'Next phase',
-                      subtitle:
-                          'This ancestor branch now reads from family relationships so you can keep extending the line further back without changing the family tree home screen.',
+                              if (person == null) {
+                                return _MiniBranchAddCard(
+                                  label: 'Add ancestor',
+                                  onTap: node.childRefForAdd == null
+                                      ? null
+                                      : () => _openAncestorAddOptions(
+                                            childRef: node.childRefForAdd!,
+                                            title: 'Ancestor',
+                                          ),
+                                );
+                              }
+
+                              return _MiniBranchCard(
+                                label: _personLabel(person, 'Ancestor'),
+                                avatarUrl: _avatarFor(person),
+                                onTap: () async {
+                                  await _openPerson(person);
+                                },
+                                onBranchTap: () => _openAncestorBranchForPerson(
+                                  person,
+                                  fallbackLabel: 'Ancestor',
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -1419,10 +1522,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                                                     slotKey: config.centerSlot,
                                                     person: centerPerson,
                                                   ),
+                                          onBranchTap: null,
                                         ),
                                         if (config.primarySlots.isNotEmpty) ...[
                                           const SizedBox(height: 18),
-                                          _BranchSectionTitle(
+                                          const _BranchSectionTitle(
                                             title:
                                                 'Next generation in this line',
                                           ),
@@ -1448,13 +1552,14 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                                                           person:
                                                               primaryPeople[i]!,
                                                         ),
+                                                onBranchTap: null,
                                               ),
                                             ),
                                           ),
                                         ],
                                         if (config.secondarySlots.isNotEmpty) ...[
                                           const SizedBox(height: 18),
-                                          _BranchSectionTitle(
+                                          const _BranchSectionTitle(
                                             title: 'Future descendants',
                                           ),
                                           const SizedBox(height: 10),
@@ -1482,16 +1587,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                                                               person:
                                                                   secondaryPeople[i]!,
                                                             ),
+                                                onBranchTap: null,
                                               ),
                                             ),
                                           ),
                                         ],
-                                        const SizedBox(height: 22),
-                                        _BranchIntroCard(
-                                          title: 'Next phase',
-                                          subtitle:
-                                              'This descendant branch remains compatible with the current family tree flow.',
-                                        ),
                                       ],
                                     ),
                                   ),
@@ -1523,6 +1623,18 @@ class _BranchConfig {
     required this.primaryLabels,
     required this.secondarySlots,
     required this.secondaryLabels,
+  });
+}
+
+class _AncestorViewModel {
+  final Map<String, dynamic>? focusPerson;
+  final String focusFallback;
+  final List<_AncestorGeneration> generations;
+
+  const _AncestorViewModel({
+    required this.focusPerson,
+    required this.focusFallback,
+    required this.generations,
   });
 }
 
@@ -1595,12 +1707,14 @@ class _BranchPersonCard extends StatelessWidget {
   final String label;
   final String? avatarUrl;
   final VoidCallback? onTap;
+  final VoidCallback? onBranchTap;
 
   const _BranchPersonCard({
     required this.title,
     required this.label,
     required this.avatarUrl,
     required this.onTap,
+    required this.onBranchTap,
   });
 
   @override
@@ -1640,6 +1754,14 @@ class _BranchPersonCard extends StatelessWidget {
                   ),
                   textAlign: TextAlign.center,
                 ),
+                if (onBranchTap != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: onBranchTap,
+                    icon: const Icon(Icons.account_tree_outlined, size: 18),
+                    label: const Text('Open branch'),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1653,11 +1775,13 @@ class _MiniBranchCard extends StatelessWidget {
   final String label;
   final String? avatarUrl;
   final VoidCallback? onTap;
+  final VoidCallback? onBranchTap;
 
   const _MiniBranchCard({
     required this.label,
     required this.avatarUrl,
     required this.onTap,
+    required this.onBranchTap,
   });
 
   @override
@@ -1688,6 +1812,14 @@ class _MiniBranchCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 maxLines: 2,
               ),
+              if (onBranchTap != null) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: onBranchTap,
+                  icon: const Icon(Icons.account_tree_outlined, size: 16),
+                  label: const Text('Branch'),
+                ),
+              ],
             ],
           ),
         ),
