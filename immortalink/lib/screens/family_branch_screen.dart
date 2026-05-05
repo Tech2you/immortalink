@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'family_tree_screen.dart';
 import 'legacy_vault_screen.dart';
 import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
@@ -358,6 +359,17 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     );
 
     await _load();
+  }
+
+  Future<void> _exitToFamilyTree() async {
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => FamilyTreeScreen(familyId: widget.familyId),
+      ),
+      (route) => false,
+    );
   }
 
   bool _canOpenAncestorBranch(String slotKey) {
@@ -776,9 +788,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
     int startDepth = 1;
 
-    // If a slot-root branch has no direct parent relationships yet,
-    // fall back to the visible family-tree lineage slots so the branch
-    // still follows the expected ancestor lane.
     if (explicitRoot == null && seedRef != null && _parentsOf(seedRef).isEmpty) {
       final fallbackGroups = _slotFallbackGroupsForBranch();
 
@@ -813,7 +822,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         current = firstNodes;
         startDepth = 2;
 
-        // If there are later slot groups, add them only while they contain data.
         for (int i = firstNonEmptyIndex + 1; i < fallbackGroups.length; i++) {
           final group = fallbackGroups[i];
           if (!group.any((e) => e != null)) continue;
@@ -1072,7 +1080,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     required String title,
   }) async {
     final nameController = TextEditingController();
-    final displayNameController = TextEditingController();
     final birthYearController = TextEditingController();
     final deathYearController = TextEditingController();
     final aboutController = TextEditingController();
@@ -1115,14 +1122,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   ),
                   const SizedBox(height: 10),
                   TextField(
-                    controller: displayNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name (optional)',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
                     controller: birthYearController,
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
@@ -1142,13 +1141,26 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  TextField(
-                    controller: deathYearController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Death year (optional)',
-                      border: OutlineInputBorder(),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Optional extra details',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
+                    children: [
+                      TextField(
+                        controller: deathYearController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Death year (optional)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
                   ),
                   if (errorText != null) ...[
                     const SizedBox(height: 10),
@@ -1168,7 +1180,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   ? null
                   : () async {
                       final name = nameController.text.trim();
-                      final displayName = displayNameController.text.trim();
                       final birthYear = parseYear(birthYearController.text);
                       final deathYear = parseYear(deathYearController.text);
                       final about = aboutController.text.trim();
@@ -1210,8 +1221,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                               'family_id': widget.familyId,
                               'slot_key': null,
                               'name': name,
-                              'display_name':
-                                  displayName.isEmpty ? null : displayName,
+                              'display_name': name,
                               'birth_year': birthYear,
                               'death_year': deathYear,
                               'about_me_text': about.isEmpty ? null : about,
@@ -1454,6 +1464,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
             tooltip: 'Refresh',
             onPressed: _load,
             icon: const Icon(Icons.refresh),
+          ),
+          IconButton(
+            tooltip: 'Back to family tree',
+            onPressed: _exitToFamilyTree,
+            icon: const Icon(Icons.exit_to_app),
           ),
         ],
       ),
