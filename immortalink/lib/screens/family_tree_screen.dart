@@ -21,7 +21,99 @@ class FamilyTreeScreen extends StatefulWidget {
 
 class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   final _supabase = Supabase.instance.client;
+String? _legacyRelationForSlot(String slotKey) {
+  switch (slotKey) {
+    case kMother:
+    case kFather:
+    case kMaternalGm:
+    case kMaternalGf:
+    case kPaternalGm:
+    case kPaternalGf:
+    case kMaternalGgm:
+    case kMaternalGgf:
+    case kPaternalGgm:
+    case kPaternalGgf:
+      return 'parent';
 
+    case kChild1:
+    case kChild2:
+    case kChild3:
+    case kChild4:
+    case kGrandchild1:
+    case kGrandchild2:
+    case kGrandchild3:
+    case kGrandchild4:
+    case kGreatGrandchild1:
+    case kGreatGrandchild2:
+    case kGreatGrandchild3:
+    case kGreatGrandchild4:
+      return 'child';
+
+    case kSpouse1:
+      return 'spouse';
+
+    case kSibling1:
+    case kSibling2:
+    case kSibling3:
+      return 'sibling';
+
+    default:
+      return null;
+  }
+}
+
+Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
+  switch (slotKey) {
+    case kMother:
+    case kFather:
+    case kChild1:
+    case kChild2:
+    case kChild3:
+    case kChild4:
+    case kSpouse1:
+    case kSibling1:
+    case kSibling2:
+    case kSibling3:
+      return _currentViewerPerson(_latestData);
+
+    case kMaternalGm:
+    case kMaternalGf:
+      return _latestDisplaySlots[kMother];
+
+    case kPaternalGm:
+    case kPaternalGf:
+      return _latestDisplaySlots[kFather];
+
+    case kMaternalGgm:
+    case kMaternalGgf:
+      return _latestDisplaySlots[kMaternalGm];
+
+    case kPaternalGgm:
+    case kPaternalGgf:
+      return _latestDisplaySlots[kPaternalGm];
+
+    case kGrandchild1:
+      return _latestDisplaySlots[kChild1];
+    case kGrandchild2:
+      return _latestDisplaySlots[kChild2];
+    case kGrandchild3:
+      return _latestDisplaySlots[kChild3];
+    case kGrandchild4:
+      return _latestDisplaySlots[kChild4];
+
+    case kGreatGrandchild1:
+      return _latestDisplaySlots[kGrandchild1];
+    case kGreatGrandchild2:
+      return _latestDisplaySlots[kGrandchild2];
+    case kGreatGrandchild3:
+      return _latestDisplaySlots[kGrandchild3];
+    case kGreatGrandchild4:
+      return _latestDisplaySlots[kGrandchild4];
+
+    default:
+      return null;
+  }
+}
   static const String _logoPath = 'assets/images/immortalink_logo.png';
   static const String _vaultAvatarBucket = 'avatars';
   static const String _legacyAvatarBucket = 'vault_photos';
@@ -417,6 +509,80 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
       default:
         return null;
+    }
+  }
+
+  bool _supportsLegacyProfile(String slotKey) {
+    switch (slotKey) {
+      case kMother:
+      case kFather:
+      case kMaternalGm:
+      case kMaternalGf:
+      case kPaternalGm:
+      case kPaternalGf:
+      case kMaternalGgm:
+      case kMaternalGgf:
+      case kPaternalGgm:
+      case kPaternalGgf:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  String _legacyDialogTitleForSlot(String slotKey, String fallbackTitle) {
+    switch (slotKey) {
+      case kSpouse1:
+        return 'Add legacy spouse';
+      case kSibling1:
+      case kSibling2:
+      case kSibling3:
+        return 'Add legacy sibling';
+      case kChild1:
+      case kChild2:
+      case kChild3:
+      case kChild4:
+        return 'Add legacy child';
+      case kGrandchild1:
+      case kGrandchild2:
+      case kGrandchild3:
+      case kGrandchild4:
+        return 'Add legacy grandchild';
+      case kGreatGrandchild1:
+      case kGreatGrandchild2:
+      case kGreatGrandchild3:
+      case kGreatGrandchild4:
+        return 'Add legacy great-grandchild';
+      default:
+        return 'Add legacy $fallbackTitle';
+    }
+  }
+
+  String _legacyDialogDescriptionForSlot(String slotKey) {
+    switch (slotKey) {
+      case kSpouse1:
+        return 'Create a family-owned spouse profile for someone who does not have their own account or vault yet.';
+      case kSibling1:
+      case kSibling2:
+      case kSibling3:
+        return 'Create a family-owned sibling profile for someone who does not have their own account or vault yet.';
+      case kChild1:
+      case kChild2:
+      case kChild3:
+      case kChild4:
+        return 'Create a family-owned child profile for someone who does not have their own account or vault yet.';
+      case kGrandchild1:
+      case kGrandchild2:
+      case kGrandchild3:
+      case kGrandchild4:
+        return 'Create a family-owned grandchild profile for someone who does not have their own account or vault yet.';
+      case kGreatGrandchild1:
+      case kGreatGrandchild2:
+      case kGreatGrandchild3:
+      case kGreatGrandchild4:
+        return 'Create a family-owned great-grandchild profile for someone who does not have their own account or vault yet.';
+      default:
+        return 'Create a family-owned predecessor profile for someone who does not have their own account or vault.';
     }
   }
 
@@ -879,143 +1045,181 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   }
 
   Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
-    final global = _slotToGlobalPersonMap(data);
-    final viewer = _currentViewerPerson(data);
+  final global = _slotToGlobalPersonMap(data);
+  final viewer = _currentViewerPerson(data);
 
-    if (viewer == null) return {};
+  if (viewer == null) return {};
 
-    final parentsByChild = <String, List<Map<String, dynamic>>>{};
-    final childrenByParent = <String, List<Map<String, dynamic>>>{};
+  final parentsByChild = <String, List<Map<String, dynamic>>>{};
+  final childrenByParent = <String, List<Map<String, dynamic>>>{};
 
-    _buildRelationshipGraph(
-      data,
-      parentsByChild,
-      childrenByParent,
-    );
+  _buildRelationshipGraph(
+    data,
+    parentsByChild,
+    childrenByParent,
+  );
 
-    List<Map<String, dynamic>> parentsOf(Map<String, dynamic>? person) {
-      if (person == null) return [];
-      final key = _nodeKeyFromPerson(person);
-      final out = [...(parentsByChild[key] ?? const <Map<String, dynamic>>[])];
-      out.sort((a, b) => _comparePeople(global, a, b));
-      return out;
-    }
-
-    List<Map<String, dynamic>> childrenOf(Map<String, dynamic>? person) {
-      if (person == null) return [];
-      final key = _nodeKeyFromPerson(person);
-      final out = [...(childrenByParent[key] ?? const <Map<String, dynamic>>[])];
-      out.sort((a, b) => _comparePeople(global, a, b));
-      return out;
-    }
-
-    final visible = <String, Map<String, dynamic>>{};
-
-    final parents = parentsOf(viewer);
-    if (parents.isNotEmpty) visible[kMother] = parents[0];
-    if (parents.length > 1) visible[kFather] = parents[1];
-
-    if (parents.isNotEmpty) {
-      final maternalGrand = parentsOf(parents[0]);
-      if (maternalGrand.isNotEmpty) visible[kMaternalGm] = maternalGrand[0];
-      if (maternalGrand.length > 1) visible[kMaternalGf] = maternalGrand[1];
-
-      if (maternalGrand.isNotEmpty) {
-        final maternalGreat = parentsOf(maternalGrand[0]);
-        if (maternalGreat.isNotEmpty) {
-          visible[kMaternalGgm] = maternalGreat[0];
-        }
-        if (maternalGreat.length > 1) {
-          visible[kMaternalGgf] = maternalGreat[1];
-        }
-      }
-    }
-
-    if (parents.length > 1) {
-      final paternalGrand = parentsOf(parents[1]);
-      if (paternalGrand.isNotEmpty) visible[kPaternalGm] = paternalGrand[0];
-      if (paternalGrand.length > 1) visible[kPaternalGf] = paternalGrand[1];
-
-      if (paternalGrand.isNotEmpty) {
-        final paternalGreat = parentsOf(paternalGrand[0]);
-        if (paternalGreat.isNotEmpty) {
-          visible[kPaternalGgm] = paternalGreat[0];
-        }
-        if (paternalGreat.length > 1) {
-          visible[kPaternalGgf] = paternalGreat[1];
-        }
-      }
-    }
-
-    final siblings = <Map<String, dynamic>>[];
-    for (final parent in parents) {
-      for (final child in childrenOf(parent)) {
-        if (_samePerson(child, viewer)) continue;
-        _addUniquePerson(siblings, child);
-      }
-    }
-    siblings.sort((a, b) => _comparePeople(global, a, b));
-
-    if (siblings.isNotEmpty) visible[kSibling1] = siblings[0];
-    if (siblings.length > 1) visible[kSibling2] = siblings[1];
-    if (siblings.length > 2) visible[kSibling3] = siblings[2];
-
-    final children = childrenOf(viewer);
-    if (children.isNotEmpty) visible[kChild1] = children[0];
-    if (children.length > 1) visible[kChild2] = children[1];
-    if (children.length > 2) visible[kChild3] = children[2];
-    if (children.length > 3) visible[kChild4] = children[3];
-
-    final grandChildren = <Map<String, dynamic>>[];
-    for (final child in children) {
-      for (final grandChild in childrenOf(child)) {
-        _addUniquePerson(grandChildren, grandChild);
-      }
-    }
-    grandChildren.sort((a, b) => _comparePeople(global, a, b));
-
-    if (grandChildren.isNotEmpty) visible[kGrandchild1] = grandChildren[0];
-    if (grandChildren.length > 1) visible[kGrandchild2] = grandChildren[1];
-    if (grandChildren.length > 2) visible[kGrandchild3] = grandChildren[2];
-    if (grandChildren.length > 3) visible[kGrandchild4] = grandChildren[3];
-
-    final greatGrandChildren = <Map<String, dynamic>>[];
-    for (final grandChild in grandChildren) {
-      for (final greatGrandChild in childrenOf(grandChild)) {
-        _addUniquePerson(greatGrandChildren, greatGrandChild);
-      }
-    }
-    greatGrandChildren.sort((a, b) => _comparePeople(global, a, b));
-
-    if (greatGrandChildren.isNotEmpty) {
-      visible[kGreatGrandchild1] = greatGrandChildren[0];
-    }
-    if (greatGrandChildren.length > 1) {
-      visible[kGreatGrandchild2] = greatGrandChildren[1];
-    }
-    if (greatGrandChildren.length > 2) {
-      visible[kGreatGrandchild3] = greatGrandChildren[2];
-    }
-    if (greatGrandChildren.length > 3) {
-      visible[kGreatGrandchild4] = greatGrandChildren[3];
-    }
-
-    Map<String, dynamic>? spouse;
-    for (final child in children) {
-      final coParents =
-          parentsOf(child).where((p) => !_samePerson(p, viewer)).toList();
-      if (coParents.isNotEmpty) {
-        spouse = coParents.first;
-        break;
-      }
-    }
-
-    if (spouse != null && !_samePerson(spouse, viewer)) {
-      visible[kSpouse1] = spouse;
-    }
-
-    return visible;
+  List<Map<String, dynamic>> parentsOf(Map<String, dynamic>? person) {
+    if (person == null) return [];
+    final key = _nodeKeyFromPerson(person);
+    final out = [...(parentsByChild[key] ?? const <Map<String, dynamic>>[])];
+    out.sort((a, b) => _comparePeople(global, a, b));
+    return out;
   }
+
+  List<Map<String, dynamic>> childrenOf(Map<String, dynamic>? person) {
+    if (person == null) return [];
+    final key = _nodeKeyFromPerson(person);
+    final out = [...(childrenByParent[key] ?? const <Map<String, dynamic>>[])];
+    out.sort((a, b) => _comparePeople(global, a, b));
+    return out;
+  }
+
+  void placePerson(
+    Map<String, Map<String, dynamic>> visible,
+    List<String> allowedSlots,
+    Map<String, dynamic>? person,
+  ) {
+    if (person == null) return;
+
+    final actualSlot = _slotForPerson(global, person);
+    if (actualSlot.isNotEmpty &&
+        allowedSlots.contains(actualSlot) &&
+        !visible.containsKey(actualSlot)) {
+      visible[actualSlot] = person;
+      return;
+    }
+
+    for (final slot in allowedSlots) {
+      if (!visible.containsKey(slot)) {
+        visible[slot] = person;
+        return;
+      }
+    }
+  }
+
+  final visible = <String, Map<String, dynamic>>{};
+
+  final parents = parentsOf(viewer);
+  for (final parent in parents) {
+    placePerson(visible, [kMother, kFather], parent);
+  }
+
+  final mother = visible[kMother];
+  final father = visible[kFather];
+
+  if (mother != null) {
+    final maternalGrand = parentsOf(mother);
+    for (final person in maternalGrand) {
+      placePerson(visible, [kMaternalGm, kMaternalGf], person);
+    }
+
+    final maternalGm = visible[kMaternalGm];
+    if (maternalGm != null) {
+      final maternalGreat = parentsOf(maternalGm);
+      for (final person in maternalGreat) {
+        placePerson(visible, [kMaternalGgm, kMaternalGgf], person);
+      }
+    }
+  }
+
+  if (father != null) {
+    final paternalGrand = parentsOf(father);
+    for (final person in paternalGrand) {
+      placePerson(visible, [kPaternalGm, kPaternalGf], person);
+    }
+
+    final paternalGm = visible[kPaternalGm];
+    if (paternalGm != null) {
+      final paternalGreat = parentsOf(paternalGm);
+      for (final person in paternalGreat) {
+        placePerson(visible, [kPaternalGgm, kPaternalGgf], person);
+      }
+    }
+  }
+
+  final siblings = <Map<String, dynamic>>[];
+  for (final parent in parents) {
+    for (final child in childrenOf(parent)) {
+      if (_samePerson(child, viewer)) continue;
+      _addUniquePerson(siblings, child);
+    }
+  }
+  siblings.sort((a, b) => _comparePeople(global, a, b));
+  for (final sibling in siblings) {
+    placePerson(visible, [kSibling1, kSibling2, kSibling3], sibling);
+  }
+
+  final children = childrenOf(viewer);
+  for (final child in children) {
+    placePerson(visible, [kChild1, kChild2, kChild3, kChild4], child);
+  }
+
+  final placedChildren = [
+    visible[kChild1],
+    visible[kChild2],
+    visible[kChild3],
+    visible[kChild4],
+  ].whereType<Map<String, dynamic>>().toList();
+
+  final grandChildren = <Map<String, dynamic>>[];
+  for (final child in placedChildren) {
+    for (final grandChild in childrenOf(child)) {
+      _addUniquePerson(grandChildren, grandChild);
+    }
+  }
+  grandChildren.sort((a, b) => _comparePeople(global, a, b));
+  for (final grandChild in grandChildren) {
+    placePerson(
+      visible,
+      [kGrandchild1, kGrandchild2, kGrandchild3, kGrandchild4],
+      grandChild,
+    );
+  }
+
+  final placedGrandChildren = [
+    visible[kGrandchild1],
+    visible[kGrandchild2],
+    visible[kGrandchild3],
+    visible[kGrandchild4],
+  ].whereType<Map<String, dynamic>>().toList();
+
+  final greatGrandChildren = <Map<String, dynamic>>[];
+  for (final grandChild in placedGrandChildren) {
+    for (final greatGrandChild in childrenOf(grandChild)) {
+      _addUniquePerson(greatGrandChildren, greatGrandChild);
+    }
+  }
+  greatGrandChildren.sort((a, b) => _comparePeople(global, a, b));
+  for (final greatGrandChild in greatGrandChildren) {
+    placePerson(
+      visible,
+      [
+        kGreatGrandchild1,
+        kGreatGrandchild2,
+        kGreatGrandchild3,
+        kGreatGrandchild4,
+      ],
+      greatGrandChild,
+    );
+  }
+
+  Map<String, dynamic>? spouse;
+  for (final child in placedChildren) {
+    final coParents =
+        parentsOf(child).where((p) => !_samePerson(p, viewer)).toList();
+    if (coParents.isNotEmpty) {
+      spouse = coParents.first;
+      break;
+    }
+  }
+
+  if (spouse != null && !_samePerson(spouse, viewer)) {
+    placePerson(visible, [kSpouse1], spouse);
+  }
+
+  return visible;
+}
 
   Future<void> _openYourVaultFallback() async {
     try {
@@ -1193,7 +1397,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setInner) => AlertDialog(
-          title: Text('Add legacy $title'),
+          title: Text(_legacyDialogTitleForSlot(slotKey, title.toLowerCase())),
           content: SizedBox(
             width: 460,
             child: SingleChildScrollView(
@@ -1202,7 +1406,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Create a family-owned predecessor profile for someone who does not have their own account or vault.',
+                    _legacyDialogDescriptionForSlot(slotKey),
                     style: TextStyle(color: Colors.black.withOpacity(0.65)),
                   ),
                   const SizedBox(height: 12),
@@ -1321,39 +1525,37 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                       });
 
                       try {
-                        await _supabase.rpc(
-                          'create_legacy_predecessor',
-                          params: {
-                            'p_family_id': widget.familyId,
-                            'p_slot_key': slotKey,
-                            'p_name': name,
-                            'p_display_name':
-                                displayName.isEmpty ? null : displayName,
-                            'p_birth_year': birthYear,
-                            'p_death_year': deathYear,
-                            'p_about_me_text': about.isEmpty ? null : about,
-                          },
-                        );
+                        final relation = _legacyRelationForSlot(slotKey);
+final anchorPerson = _legacyAnchorPersonForSlot(slotKey);
+final anchorRef = _nodeRefFromPerson(anchorPerson);
 
-                        final created = await _supabase
-                            .from('legacy_family_members')
-                            .select('id')
-                            .eq('family_id', widget.familyId)
-                            .eq('slot_key', slotKey)
-                            .isFilter('replaced_by_vault_id', null)
-                            .order('created_at', ascending: false)
-                            .limit(1)
-                            .maybeSingle();
+if (relation == null) {
+  throw Exception('Unsupported legacy relationship for slot: $slotKey');
+}
 
-                        final legacyId =
-                            (created?['id'] ?? '').toString().trim();
-                        if (legacyId.isNotEmpty) {
-                          await _linkNewNodeIntoRelationships(
-                            slotKey: slotKey,
-                            newNodeType: 'legacy',
-                            newNodeId: legacyId,
-                          );
-                        }
+if (anchorRef == null) {
+  throw Exception('Missing anchor person for slot: $slotKey');
+}
+
+final legacyId = await _supabase.rpc(
+  'create_legacy_relative',
+  params: {
+    'p_family_id': widget.familyId,
+    'p_anchor_type': anchorRef.nodeType,
+    'p_anchor_id': anchorRef.nodeId,
+    'p_relation': relation,
+    'p_name': name,
+    'p_display_name': displayName.isEmpty ? null : displayName,
+    'p_birth_year': birthYear,
+    'p_death_year': deathYear,
+    'p_about_me_text': about.isEmpty ? null : about,
+  },
+);
+
+final createdLegacyId = (legacyId ?? '').toString().trim();
+if (createdLegacyId.isEmpty) {
+  throw Exception('Failed to create legacy relative');
+}
 
                         if (!ctx.mounted) return;
                         Navigator.pop(ctx);
@@ -1408,7 +1610,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Choose whether this person is a living family member to invite now, or a legacy predecessor profile your family will build together.',
+                'Choose whether this person is a living family member to invite now, or a legacy family profile your family will build together.',
                 style: TextStyle(color: Colors.black.withOpacity(0.65)),
               ),
               const SizedBox(height: 16),
@@ -1429,9 +1631,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                 leading: const CircleAvatar(
                   child: Icon(Icons.history_edu_outlined),
                 ),
-                title: const Text('Add legacy predecessor'),
-                subtitle:
-                    const Text('For an ancestor without their own account/vault'),
+                title: const Text('Add legacy family profile'),
+                subtitle: const Text(
+                  'For someone without their own account/vault yet',
+                ),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showLegacyPredecessorDialog(
@@ -2183,7 +2386,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kSpouse1]?['id'] ?? '')
                                                   .toString()],
-                                          onInvite: () => _createInvite(
+                                          onInvite: () =>
+                                              _openPredecessorAddOptions(
                                             slotKey: kSpouse1,
                                             title: 'Spouse',
                                           ),
@@ -2234,9 +2438,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                   (slotVault[kSibling1]?['id'] ??
                                                           '')
                                                       .toString()],
-                                              onInvite: () => _createInvite(
+                                              onInvite: () =>
+                                                  _openPredecessorAddOptions(
                                                 slotKey: kSibling1,
-                                                title: 'Sibling 1',
+                                                title: 'Sibling',
                                               ),
                                               onOpen: () => _openVaultFromTree(
                                                 data,
@@ -2253,9 +2458,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                   (slotVault[kSibling2]?['id'] ??
                                                           '')
                                                       .toString()],
-                                              onInvite: () => _createInvite(
+                                              onInvite: () =>
+                                                  _openPredecessorAddOptions(
                                                 slotKey: kSibling2,
-                                                title: 'Sibling 2',
+                                                title: 'Sibling',
                                               ),
                                               onOpen: () => _openVaultFromTree(
                                                 data,
@@ -2272,9 +2478,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                   (slotVault[kSibling3]?['id'] ??
                                                           '')
                                                       .toString()],
-                                              onInvite: () => _createInvite(
+                                              onInvite: () =>
+                                                  _openPredecessorAddOptions(
                                                 slotKey: kSibling3,
-                                                title: 'Sibling 3',
+                                                title: 'Sibling',
                                               ),
                                               onOpen: () => _openVaultFromTree(
                                                 data,
@@ -2312,9 +2519,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kChild1]?['id'] ?? '')
                                                   .toString()],
-                                          onInvite: () => _createInvite(
+                                          onInvite: () =>
+                                              _openPredecessorAddOptions(
                                             slotKey: kChild1,
-                                            title: 'Child 1',
+                                            title: 'Child',
                                           ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
@@ -2335,9 +2543,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kChild2]?['id'] ?? '')
                                                   .toString()],
-                                          onInvite: () => _createInvite(
+                                          onInvite: () =>
+                                              _openPredecessorAddOptions(
                                             slotKey: kChild2,
-                                            title: 'Child 2',
+                                            title: 'Child',
                                           ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
@@ -2358,9 +2567,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kChild3]?['id'] ?? '')
                                                   .toString()],
-                                          onInvite: () => _createInvite(
+                                          onInvite: () =>
+                                              _openPredecessorAddOptions(
                                             slotKey: kChild3,
-                                            title: 'Child 3',
+                                            title: 'Child',
                                           ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
@@ -2381,9 +2591,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                           avatarUrl: data.avatarUrlByVaultId[
                                               (slotVault[kChild4]?['id'] ?? '')
                                                   .toString()],
-                                          onInvite: () => _createInvite(
+                                          onInvite: () =>
+                                              _openPredecessorAddOptions(
                                             slotKey: kChild4,
-                                            title: 'Child 4',
+                                            title: 'Child',
                                           ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
@@ -2424,9 +2635,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 (slotVault[kGrandchild1]?['id'] ??
                                                         '')
                                                     .toString()],
-                                            onInvite: () => _createInvite(
+                                            onInvite: () =>
+                                                _openPredecessorAddOptions(
                                               slotKey: kGrandchild1,
-                                              title: 'Grandchild 1',
+                                              title: 'Grandchild',
                                             ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
@@ -2450,9 +2662,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 (slotVault[kGrandchild2]?['id'] ??
                                                         '')
                                                     .toString()],
-                                            onInvite: () => _createInvite(
+                                            onInvite: () =>
+                                                _openPredecessorAddOptions(
                                               slotKey: kGrandchild2,
-                                              title: 'Grandchild 2',
+                                              title: 'Grandchild',
                                             ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
@@ -2476,9 +2689,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 (slotVault[kGrandchild3]?['id'] ??
                                                         '')
                                                     .toString()],
-                                            onInvite: () => _createInvite(
+                                            onInvite: () =>
+                                                _openPredecessorAddOptions(
                                               slotKey: kGrandchild3,
-                                              title: 'Grandchild 3',
+                                              title: 'Grandchild',
                                             ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
@@ -2502,9 +2716,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                 (slotVault[kGrandchild4]?['id'] ??
                                                         '')
                                                     .toString()],
-                                            onInvite: () => _createInvite(
+                                            onInvite: () =>
+                                                _openPredecessorAddOptions(
                                               slotKey: kGrandchild4,
-                                              title: 'Grandchild 4',
+                                              title: 'Grandchild',
                                             ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
@@ -2550,9 +2765,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                             ?['id'] ??
                                                         '')
                                                     .toString()],
-                                            onInvite: () => _createInvite(
+                                            onInvite: () =>
+                                                _openPredecessorAddOptions(
                                               slotKey: kGreatGrandchild1,
-                                              title: 'Great-Grandchild 1',
+                                              title: 'Great-grandchild',
                                             ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
@@ -2579,9 +2795,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                             ?['id'] ??
                                                         '')
                                                     .toString()],
-                                            onInvite: () => _createInvite(
+                                            onInvite: () =>
+                                                _openPredecessorAddOptions(
                                               slotKey: kGreatGrandchild2,
-                                              title: 'Great-Grandchild 2',
+                                              title: 'Great-grandchild',
                                             ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
@@ -2608,9 +2825,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                             ?['id'] ??
                                                         '')
                                                     .toString()],
-                                            onInvite: () => _createInvite(
+                                            onInvite: () =>
+                                                _openPredecessorAddOptions(
                                               slotKey: kGreatGrandchild3,
-                                              title: 'Great-Grandchild 3',
+                                              title: 'Great-grandchild',
                                             ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
@@ -2637,9 +2855,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                                             ?['id'] ??
                                                         '')
                                                     .toString()],
-                                            onInvite: () => _createInvite(
+                                            onInvite: () =>
+                                                _openPredecessorAddOptions(
                                               slotKey: kGreatGrandchild4,
-                                              title: 'Great-Grandchild 4',
+                                              title: 'Great-grandchild',
                                             ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
