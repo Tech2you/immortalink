@@ -305,10 +305,14 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       'maternal_gf',
       'paternal_gm',
       'paternal_gf',
-      'maternal_ggm',
-      'maternal_ggf',
-      'paternal_ggm',
-      'paternal_ggf',
+      'maternal_gm_mother',
+      'maternal_gm_father',
+      'maternal_gf_mother',
+      'maternal_gf_father',
+      'paternal_gm_mother',
+      'paternal_gm_father',
+      'paternal_gf_mother',
+      'paternal_gf_father',
       'child_1',
       'child_2',
       'child_3',
@@ -404,35 +408,35 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Future<void> _openAncestorBranchForPerson(
-  Map<String, dynamic> person, {
-  required String fallbackLabel,
-}) async {
-  final isLegacy = person['__legacy'] == true;
-  final id = (person['id'] ?? '').toString().trim();
-  if (id.isEmpty) return;
+    Map<String, dynamic> person, {
+    required String fallbackLabel,
+  }) async {
+    final isLegacy = person['__legacy'] == true;
+    final id = (person['id'] ?? '').toString().trim();
+    if (id.isEmpty) return;
 
-  final personRef = _nodeRefFromPerson(person);
-  if (personRef == null) return;
+    final personRef = _nodeRefFromPerson(person);
+    if (personRef == null) return;
 
-  final nextSlotKey = _slotHintForNode(personRef);
-  if (nextSlotKey.isEmpty) return;
+    final nextSlotKey = _slotHintForNode(personRef);
+    if (nextSlotKey.isEmpty) return;
 
-  await Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => FamilyBranchScreen(
-        familyId: widget.familyId,
-        rootLabel: _personLabel(person, fallbackLabel),
-        rootSlotKey: nextSlotKey,
-        direction: 'ancestor',
-        rootNodeType: isLegacy ? 'legacy' : 'vault',
-        rootNodeId: id,
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FamilyBranchScreen(
+          familyId: widget.familyId,
+          rootLabel: _personLabel(person, fallbackLabel),
+          rootSlotKey: nextSlotKey,
+          direction: 'ancestor',
+          rootNodeType: isLegacy ? 'legacy' : 'vault',
+          rootNodeId: id,
+        ),
       ),
-    ),
-  );
+    );
 
-  await _load();
-}
+    await _load();
+  }
 
   Future<void> _exitToFamilyTree() async {
     if (!mounted) return;
@@ -452,10 +456,14 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         slotKey == 'maternal_gf' ||
         slotKey == 'paternal_gm' ||
         slotKey == 'paternal_gf' ||
-        slotKey == 'maternal_ggm' ||
-        slotKey == 'maternal_ggf' ||
-        slotKey == 'paternal_ggm' ||
-        slotKey == 'paternal_ggf';
+        slotKey == 'maternal_gm_mother' ||
+        slotKey == 'maternal_gm_father' ||
+        slotKey == 'maternal_gf_mother' ||
+        slotKey == 'maternal_gf_father' ||
+        slotKey == 'paternal_gm_mother' ||
+        slotKey == 'paternal_gm_father' ||
+        slotKey == 'paternal_gf_mother' ||
+        slotKey == 'paternal_gf_father';
   }
 
   bool _canOpenDescendantBranch(String slotKey) {
@@ -491,11 +499,15 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       case 'maternal_gf':
       case 'paternal_gf':
         return 'Grandfather';
-      case 'maternal_ggm':
-      case 'paternal_ggm':
+      case 'maternal_gm_mother':
+      case 'maternal_gf_mother':
+      case 'paternal_gm_mother':
+      case 'paternal_gf_mother':
         return 'Great-grandmother';
-      case 'maternal_ggf':
-      case 'paternal_ggf':
+      case 'maternal_gm_father':
+      case 'maternal_gf_father':
+      case 'paternal_gm_father':
+      case 'paternal_gf_father':
         return 'Great-grandfather';
       case 'child_1':
       case 'child_2':
@@ -593,25 +605,25 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                     );
                   } else {
                     final personRef = _nodeRefFromPerson(person);
-if (personRef == null) return;
+                    if (personRef == null) return;
 
-final nextSlotKey = _slotHintForNode(personRef);
-if (nextSlotKey.isEmpty) return;
+                    final nextSlotKey = _slotHintForNode(personRef);
+                    if (nextSlotKey.isEmpty) return;
 
-await Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (_) => FamilyBranchScreen(
-      familyId: widget.familyId,
-      rootLabel: _personLabel(person, label),
-      rootSlotKey: nextSlotKey,
-      direction: direction,
-      rootNodeType: isLegacy ? 'legacy' : 'vault',
-      rootNodeId: personId.isEmpty ? null : personId,
-    ),
-  ),
-);
-await _load();
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => FamilyBranchScreen(
+                          familyId: widget.familyId,
+                          rootLabel: _personLabel(person, label),
+                          rootSlotKey: nextSlotKey,
+                          direction: direction,
+                          rootNodeType: isLegacy ? 'legacy' : 'vault',
+                          rootNodeId: personId.isEmpty ? null : personId,
+                        ),
+                      ),
+                    );
+                    await _load();
                   }
                 },
               ),
@@ -832,25 +844,43 @@ await _load();
       case 'mother':
         slotGroups = const [
           ['maternal_gm', 'maternal_gf'],
-          ['maternal_ggm', 'maternal_ggf'],
+          [
+            'maternal_gm_mother',
+            'maternal_gm_father',
+            'maternal_gf_mother',
+            'maternal_gf_father',
+          ],
         ];
         break;
       case 'father':
         slotGroups = const [
           ['paternal_gm', 'paternal_gf'],
-          ['paternal_ggm', 'paternal_ggf'],
+          [
+            'paternal_gm_mother',
+            'paternal_gm_father',
+            'paternal_gf_mother',
+            'paternal_gf_father',
+          ],
         ];
         break;
       case 'maternal_gm':
+        slotGroups = const [
+          ['maternal_gm_mother', 'maternal_gm_father'],
+        ];
+        break;
       case 'maternal_gf':
         slotGroups = const [
-          ['maternal_ggm', 'maternal_ggf'],
+          ['maternal_gf_mother', 'maternal_gf_father'],
         ];
         break;
       case 'paternal_gm':
+        slotGroups = const [
+          ['paternal_gm_mother', 'paternal_gm_father'],
+        ];
+        break;
       case 'paternal_gf':
         slotGroups = const [
-          ['paternal_ggm', 'paternal_ggf'],
+          ['paternal_gf_mother', 'paternal_gf_father'],
         ];
         break;
       default:
@@ -923,7 +953,8 @@ await _load();
           );
         }
 
-        while (firstNodes.length < 2) {
+        final firstTargetCount = firstGroup.length;
+        while (firstNodes.length < firstTargetCount) {
           firstNodes.add(
             _AncestorBranchNode(
               ref: null,
@@ -935,11 +966,11 @@ await _load();
         generations.add(
           _AncestorGeneration(
             depth: 1,
-            nodes: firstNodes.take(2).toList(),
+            nodes: firstNodes.take(firstTargetCount).toList(),
           ),
         );
 
-        current = firstNodes.take(2).toList();
+        current = firstNodes.take(firstTargetCount).toList();
         startDepth = 2;
 
         for (int i = firstNonEmptyIndex + 1; i < fallbackGroups.length; i++) {
@@ -955,7 +986,7 @@ await _load();
             );
           }
 
-          final targetCount = pow(2, generations.length + 1).toInt();
+          final targetCount = group.length;
           while (nodes.length < targetCount) {
             nodes.add(
               _AncestorBranchNode(
@@ -2026,9 +2057,8 @@ await _load();
                             runSpacing: 12,
                             alignment: WrapAlignment.center,
                             children: generation.nodes.map((node) {
-                              final person = node.ref == null
-                                  ? null
-                                  : _personForNode(node.ref!);
+                              final person =
+                                  node.ref == null ? null : _personForNode(node.ref!);
 
                               if (person == null) {
                                 return _MiniBranchAddCard(
@@ -2135,9 +2165,8 @@ await _load();
                             runSpacing: 12,
                             alignment: WrapAlignment.center,
                             children: generation.nodes.map((node) {
-                              final person = node.ref == null
-                                  ? null
-                                  : _personForNode(node.ref!);
+                              final person =
+                                  node.ref == null ? null : _personForNode(node.ref!);
 
                               if (person == null) {
                                 return _MiniBranchAddCard(
@@ -2158,35 +2187,35 @@ await _load();
                                   await _openPerson(person);
                                 },
                                 onBranchTap: () async {
-                                  final isLegacy =
-                                      person['__legacy'] == true;
-                                  final personId = (person['id'] ?? '')
-                                      .toString()
-                                      .trim();
+                                  final isLegacy = person['__legacy'] == true;
+                                  final personId =
+                                      (person['id'] ?? '').toString().trim();
 
                                   final personRef = _nodeRefFromPerson(person);
-if (personRef == null) return;
+                                  if (personRef == null) return;
 
-final nextSlotKey = _slotHintForNode(personRef);
-if (nextSlotKey.isEmpty) return;
+                                  final nextSlotKey = _slotHintForNode(personRef);
+                                  if (nextSlotKey.isEmpty) return;
 
-await Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (_) => FamilyBranchScreen(
-      familyId: widget.familyId,
-      rootLabel: _personLabel(
-        person,
-        'Descendant',
-      ),
-      rootSlotKey: nextSlotKey,
-      direction: 'descendant',
-      rootNodeType: isLegacy ? 'legacy' : 'vault',
-      rootNodeId: personId.isEmpty ? null : personId,
-    ),
-  ),
-);
-await _load();
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => FamilyBranchScreen(
+                                        familyId: widget.familyId,
+                                        rootLabel: _personLabel(
+                                          person,
+                                          'Descendant',
+                                        ),
+                                        rootSlotKey: nextSlotKey,
+                                        direction: 'descendant',
+                                        rootNodeType:
+                                            isLegacy ? 'legacy' : 'vault',
+                                        rootNodeId:
+                                            personId.isEmpty ? null : personId,
+                                      ),
+                                    ),
+                                  );
+                                  await _load();
                                 },
                               );
                             }).toList(),
@@ -2203,11 +2232,13 @@ await _load();
       },
     );
   }
-String _requiredSlotForPerson(Map<String, dynamic> person) {
-  final ref = _nodeRefFromPerson(person);
-  if (ref == null) return '';
-  return _slotHintForNode(ref);
-}
+
+  String _requiredSlotForPerson(Map<String, dynamic> person) {
+    final ref = _nodeRefFromPerson(person);
+    if (ref == null) return '';
+    return _slotHintForNode(ref);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isAncestor = widget.direction == 'ancestor';

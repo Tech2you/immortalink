@@ -26,10 +26,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   static const String _vaultAvatarBucket = 'avatars';
   static const String _legacyAvatarBucket = 'vault_photos';
 
-  static const String kMaternalGgm = 'maternal_ggm';
-  static const String kMaternalGgf = 'maternal_ggf';
-  static const String kPaternalGgm = 'paternal_ggm';
-  static const String kPaternalGgf = 'paternal_ggf';
+  // Great-grandparents: two parents for each grandparent = 8 total slots.
+  static const String kMaternalGmMother = 'maternal_gm_mother';
+  static const String kMaternalGmFather = 'maternal_gm_father';
+  static const String kMaternalGfMother = 'maternal_gf_mother';
+  static const String kMaternalGfFather = 'maternal_gf_father';
+  static const String kPaternalGmMother = 'paternal_gm_mother';
+  static const String kPaternalGmFather = 'paternal_gm_father';
+  static const String kPaternalGfMother = 'paternal_gf_mother';
+  static const String kPaternalGfFather = 'paternal_gf_father';
 
   static const String kMaternalGm = 'maternal_gm';
   static const String kMaternalGf = 'maternal_gf';
@@ -90,10 +95,14 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       case kMaternalGf:
       case kPaternalGm:
       case kPaternalGf:
-      case kMaternalGgm:
-      case kMaternalGgf:
-      case kPaternalGgm:
-      case kPaternalGgf:
+      case kMaternalGmMother:
+      case kMaternalGmFather:
+      case kMaternalGfMother:
+      case kMaternalGfFather:
+      case kPaternalGmMother:
+      case kPaternalGmFather:
+      case kPaternalGfMother:
+      case kPaternalGfFather:
         return 'parent';
 
       case kChild1:
@@ -152,19 +161,21 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       case kPaternalGf:
         return _latestDisplaySlots[kFather];
 
-      case kMaternalGgm:
-      case kMaternalGgf:
-        return _firstNonNullPerson([
-          _latestDisplaySlots[kMaternalGm],
-          _latestDisplaySlots[kMaternalGf],
-        ]);
+      case kMaternalGmMother:
+      case kMaternalGmFather:
+        return _latestDisplaySlots[kMaternalGm];
 
-      case kPaternalGgm:
-      case kPaternalGgf:
-        return _firstNonNullPerson([
-          _latestDisplaySlots[kPaternalGm],
-          _latestDisplaySlots[kPaternalGf],
-        ]);
+      case kMaternalGfMother:
+      case kMaternalGfFather:
+        return _latestDisplaySlots[kMaternalGf];
+
+      case kPaternalGmMother:
+      case kPaternalGmFather:
+        return _latestDisplaySlots[kPaternalGm];
+
+      case kPaternalGfMother:
+      case kPaternalGfFather:
+        return _latestDisplaySlots[kPaternalGf];
 
       case kGrandchild1:
         return _latestDisplaySlots[kChild1];
@@ -471,8 +482,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
           relationshipKind: 'parent_child',
         );
 
-      case kMaternalGgm:
-      case kMaternalGgf:
+      case kMaternalGmMother:
+      case kMaternalGmFather:
         return const _RelationshipAnchorSpec(
           anchorSlotKey: kMaternalGm,
           anchorIsViewer: false,
@@ -480,10 +491,28 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
           relationshipKind: 'parent_child',
         );
 
-      case kPaternalGgm:
-      case kPaternalGgf:
+      case kMaternalGfMother:
+      case kMaternalGfFather:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kMaternalGf,
+          anchorIsViewer: false,
+          newNodeIsParent: true,
+          relationshipKind: 'parent_child',
+        );
+
+      case kPaternalGmMother:
+      case kPaternalGmFather:
         return const _RelationshipAnchorSpec(
           anchorSlotKey: kPaternalGm,
+          anchorIsViewer: false,
+          newNodeIsParent: true,
+          relationshipKind: 'parent_child',
+        );
+
+      case kPaternalGfMother:
+      case kPaternalGfFather:
+        return const _RelationshipAnchorSpec(
+          anchorSlotKey: kPaternalGf,
           anchorIsViewer: false,
           newNodeIsParent: true,
           relationshipKind: 'parent_child',
@@ -535,10 +564,14 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       case kMaternalGf:
       case kPaternalGm:
       case kPaternalGf:
-      case kMaternalGgm:
-      case kMaternalGgf:
-      case kPaternalGgm:
-      case kPaternalGgf:
+      case kMaternalGmMother:
+      case kMaternalGmFather:
+      case kMaternalGfMother:
+      case kMaternalGfFather:
+      case kPaternalGmMother:
+      case kPaternalGmFather:
+      case kPaternalGfMother:
+      case kPaternalGfFather:
         return true;
       default:
         return false;
@@ -894,10 +927,14 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       kMaternalGf,
       kPaternalGm,
       kPaternalGf,
-      kMaternalGgm,
-      kMaternalGgf,
-      kPaternalGgm,
-      kPaternalGgf,
+      kMaternalGmMother,
+      kMaternalGmFather,
+      kMaternalGfMother,
+      kMaternalGfFather,
+      kPaternalGmMother,
+      kPaternalGmFather,
+      kPaternalGfMother,
+      kPaternalGfFather,
       kSpouse1,
       kSibling1,
       kSibling2,
@@ -1129,12 +1166,27 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
         placePerson(visible, [kMaternalGm, kMaternalGf], person);
       }
 
-      final maternalAnchor =
-          _firstNonNullPerson([visible[kMaternalGm], visible[kMaternalGf]]);
-      if (maternalAnchor != null) {
-        final maternalGreat = parentsOf(maternalAnchor);
-        for (final person in maternalGreat) {
-          placePerson(visible, [kMaternalGgm, kMaternalGgf], person);
+      final maternalGm = visible[kMaternalGm];
+      if (maternalGm != null) {
+        final maternalGmParents = parentsOf(maternalGm);
+        for (final person in maternalGmParents) {
+          placePerson(
+            visible,
+            [kMaternalGmMother, kMaternalGmFather],
+            person,
+          );
+        }
+      }
+
+      final maternalGf = visible[kMaternalGf];
+      if (maternalGf != null) {
+        final maternalGfParents = parentsOf(maternalGf);
+        for (final person in maternalGfParents) {
+          placePerson(
+            visible,
+            [kMaternalGfMother, kMaternalGfFather],
+            person,
+          );
         }
       }
     }
@@ -1145,12 +1197,27 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
         placePerson(visible, [kPaternalGm, kPaternalGf], person);
       }
 
-      final paternalAnchor =
-          _firstNonNullPerson([visible[kPaternalGm], visible[kPaternalGf]]);
-      if (paternalAnchor != null) {
-        final paternalGreat = parentsOf(paternalAnchor);
-        for (final person in paternalGreat) {
-          placePerson(visible, [kPaternalGgm, kPaternalGgf], person);
+      final paternalGm = visible[kPaternalGm];
+      if (paternalGm != null) {
+        final paternalGmParents = parentsOf(paternalGm);
+        for (final person in paternalGmParents) {
+          placePerson(
+            visible,
+            [kPaternalGmMother, kPaternalGmFather],
+            person,
+          );
+        }
+      }
+
+      final paternalGf = visible[kPaternalGf];
+      if (paternalGf != null) {
+        final paternalGfParents = parentsOf(paternalGf);
+        for (final person in paternalGfParents) {
+          placePerson(
+            visible,
+            [kPaternalGfMother, kPaternalGfFather],
+            person,
+          );
         }
       }
     }
@@ -1680,10 +1747,14 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
         slotKey == kMaternalGf ||
         slotKey == kPaternalGm ||
         slotKey == kPaternalGf ||
-        slotKey == kMaternalGgm ||
-        slotKey == kMaternalGgf ||
-        slotKey == kPaternalGgm ||
-        slotKey == kPaternalGgf;
+        slotKey == kMaternalGmMother ||
+        slotKey == kMaternalGmFather ||
+        slotKey == kMaternalGfMother ||
+        slotKey == kMaternalGfFather ||
+        slotKey == kPaternalGmMother ||
+        slotKey == kPaternalGmFather ||
+        slotKey == kPaternalGfMother ||
+        slotKey == kPaternalGfFather;
   }
 
   bool _canOpenDescendantBranch(String slotKey) {
@@ -1719,11 +1790,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       case kMaternalGf:
       case kPaternalGf:
         return 'Grandfather';
-      case kMaternalGgm:
-      case kPaternalGgm:
+      case kMaternalGmMother:
+      case kMaternalGfMother:
+      case kPaternalGmMother:
+      case kPaternalGfMother:
         return 'Great-grandmother';
-      case kMaternalGgf:
-      case kPaternalGgf:
+      case kMaternalGmFather:
+      case kMaternalGfFather:
+      case kPaternalGmFather:
+      case kPaternalGfFather:
         return 'Great-grandfather';
       case kChild1:
       case kChild2:
@@ -1852,6 +1927,65 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
         _geom = next;
       });
     });
+  }
+
+  Widget _buildGreatGrandparentSlot({
+    required String slotKey,
+    required Map<String, Map<String, dynamic>> slotVault,
+    required _FamilyData data,
+  }) {
+    return _PersonSlot(
+      key: _keyFor(slotKey),
+      filled: slotVault[slotKey],
+      avatarUrl: data.avatarUrlByVaultId[
+          (slotVault[slotKey]?['id'] ?? '').toString()],
+      onInvite: () => _openPredecessorAddOptions(
+        slotKey: slotKey,
+        title: 'Great-grandparent',
+      ),
+      onOpen: () => _openVaultFromTree(
+        data,
+        slotVault[slotKey]!,
+      ),
+      onBranchTap: slotVault[slotKey] == null
+          ? null
+          : () => _openDirectBranchForPerson(
+                slotKey: slotKey,
+                person: slotVault[slotKey]!,
+              ),
+      showAddLabel: 'Add great-grandparent',
+    );
+  }
+
+  Widget _buildGreatGrandparentPairCard({
+    required String title,
+    required String leftSlotKey,
+    required String rightSlotKey,
+    required Map<String, Map<String, dynamic>> slotVault,
+    required _FamilyData data,
+  }) {
+    return _GroupCard(
+      title: title,
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildGreatGrandparentSlot(
+              slotKey: leftSlotKey,
+              slotVault: slotVault,
+              data: data,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildGreatGrandparentSlot(
+              slotKey: rightSlotKey,
+              slotVault: slotVault,
+              data: data,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1991,166 +2125,54 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                 if (_showGreatGrandparents) ...[
                                   const SizedBox(height: 8),
                                   Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Expanded(
-                                        child: _GroupCard(
-                                          title: 'Great-grandparents',
-                                          child: Row(
-                                            children: [
-                                              Expanded(
-                                                child: _PersonSlot(
-                                                  key: _keyFor(kMaternalGgm),
-                                                  filled:
-                                                      slotVault[kMaternalGgm],
-                                                  avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kMaternalGgm]
-                                                                  ?['id'] ??
-                                                              '')
-                                                          .toString()],
-                                                  onInvite: () =>
-                                                      _openPredecessorAddOptions(
-                                                    slotKey: kMaternalGgm,
-                                                    title: 'Great-grandparent',
-                                                  ),
-                                                  onOpen: () =>
-                                                      _openVaultFromTree(
-                                                    data,
-                                                    slotVault[kMaternalGgm]!,
-                                                  ),
-                                                  onBranchTap: slotVault[
-                                                              kMaternalGgm] ==
-                                                          null
-                                                      ? null
-                                                      : () =>
-                                                          _openDirectBranchForPerson(
-                                                            slotKey:
-                                                                kMaternalGgm,
-                                                            person: slotVault[
-                                                                kMaternalGgm]!,
-                                                          ),
-                                                  showAddLabel:
-                                                      'Add great-grandparent',
-                                                ),
-                                              ),
-                                              const SizedBox(width: 10),
-                                              Expanded(
-                                                child: _PersonSlot(
-                                                  key: _keyFor(kMaternalGgf),
-                                                  filled:
-                                                      slotVault[kMaternalGgf],
-                                                  avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kMaternalGgf]
-                                                                  ?['id'] ??
-                                                              '')
-                                                          .toString()],
-                                                  onInvite: () =>
-                                                      _openPredecessorAddOptions(
-                                                    slotKey: kMaternalGgf,
-                                                    title: 'Great-grandparent',
-                                                  ),
-                                                  onOpen: () =>
-                                                      _openVaultFromTree(
-                                                    data,
-                                                    slotVault[kMaternalGgf]!,
-                                                  ),
-                                                  onBranchTap: slotVault[
-                                                              kMaternalGgf] ==
-                                                          null
-                                                      ? null
-                                                      : () =>
-                                                          _openDirectBranchForPerson(
-                                                            slotKey:
-                                                                kMaternalGgf,
-                                                            person: slotVault[
-                                                                kMaternalGgf]!,
-                                                          ),
-                                                  showAddLabel:
-                                                      'Add great-grandparent',
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                        child: Column(
+                                          children: [
+                                            _buildGreatGrandparentPairCard(
+                                              title:
+                                                  'Parents of maternal grandmother',
+                                              leftSlotKey: kMaternalGmMother,
+                                              rightSlotKey: kMaternalGmFather,
+                                              slotVault: slotVault,
+                                              data: data,
+                                            ),
+                                            const SizedBox(height: 12),
+                                            _buildGreatGrandparentPairCard(
+                                              title:
+                                                  'Parents of maternal grandfather',
+                                              leftSlotKey: kMaternalGfMother,
+                                              rightSlotKey: kMaternalGfFather,
+                                              slotVault: slotVault,
+                                              data: data,
+                                            ),
+                                          ],
                                         ),
                                       ),
                                       const SizedBox(width: 12),
                                       Expanded(
-                                        child: _GroupCard(
-                                          title: 'Great-grandparents',
-                                          child: Row(
-                                            children: [
-                                              Expanded(
-                                                child: _PersonSlot(
-                                                  key: _keyFor(kPaternalGgm),
-                                                  filled:
-                                                      slotVault[kPaternalGgm],
-                                                  avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kPaternalGgm]
-                                                                  ?['id'] ??
-                                                              '')
-                                                          .toString()],
-                                                  onInvite: () =>
-                                                      _openPredecessorAddOptions(
-                                                    slotKey: kPaternalGgm,
-                                                    title: 'Great-grandparent',
-                                                  ),
-                                                  onOpen: () =>
-                                                      _openVaultFromTree(
-                                                    data,
-                                                    slotVault[kPaternalGgm]!,
-                                                  ),
-                                                  onBranchTap: slotVault[
-                                                              kPaternalGgm] ==
-                                                          null
-                                                      ? null
-                                                      : () =>
-                                                          _openDirectBranchForPerson(
-                                                            slotKey:
-                                                                kPaternalGgm,
-                                                            person: slotVault[
-                                                                kPaternalGgm]!,
-                                                          ),
-                                                  showAddLabel:
-                                                      'Add great-grandparent',
-                                                ),
-                                              ),
-                                              const SizedBox(width: 10),
-                                              Expanded(
-                                                child: _PersonSlot(
-                                                  key: _keyFor(kPaternalGgf),
-                                                  filled:
-                                                      slotVault[kPaternalGgf],
-                                                  avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kPaternalGgf]
-                                                                  ?['id'] ??
-                                                              '')
-                                                          .toString()],
-                                                  onInvite: () =>
-                                                      _openPredecessorAddOptions(
-                                                    slotKey: kPaternalGgf,
-                                                    title: 'Great-grandparent',
-                                                  ),
-                                                  onOpen: () =>
-                                                      _openVaultFromTree(
-                                                    data,
-                                                    slotVault[kPaternalGgf]!,
-                                                  ),
-                                                  onBranchTap: slotVault[
-                                                              kPaternalGgf] ==
-                                                          null
-                                                      ? null
-                                                      : () =>
-                                                          _openDirectBranchForPerson(
-                                                            slotKey:
-                                                                kPaternalGgf,
-                                                            person: slotVault[
-                                                                kPaternalGgf]!,
-                                                          ),
-                                                  showAddLabel:
-                                                      'Add great-grandparent',
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                        child: Column(
+                                          children: [
+                                            _buildGreatGrandparentPairCard(
+                                              title:
+                                                  'Parents of paternal grandmother',
+                                              leftSlotKey: kPaternalGmMother,
+                                              rightSlotKey: kPaternalGmFather,
+                                              slotVault: slotVault,
+                                              data: data,
+                                            ),
+                                            const SizedBox(height: 12),
+                                            _buildGreatGrandparentPairCard(
+                                              title:
+                                                  'Parents of paternal grandfather',
+                                              leftSlotKey: kPaternalGfMother,
+                                              rightSlotKey: kPaternalGfFather,
+                                              slotVault: slotVault,
+                                              data: data,
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ],
@@ -3330,10 +3352,15 @@ class _TreeLinesPainter extends CustomPainter {
     const you = 'you';
 
     if (showGreatGrandparents) {
-      line('maternal_ggm', 'maternal_gm');
-      line('maternal_ggf', 'maternal_gm');
-      line('paternal_ggm', 'paternal_gm');
-      line('paternal_ggf', 'paternal_gm');
+      line('maternal_gm_mother', 'maternal_gm');
+      line('maternal_gm_father', 'maternal_gm');
+      line('maternal_gf_mother', 'maternal_gf');
+      line('maternal_gf_father', 'maternal_gf');
+
+      line('paternal_gm_mother', 'paternal_gm');
+      line('paternal_gm_father', 'paternal_gm');
+      line('paternal_gf_mother', 'paternal_gf');
+      line('paternal_gf_father', 'paternal_gf');
     }
 
     if (showGrandparents) {
@@ -3363,6 +3390,7 @@ class _TreeLinesPainter extends CustomPainter {
         line('child_3', 'grandchild_3');
         line('child_4', 'grandchild_4');
       }
+
       if (showGreatGrandkids) {
         line('grandchild_1', 'greatgrandchild_1');
         line('grandchild_2', 'greatgrandchild_2');
@@ -3382,7 +3410,6 @@ class _TreeLinesPainter extends CustomPainter {
         oldDelegate.showGreatGrandkids != showGreatGrandkids;
   }
 }
-
 class _BottomVinesPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
