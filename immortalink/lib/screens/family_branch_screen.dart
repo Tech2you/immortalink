@@ -40,8 +40,8 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   static const String _vaultAvatarBucket = 'avatars';
   static const String _legacyAvatarBucket = 'vault_photos';
 
-  // 3 generations further back = 2 + 4 + 8 = 14 slots
   static const int _maxAncestorDepth = 3;
+  static const int _maxDescendantDepth = 2;
 
   bool _loading = true;
   String? _error;
@@ -279,6 +279,73 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     return _NodeRef(type: isLegacy ? 'legacy' : 'vault', id: id);
   }
 
+  String _nodeKey(_NodeRef ref) => '${ref.type}:${ref.id}';
+
+  String _slotHintForNode(_NodeRef ref) {
+    final slotMap = _slotToPersonMap();
+    final person = _personForNode(ref);
+    if (person == null) return '';
+    final key = _nodeKey(ref);
+
+    for (final entry in slotMap.entries) {
+      final entryRef = _nodeRefFromPerson(entry.value);
+      if (entryRef != null && _nodeKey(entryRef) == key) {
+        return entry.key;
+      }
+    }
+
+    return '';
+  }
+
+  int _slotPriority(String slot) {
+    const ordered = [
+      'mother',
+      'father',
+      'maternal_gm',
+      'maternal_gf',
+      'paternal_gm',
+      'paternal_gf',
+      'maternal_ggm',
+      'maternal_ggf',
+      'paternal_ggm',
+      'paternal_ggf',
+      'child_1',
+      'child_2',
+      'child_3',
+      'child_4',
+      'grandchild_1',
+      'grandchild_2',
+      'grandchild_3',
+      'grandchild_4',
+      'greatgrandchild_1',
+      'greatgrandchild_2',
+      'greatgrandchild_3',
+      'greatgrandchild_4',
+    ];
+    final idx = ordered.indexOf(slot);
+    return idx == -1 ? 999 : idx;
+  }
+
+  void _sortNodeRefs(List<_NodeRef> refs) {
+    refs.sort((a, b) {
+      final slotA = _slotHintForNode(a);
+      final slotB = _slotHintForNode(b);
+
+      final prioA = _slotPriority(slotA);
+      final prioB = _slotPriority(slotB);
+
+      if (prioA != prioB) return prioA.compareTo(prioB);
+
+      final personA = _personForNode(a);
+      final personB = _personForNode(b);
+
+      final nameA = _personLabel(personA, '').toLowerCase();
+      final nameB = _personLabel(personB, '').toLowerCase();
+
+      return nameA.compareTo(nameB);
+    });
+  }
+
   Future<void> _openPerson(Map<String, dynamic> person) async {
     final uid = _supabase.auth.currentUser?.id;
     final isLegacy = person['__legacy'] == true;
@@ -337,29 +404,35 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Future<void> _openAncestorBranchForPerson(
-    Map<String, dynamic> person, {
-    required String fallbackLabel,
-  }) async {
-    final isLegacy = person['__legacy'] == true;
-    final id = (person['id'] ?? '').toString().trim();
-    if (id.isEmpty) return;
+  Map<String, dynamic> person, {
+  required String fallbackLabel,
+}) async {
+  final isLegacy = person['__legacy'] == true;
+  final id = (person['id'] ?? '').toString().trim();
+  if (id.isEmpty) return;
 
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => FamilyBranchScreen(
-          familyId: widget.familyId,
-          rootLabel: _personLabel(person, fallbackLabel),
-          rootSlotKey: widget.rootSlotKey,
-          direction: 'ancestor',
-          rootNodeType: isLegacy ? 'legacy' : 'vault',
-          rootNodeId: id,
-        ),
+  final personRef = _nodeRefFromPerson(person);
+  if (personRef == null) return;
+
+  final nextSlotKey = _slotHintForNode(personRef);
+  if (nextSlotKey.isEmpty) return;
+
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => FamilyBranchScreen(
+        familyId: widget.familyId,
+        rootLabel: _personLabel(person, fallbackLabel),
+        rootSlotKey: nextSlotKey,
+        direction: 'ancestor',
+        rootNodeType: isLegacy ? 'legacy' : 'vault',
+        rootNodeId: id,
       ),
-    );
+    ),
+  );
 
-    await _load();
-  }
+  await _load();
+}
 
   Future<void> _exitToFamilyTree() async {
     if (!mounted) return;
@@ -510,24 +583,35 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                 onTap: () async {
                   Navigator.pop(ctx);
 
+                  final isLegacy = person['__legacy'] == true;
+                  final personId = (person['id'] ?? '').toString().trim();
+
                   if (direction == 'ancestor') {
                     await _openAncestorBranchForPerson(
                       person,
                       fallbackLabel: label,
                     );
                   } else {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => FamilyBranchScreen(
-                          familyId: widget.familyId,
-                          rootLabel: label,
-                          rootSlotKey: slotKey,
-                          direction: direction,
-                        ),
-                      ),
-                    );
-                    await _load();
+                    final personRef = _nodeRefFromPerson(person);
+if (personRef == null) return;
+
+final nextSlotKey = _slotHintForNode(personRef);
+if (nextSlotKey.isEmpty) return;
+
+await Navigator.push(
+  context,
+  MaterialPageRoute(
+    builder: (_) => FamilyBranchScreen(
+      familyId: widget.familyId,
+      rootLabel: _personLabel(person, label),
+      rootSlotKey: nextSlotKey,
+      direction: direction,
+      rootNodeType: isLegacy ? 'legacy' : 'vault',
+      rootNodeId: personId.isEmpty ? null : personId,
+    ),
+  ),
+);
+await _load();
                   }
                 },
               ),
@@ -710,6 +794,33 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       if (!exists) refs.add(ref);
     }
 
+    _sortNodeRefs(refs);
+    return refs;
+  }
+
+  List<_NodeRef> _childrenOf(_NodeRef parent) {
+    final refs = <_NodeRef>[];
+
+    for (final row in _relationships) {
+      final parentType = (row['parent_type'] ?? '').toString().trim();
+      final parentId = (row['parent_id'] ?? '').toString().trim();
+      final kind = (row['relationship_kind'] ?? '').toString().trim();
+
+      if (kind != 'parent_child') continue;
+      if (parentType != parent.type || parentId != parent.id) continue;
+
+      final childType = (row['child_type'] ?? '').toString().trim();
+      final childId = (row['child_id'] ?? '').toString().trim();
+      if (childType.isEmpty || childId.isEmpty) continue;
+
+      if (childType == 'invite') continue;
+
+      final ref = _NodeRef(type: childType, id: childId);
+      final exists = refs.any((e) => e.type == ref.type && e.id == ref.id);
+      if (!exists) refs.add(ref);
+    }
+
+    _sortNodeRefs(refs);
     return refs;
   }
 
@@ -812,21 +923,29 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
           );
         }
 
+        while (firstNodes.length < 2) {
+          firstNodes.add(
+            _AncestorBranchNode(
+              ref: null,
+              childRefForAdd: seedRef,
+            ),
+          );
+        }
+
         generations.add(
           _AncestorGeneration(
             depth: 1,
-            nodes: firstNodes,
+            nodes: firstNodes.take(2).toList(),
           ),
         );
 
-        current = firstNodes;
+        current = firstNodes.take(2).toList();
         startDepth = 2;
 
         for (int i = firstNonEmptyIndex + 1; i < fallbackGroups.length; i++) {
           final group = fallbackGroups[i];
-          if (!group.any((e) => e != null)) continue;
-
           final nodes = <_AncestorBranchNode>[];
+
           for (final ref in group) {
             nodes.add(
               _AncestorBranchNode(
@@ -836,14 +955,24 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
             );
           }
 
+          final targetCount = pow(2, generations.length + 1).toInt();
+          while (nodes.length < targetCount) {
+            nodes.add(
+              _AncestorBranchNode(
+                ref: null,
+                childRefForAdd: seedRef,
+              ),
+            );
+          }
+
           generations.add(
             _AncestorGeneration(
               depth: generations.length + 1,
-              nodes: nodes,
+              nodes: nodes.take(targetCount).toList(),
             ),
           );
 
-          current = nodes;
+          current = nodes.take(targetCount).toList();
           startDepth = generations.length + 1;
         }
 
@@ -889,17 +1018,122 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         );
       }
 
+      final targetCount = pow(2, depth).toInt();
+      while (next.length < targetCount) {
+        next.add(
+          _AncestorBranchNode(
+            ref: null,
+            childRefForAdd: seedRef,
+          ),
+        );
+      }
+
       generations.add(
         _AncestorGeneration(
           depth: depth,
-          nodes: next,
+          nodes: next.take(targetCount).toList(),
         ),
       );
 
-      current = next;
+      current = next.take(targetCount).toList();
     }
 
     return _AncestorViewModel(
+      focusPerson: focusPerson,
+      focusFallback: focusFallback,
+      generations: generations,
+    );
+  }
+
+  Future<_DescendantViewModel> _buildDescendantViewModel() async {
+    final explicitRoot = _explicitRootNodeRef();
+
+    _NodeRef? focusRef;
+    String focusFallback = widget.rootLabel;
+
+    if (explicitRoot != null) {
+      focusRef = explicitRoot;
+      focusFallback = widget.rootLabel;
+    } else {
+      final slotRoot = _rootNodeRefFromSlot();
+      if (slotRoot != null) {
+        focusRef = slotRoot;
+        focusFallback = widget.rootLabel;
+      }
+    }
+
+    final focusPerson = focusRef == null ? null : _personForNode(focusRef);
+    final generations = <_DescendantGeneration>[];
+
+    List<_DescendantBranchNode> current = focusRef == null
+        ? []
+        : [
+            _DescendantBranchNode(
+              ref: focusRef,
+              parentRefForAdd: focusRef,
+            ),
+          ];
+
+    for (int depth = 1; depth <= _maxDescendantDepth; depth++) {
+      final next = <_DescendantBranchNode>[];
+
+      for (final parentNode in current) {
+        final parentRef = parentNode.ref ?? parentNode.parentRefForAdd;
+        if (parentRef == null) {
+          next.add(
+            _DescendantBranchNode(
+              ref: null,
+              parentRefForAdd: null,
+            ),
+          );
+          next.add(
+            _DescendantBranchNode(
+              ref: null,
+              parentRefForAdd: null,
+            ),
+          );
+          continue;
+        }
+
+        final children = _childrenOf(parentRef);
+        final first = children.isNotEmpty ? children[0] : null;
+        final second = children.length > 1 ? children[1] : null;
+
+        next.add(
+          _DescendantBranchNode(
+            ref: first,
+            parentRefForAdd: parentRef,
+          ),
+        );
+        next.add(
+          _DescendantBranchNode(
+            ref: second,
+            parentRefForAdd: parentRef,
+          ),
+        );
+      }
+
+      final targetCount = pow(2, depth).toInt();
+      while (next.length < targetCount) {
+        next.add(
+          _DescendantBranchNode(
+            ref: null,
+            parentRefForAdd: null,
+          ),
+        );
+      }
+
+      generations.add(
+        _DescendantGeneration(
+          depth: depth,
+          nodes: next.take(targetCount).toList(),
+        ),
+      );
+
+      current = next.take(targetCount).toList();
+    }
+
+    return _DescendantViewModel(
       focusPerson: focusPerson,
       focusFallback: focusFallback,
       generations: generations,
@@ -911,6 +1145,12 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     if (depth == 2) return 'Two generations further back';
     if (depth == 3) return 'Three generations further back';
     return '$depth generations further back';
+  }
+
+  String _descendantGenerationTitle(int depth) {
+    if (depth == 1) return 'Next generation in this line';
+    if (depth == 2) return 'Future descendants';
+    return '$depth generations forward';
   }
 
   Future<String?> _getMyVaultIdForInvite() async {
@@ -1075,11 +1315,132 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     }
   }
 
+  Future<void> _createDescendantInvite({
+    required _NodeRef parentRef,
+    required String title,
+  }) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final expiresAt = DateTime.now().add(const Duration(days: 7)).toUtc();
+      final myVaultId = await _getMyVaultIdForInvite();
+
+      if (myVaultId == null || myVaultId.trim().isEmpty) {
+        throw Exception('You need your own vault before creating invites.');
+      }
+
+      String? inviteId;
+      String code = '';
+
+      for (int attempt = 0; attempt < 8; attempt++) {
+        final nextCode = await _createUniqueInviteCode();
+
+        try {
+          final inserted = await _supabase
+              .from('family_invites')
+              .insert({
+                'family_id': widget.familyId,
+                'created_by': user.id,
+                'invite_code': nextCode,
+                'slot_key': widget.rootSlotKey,
+                'expires_at': expiresAt.toIso8601String(),
+                'inviter_vault_id': myVaultId,
+              })
+              .select('id')
+              .maybeSingle();
+
+          inviteId = (inserted?['id'] ?? '').toString().trim();
+          code = nextCode;
+          if (inviteId.isNotEmpty) break;
+        } on PostgrestException catch (e) {
+          final msg = e.message.toLowerCase();
+          final duplicate =
+              e.code == '23505' || msg.contains('duplicate key value');
+          if (duplicate) {
+            continue;
+          }
+          rethrow;
+        }
+      }
+
+      if (inviteId == null || inviteId.isEmpty || code.isEmpty) {
+        throw Exception('Invite creation failed after multiple retries.');
+      }
+
+      await _supabase.from('family_relationships').insert({
+        'family_id': widget.familyId,
+        'parent_type': parentRef.type,
+        'parent_id': parentRef.id,
+        'child_type': 'invite',
+        'child_id': inviteId,
+        'relationship_kind': 'parent_child',
+      });
+
+      if (!mounted) return;
+
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Invite created: $title'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Invite code (copy & share):'),
+              const SizedBox(height: 6),
+              SelectableText(
+                code,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Expires: ${expiresAt.toLocal()}',
+                style: TextStyle(
+                  color: Colors.black.withOpacity(0.6),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: code));
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Invite code copied')),
+                );
+              },
+              child: const Text('Copy'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Invite failed: $e')),
+      );
+    }
+  }
+
   Future<void> _showLegacyAncestorDialog({
     required _NodeRef childRef,
     required String title,
   }) async {
     final nameController = TextEditingController();
+    final displayNameController = TextEditingController();
     final birthYearController = TextEditingController();
     final deathYearController = TextEditingController();
     final aboutController = TextEditingController();
@@ -1117,6 +1478,14 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                     autofocus: true,
                     decoration: const InputDecoration(
                       labelText: 'Name *',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: displayNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Display name (optional)',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -1180,10 +1549,10 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   ? null
                   : () async {
                       final name = nameController.text.trim();
+                      final displayName = displayNameController.text.trim();
                       final birthYear = parseYear(birthYearController.text);
                       final deathYear = parseYear(deathYearController.text);
                       final about = aboutController.text.trim();
-                      final userId = _supabase.auth.currentUser?.id;
 
                       if (name.isEmpty) {
                         setInner(() => errorText = 'Name is required.');
@@ -1204,8 +1573,196 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                         return;
                       }
 
-                      if (userId == null) {
-                        setInner(() => errorText = 'You must be signed in.');
+                      setInner(() {
+                        saving = true;
+                        errorText = null;
+                      });
+
+                      try {
+                        final legacyId = await _supabase.rpc(
+                          'create_legacy_relative',
+                          params: {
+                            'p_family_id': widget.familyId,
+                            'p_anchor_type': childRef.type,
+                            'p_anchor_id': childRef.id,
+                            'p_relation': 'parent',
+                            'p_name': name,
+                            'p_display_name':
+                                displayName.isEmpty ? null : displayName,
+                            'p_birth_year': birthYear,
+                            'p_death_year': deathYear,
+                            'p_about_me_text': about.isEmpty ? null : about,
+                          },
+                        );
+
+                        final createdLegacyId =
+                            (legacyId ?? '').toString().trim();
+                        if (createdLegacyId.isEmpty) {
+                          throw Exception('Failed to create legacy ancestor.');
+                        }
+
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx);
+                        await _load();
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('$title added.')),
+                        );
+                      } on PostgrestException catch (e) {
+                        setInner(() {
+                          saving = false;
+                          errorText = e.message;
+                        });
+                      } catch (e) {
+                        setInner(() {
+                          saving = false;
+                          errorText = e.toString();
+                        });
+                      }
+                    },
+              child: Text(saving ? 'Saving…' : 'Create'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showLegacyDescendantDialog({
+    required _NodeRef parentRef,
+    required String title,
+  }) async {
+    final nameController = TextEditingController();
+    final displayNameController = TextEditingController();
+    final birthYearController = TextEditingController();
+    final deathYearController = TextEditingController();
+    final aboutController = TextEditingController();
+
+    String? errorText;
+    bool saving = false;
+
+    int? parseYear(String raw) {
+      final t = raw.trim();
+      if (t.isEmpty) return null;
+      return int.tryParse(t);
+    }
+
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setInner) => AlertDialog(
+          title: Text('Add legacy $title'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Create a family-owned descendant profile and link it as a child in this branch.',
+                    style: TextStyle(color: Colors.black.withOpacity(0.65)),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Name *',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: displayNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Display name (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: birthYearController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Birth year',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: aboutController,
+                    minLines: 4,
+                    maxLines: 8,
+                    decoration: const InputDecoration(
+                      labelText: 'About me / notes (optional)',
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Optional extra details',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    children: [
+                      TextField(
+                        controller: deathYearController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Death year (optional)',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (errorText != null) ...[
+                    const SizedBox(height: 10),
+                    Text(errorText!, style: const TextStyle(color: Colors.red)),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final name = nameController.text.trim();
+                      final displayName = displayNameController.text.trim();
+                      final birthYear = parseYear(birthYearController.text);
+                      final deathYear = parseYear(deathYearController.text);
+                      final about = aboutController.text.trim();
+
+                      if (name.isEmpty) {
+                        setInner(() => errorText = 'Name is required.');
+                        return;
+                      }
+
+                      if (birthYearController.text.trim().isNotEmpty &&
+                          birthYear == null) {
+                        setInner(() =>
+                            errorText = 'Birth year must be a valid number.');
+                        return;
+                      }
+
+                      if (deathYearController.text.trim().isNotEmpty &&
+                          deathYear == null) {
+                        setInner(() =>
+                            errorText = 'Death year must be a valid number.');
                         return;
                       }
 
@@ -1215,37 +1772,27 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                       });
 
                       try {
-                        final inserted = await _supabase
-                            .from('legacy_family_members')
-                            .insert({
-                              'family_id': widget.familyId,
-                              'slot_key': null,
-                              'name': name,
-                              'display_name': name,
-                              'birth_year': birthYear,
-                              'death_year': deathYear,
-                              'about_me_text': about.isEmpty ? null : about,
-                              'created_by': userId,
-                            })
-                            .select('id')
-                            .maybeSingle();
+                        final legacyId = await _supabase.rpc(
+                          'create_legacy_relative',
+                          params: {
+                            'p_family_id': widget.familyId,
+                            'p_anchor_type': parentRef.type,
+                            'p_anchor_id': parentRef.id,
+                            'p_relation': 'child',
+                            'p_name': name,
+                            'p_display_name':
+                                displayName.isEmpty ? null : displayName,
+                            'p_birth_year': birthYear,
+                            'p_death_year': deathYear,
+                            'p_about_me_text': about.isEmpty ? null : about,
+                          },
+                        );
 
-                        final legacyId =
-                            (inserted?['id'] ?? '').toString().trim();
-                        if (legacyId.isEmpty) {
-                          throw Exception(
-                            'Legacy predecessor was created but no id was returned.',
-                          );
+                        final createdLegacyId =
+                            (legacyId ?? '').toString().trim();
+                        if (createdLegacyId.isEmpty) {
+                          throw Exception('Failed to create legacy descendant.');
                         }
-
-                        await _supabase.from('family_relationships').insert({
-                          'family_id': widget.familyId,
-                          'parent_type': 'legacy',
-                          'parent_id': legacyId,
-                          'child_type': childRef.type,
-                          'child_id': childRef.id,
-                          'relationship_kind': 'parent_child',
-                        });
 
                         if (!ctx.mounted) return;
                         Navigator.pop(ctx);
@@ -1332,6 +1879,75 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   Navigator.pop(ctx);
                   _showLegacyAncestorDialog(
                     childRef: childRef,
+                    title: title,
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openDescendantAddOptions({
+    required _NodeRef parentRef,
+    required String title,
+  }) async {
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Add $title',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Choose whether to invite a living relative or add a legacy descendant profile for this branch.',
+                style: TextStyle(color: Colors.black.withOpacity(0.65)),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  child: Icon(Icons.person_add_alt_1),
+                ),
+                title: const Text('Invite relative'),
+                subtitle: const Text('Create an invite linked as a child here'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _createDescendantInvite(
+                    parentRef: parentRef,
+                    title: title,
+                  );
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const CircleAvatar(
+                  child: Icon(Icons.history_edu_outlined),
+                ),
+                title: const Text('Add legacy descendant'),
+                subtitle:
+                    const Text('Create a family-owned descendant profile here'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showLegacyDescendantDialog(
+                    parentRef: parentRef,
                     title: title,
                   );
                 },
@@ -1452,6 +2068,146 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     );
   }
 
+  Widget _buildDescendantRelationshipView() {
+    return FutureBuilder<_DescendantViewModel>(
+      future: _buildDescendantViewModel(),
+      builder: (context, snapshot) {
+        final model = snapshot.data;
+
+        if (model == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final rootPerson = model.focusPerson;
+        final generations = model.generations;
+
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: Opacity(
+                    opacity: 0.06,
+                    child: Image.asset(
+                      _logoPath,
+                      width: 520,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            ListView(
+              padding: const EdgeInsets.all(18),
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 980),
+                    child: Column(
+                      children: [
+                        _BranchIntroCard(
+                          title: widget.rootLabel.isEmpty
+                              ? 'Descendant branch'
+                              : '${widget.rootLabel} branch',
+                          subtitle:
+                              'This branch focuses on one descendant line.',
+                        ),
+                        const SizedBox(height: 16),
+                        _BranchPersonCard(
+                          title: 'Branch focus',
+                          label: _personLabel(rootPerson, model.focusFallback),
+                          avatarUrl: _avatarFor(rootPerson),
+                          onTap: rootPerson == null
+                              ? null
+                              : () async {
+                                  await _openPerson(rootPerson);
+                                },
+                          onBranchTap: null,
+                        ),
+                        for (final generation in generations) ...[
+                          const SizedBox(height: 22),
+                          _BranchSectionTitle(
+                            title: _descendantGenerationTitle(generation.depth),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            alignment: WrapAlignment.center,
+                            children: generation.nodes.map((node) {
+                              final person = node.ref == null
+                                  ? null
+                                  : _personForNode(node.ref!);
+
+                              if (person == null) {
+                                return _MiniBranchAddCard(
+                                  label: 'Add descendant',
+                                  onTap: node.parentRefForAdd == null
+                                      ? null
+                                      : () => _openDescendantAddOptions(
+                                            parentRef: node.parentRefForAdd!,
+                                            title: 'Descendant',
+                                          ),
+                                );
+                              }
+
+                              return _MiniBranchCard(
+                                label: _personLabel(person, 'Descendant'),
+                                avatarUrl: _avatarFor(person),
+                                onTap: () async {
+                                  await _openPerson(person);
+                                },
+                                onBranchTap: () async {
+                                  final isLegacy =
+                                      person['__legacy'] == true;
+                                  final personId = (person['id'] ?? '')
+                                      .toString()
+                                      .trim();
+
+                                  final personRef = _nodeRefFromPerson(person);
+if (personRef == null) return;
+
+final nextSlotKey = _slotHintForNode(personRef);
+if (nextSlotKey.isEmpty) return;
+
+await Navigator.push(
+  context,
+  MaterialPageRoute(
+    builder: (_) => FamilyBranchScreen(
+      familyId: widget.familyId,
+      rootLabel: _personLabel(
+        person,
+        'Descendant',
+      ),
+      rootSlotKey: nextSlotKey,
+      direction: 'descendant',
+      rootNodeType: isLegacy ? 'legacy' : 'vault',
+      rootNodeId: personId.isEmpty ? null : personId,
+    ),
+  ),
+);
+await _load();
+                                },
+                              );
+                            }).toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+String _requiredSlotForPerson(Map<String, dynamic> person) {
+  final ref = _nodeRefFromPerson(person);
+  if (ref == null) return '';
+  return _slotHintForNode(ref);
+}
   @override
   Widget build(BuildContext context) {
     final isAncestor = widget.direction == 'ancestor';
@@ -1478,145 +2234,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
               ? Center(child: Text(_error!))
               : isAncestor
                   ? _buildAncestorRelationshipView()
-                  : Builder(
-                      builder: (context) {
-                        final slotMap = _slotToPersonMap();
-                        final config = _buildBranchConfig();
-
-                        final centerPerson = slotMap[config.centerSlot];
-                        final primaryPeople = List.generate(
-                          config.primarySlots.length,
-                          (i) => slotMap[config.primarySlots[i]],
-                        );
-                        final secondaryPeople = List.generate(
-                          config.secondarySlots.length,
-                          (i) => slotMap[config.secondarySlots[i]],
-                        );
-
-                        return Stack(
-                          children: [
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: Center(
-                                  child: Opacity(
-                                    opacity: 0.06,
-                                    child: Image.asset(
-                                      _logoPath,
-                                      width: 520,
-                                      fit: BoxFit.contain,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            ListView(
-                              padding: const EdgeInsets.all(18),
-                              children: [
-                                Center(
-                                  child: ConstrainedBox(
-                                    constraints:
-                                        const BoxConstraints(maxWidth: 900),
-                                    child: Column(
-                                      children: [
-                                        _BranchIntroCard(
-                                          title: config.title,
-                                          subtitle:
-                                              'This branch focuses on one descendant line.',
-                                        ),
-                                        const SizedBox(height: 16),
-                                        _BranchPersonCard(
-                                          title: 'Branch focus',
-                                          label: _personLabel(
-                                            centerPerson,
-                                            config.centerFallback,
-                                          ),
-                                          avatarUrl: _avatarFor(centerPerson),
-                                          onTap: centerPerson == null
-                                              ? null
-                                              : () => _openBranchOptions(
-                                                    slotKey: config.centerSlot,
-                                                    person: centerPerson,
-                                                  ),
-                                          onBranchTap: null,
-                                        ),
-                                        if (config.primarySlots.isNotEmpty) ...[
-                                          const SizedBox(height: 18),
-                                          const _BranchSectionTitle(
-                                            title:
-                                                'Next generation in this line',
-                                          ),
-                                          const SizedBox(height: 10),
-                                          Wrap(
-                                            spacing: 12,
-                                            runSpacing: 12,
-                                            alignment: WrapAlignment.center,
-                                            children: List.generate(
-                                              config.primarySlots.length,
-                                              (i) => _MiniBranchCard(
-                                                label: _personLabel(
-                                                  primaryPeople[i],
-                                                  config.primaryLabels[i],
-                                                ),
-                                                avatarUrl:
-                                                    _avatarFor(primaryPeople[i]),
-                                                onTap: primaryPeople[i] == null
-                                                    ? null
-                                                    : () => _openBranchOptions(
-                                                          slotKey: config
-                                                              .primarySlots[i],
-                                                          person:
-                                                              primaryPeople[i]!,
-                                                        ),
-                                                onBranchTap: null,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                        if (config.secondarySlots.isNotEmpty) ...[
-                                          const SizedBox(height: 18),
-                                          const _BranchSectionTitle(
-                                            title: 'Future descendants',
-                                          ),
-                                          const SizedBox(height: 10),
-                                          Wrap(
-                                            spacing: 12,
-                                            runSpacing: 12,
-                                            alignment: WrapAlignment.center,
-                                            children: List.generate(
-                                              config.secondarySlots.length,
-                                              (i) => _MiniBranchCard(
-                                                label: _personLabel(
-                                                  secondaryPeople[i],
-                                                  config.secondaryLabels[i],
-                                                ),
-                                                avatarUrl: _avatarFor(
-                                                  secondaryPeople[i],
-                                                ),
-                                                onTap:
-                                                    secondaryPeople[i] == null
-                                                        ? null
-                                                        : () =>
-                                                            _openBranchOptions(
-                                                              slotKey: config
-                                                                  .secondarySlots[i],
-                                                              person:
-                                                                  secondaryPeople[i]!,
-                                                            ),
-                                                onBranchTap: null,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        );
-                      },
-                    ),
+                  : _buildDescendantRelationshipView(),
     );
   }
 }
@@ -1647,6 +2265,18 @@ class _AncestorViewModel {
   final List<_AncestorGeneration> generations;
 
   const _AncestorViewModel({
+    required this.focusPerson,
+    required this.focusFallback,
+    required this.generations,
+  });
+}
+
+class _DescendantViewModel {
+  final Map<String, dynamic>? focusPerson;
+  final String focusFallback;
+  final List<_DescendantGeneration> generations;
+
+  const _DescendantViewModel({
     required this.focusPerson,
     required this.focusFallback,
     required this.generations,
@@ -1959,11 +2589,31 @@ class _AncestorBranchNode {
   });
 }
 
+class _DescendantBranchNode {
+  final _NodeRef? ref;
+  final _NodeRef? parentRefForAdd;
+
+  const _DescendantBranchNode({
+    required this.ref,
+    this.parentRefForAdd,
+  });
+}
+
 class _AncestorGeneration {
   final int depth;
   final List<_AncestorBranchNode> nodes;
 
   const _AncestorGeneration({
+    required this.depth,
+    required this.nodes,
+  });
+}
+
+class _DescendantGeneration {
+  final int depth;
+  final List<_DescendantBranchNode> nodes;
+
+  const _DescendantGeneration({
     required this.depth,
     required this.nodes,
   });

@@ -21,99 +21,7 @@ class FamilyTreeScreen extends StatefulWidget {
 
 class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   final _supabase = Supabase.instance.client;
-String? _legacyRelationForSlot(String slotKey) {
-  switch (slotKey) {
-    case kMother:
-    case kFather:
-    case kMaternalGm:
-    case kMaternalGf:
-    case kPaternalGm:
-    case kPaternalGf:
-    case kMaternalGgm:
-    case kMaternalGgf:
-    case kPaternalGgm:
-    case kPaternalGgf:
-      return 'parent';
 
-    case kChild1:
-    case kChild2:
-    case kChild3:
-    case kChild4:
-    case kGrandchild1:
-    case kGrandchild2:
-    case kGrandchild3:
-    case kGrandchild4:
-    case kGreatGrandchild1:
-    case kGreatGrandchild2:
-    case kGreatGrandchild3:
-    case kGreatGrandchild4:
-      return 'child';
-
-    case kSpouse1:
-      return 'spouse';
-
-    case kSibling1:
-    case kSibling2:
-    case kSibling3:
-      return 'sibling';
-
-    default:
-      return null;
-  }
-}
-
-Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
-  switch (slotKey) {
-    case kMother:
-    case kFather:
-    case kChild1:
-    case kChild2:
-    case kChild3:
-    case kChild4:
-    case kSpouse1:
-    case kSibling1:
-    case kSibling2:
-    case kSibling3:
-      return _currentViewerPerson(_latestData);
-
-    case kMaternalGm:
-    case kMaternalGf:
-      return _latestDisplaySlots[kMother];
-
-    case kPaternalGm:
-    case kPaternalGf:
-      return _latestDisplaySlots[kFather];
-
-    case kMaternalGgm:
-    case kMaternalGgf:
-      return _latestDisplaySlots[kMaternalGm];
-
-    case kPaternalGgm:
-    case kPaternalGgf:
-      return _latestDisplaySlots[kPaternalGm];
-
-    case kGrandchild1:
-      return _latestDisplaySlots[kChild1];
-    case kGrandchild2:
-      return _latestDisplaySlots[kChild2];
-    case kGrandchild3:
-      return _latestDisplaySlots[kChild3];
-    case kGrandchild4:
-      return _latestDisplaySlots[kChild4];
-
-    case kGreatGrandchild1:
-      return _latestDisplaySlots[kGrandchild1];
-    case kGreatGrandchild2:
-      return _latestDisplaySlots[kGrandchild2];
-    case kGreatGrandchild3:
-      return _latestDisplaySlots[kGrandchild3];
-    case kGreatGrandchild4:
-      return _latestDisplaySlots[kGrandchild4];
-
-    default:
-      return null;
-  }
-}
   static const String _logoPath = 'assets/images/immortalink_logo.png';
   static const String _vaultAvatarBucket = 'avatars';
   static const String _legacyAvatarBucket = 'vault_photos';
@@ -172,6 +80,113 @@ Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
   void initState() {
     super.initState();
     _future = _loadFamilyData();
+  }
+
+  String? _legacyRelationForSlot(String slotKey) {
+    switch (slotKey) {
+      case kMother:
+      case kFather:
+      case kMaternalGm:
+      case kMaternalGf:
+      case kPaternalGm:
+      case kPaternalGf:
+      case kMaternalGgm:
+      case kMaternalGgf:
+      case kPaternalGgm:
+      case kPaternalGgf:
+        return 'parent';
+
+      case kChild1:
+      case kChild2:
+      case kChild3:
+      case kChild4:
+      case kGrandchild1:
+      case kGrandchild2:
+      case kGrandchild3:
+      case kGrandchild4:
+      case kGreatGrandchild1:
+      case kGreatGrandchild2:
+      case kGreatGrandchild3:
+      case kGreatGrandchild4:
+        return 'child';
+
+      case kSpouse1:
+        return 'spouse';
+
+      case kSibling1:
+      case kSibling2:
+      case kSibling3:
+        return 'sibling';
+
+      default:
+        return null;
+    }
+  }
+
+  Map<String, dynamic>? _firstNonNullPerson(List<Map<String, dynamic>?> people) {
+    for (final person in people) {
+      if (person != null) return person;
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
+    switch (slotKey) {
+      case kMother:
+      case kFather:
+      case kChild1:
+      case kChild2:
+      case kChild3:
+      case kChild4:
+      case kSpouse1:
+      case kSibling1:
+      case kSibling2:
+      case kSibling3:
+        return _currentViewerPerson(_latestData);
+
+      case kMaternalGm:
+      case kMaternalGf:
+        return _latestDisplaySlots[kMother];
+
+      case kPaternalGm:
+      case kPaternalGf:
+        return _latestDisplaySlots[kFather];
+
+      case kMaternalGgm:
+      case kMaternalGgf:
+        return _firstNonNullPerson([
+          _latestDisplaySlots[kMaternalGm],
+          _latestDisplaySlots[kMaternalGf],
+        ]);
+
+      case kPaternalGgm:
+      case kPaternalGgf:
+        return _firstNonNullPerson([
+          _latestDisplaySlots[kPaternalGm],
+          _latestDisplaySlots[kPaternalGf],
+        ]);
+
+      case kGrandchild1:
+        return _latestDisplaySlots[kChild1];
+      case kGrandchild2:
+        return _latestDisplaySlots[kChild2];
+      case kGrandchild3:
+        return _latestDisplaySlots[kChild3];
+      case kGrandchild4:
+        return _latestDisplaySlots[kChild4];
+
+      case kGreatGrandchild1:
+        return _latestDisplaySlots[kGrandchild1];
+      case kGreatGrandchild2:
+        return _latestDisplaySlots[kGrandchild2];
+      case kGreatGrandchild3:
+        return _latestDisplaySlots[kGrandchild3];
+      case kGreatGrandchild4:
+        return _latestDisplaySlots[kGrandchild4];
+
+      default:
+        return null;
+    }
   }
 
   Future<String?> _signedStorageUrl({
@@ -1045,181 +1060,183 @@ Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
   }
 
   Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
-  final global = _slotToGlobalPersonMap(data);
-  final viewer = _currentViewerPerson(data);
+    final global = _slotToGlobalPersonMap(data);
+    final viewer = _currentViewerPerson(data);
 
-  if (viewer == null) return {};
+    if (viewer == null) return {};
 
-  final parentsByChild = <String, List<Map<String, dynamic>>>{};
-  final childrenByParent = <String, List<Map<String, dynamic>>>{};
+    final parentsByChild = <String, List<Map<String, dynamic>>>{};
+    final childrenByParent = <String, List<Map<String, dynamic>>>{};
 
-  _buildRelationshipGraph(
-    data,
-    parentsByChild,
-    childrenByParent,
-  );
+    _buildRelationshipGraph(
+      data,
+      parentsByChild,
+      childrenByParent,
+    );
 
-  List<Map<String, dynamic>> parentsOf(Map<String, dynamic>? person) {
-    if (person == null) return [];
-    final key = _nodeKeyFromPerson(person);
-    final out = [...(parentsByChild[key] ?? const <Map<String, dynamic>>[])];
-    out.sort((a, b) => _comparePeople(global, a, b));
-    return out;
-  }
-
-  List<Map<String, dynamic>> childrenOf(Map<String, dynamic>? person) {
-    if (person == null) return [];
-    final key = _nodeKeyFromPerson(person);
-    final out = [...(childrenByParent[key] ?? const <Map<String, dynamic>>[])];
-    out.sort((a, b) => _comparePeople(global, a, b));
-    return out;
-  }
-
-  void placePerson(
-    Map<String, Map<String, dynamic>> visible,
-    List<String> allowedSlots,
-    Map<String, dynamic>? person,
-  ) {
-    if (person == null) return;
-
-    final actualSlot = _slotForPerson(global, person);
-    if (actualSlot.isNotEmpty &&
-        allowedSlots.contains(actualSlot) &&
-        !visible.containsKey(actualSlot)) {
-      visible[actualSlot] = person;
-      return;
+    List<Map<String, dynamic>> parentsOf(Map<String, dynamic>? person) {
+      if (person == null) return [];
+      final key = _nodeKeyFromPerson(person);
+      final out = [...(parentsByChild[key] ?? const <Map<String, dynamic>>[])];
+      out.sort((a, b) => _comparePeople(global, a, b));
+      return out;
     }
 
-    for (final slot in allowedSlots) {
-      if (!visible.containsKey(slot)) {
-        visible[slot] = person;
+    List<Map<String, dynamic>> childrenOf(Map<String, dynamic>? person) {
+      if (person == null) return [];
+      final key = _nodeKeyFromPerson(person);
+      final out = [...(childrenByParent[key] ?? const <Map<String, dynamic>>[])];
+      out.sort((a, b) => _comparePeople(global, a, b));
+      return out;
+    }
+
+    void placePerson(
+      Map<String, Map<String, dynamic>> visible,
+      List<String> allowedSlots,
+      Map<String, dynamic>? person,
+    ) {
+      if (person == null) return;
+
+      final actualSlot = _slotForPerson(global, person);
+      if (actualSlot.isNotEmpty &&
+          allowedSlots.contains(actualSlot) &&
+          !visible.containsKey(actualSlot)) {
+        visible[actualSlot] = person;
         return;
       }
-    }
-  }
 
-  final visible = <String, Map<String, dynamic>>{};
-
-  final parents = parentsOf(viewer);
-  for (final parent in parents) {
-    placePerson(visible, [kMother, kFather], parent);
-  }
-
-  final mother = visible[kMother];
-  final father = visible[kFather];
-
-  if (mother != null) {
-    final maternalGrand = parentsOf(mother);
-    for (final person in maternalGrand) {
-      placePerson(visible, [kMaternalGm, kMaternalGf], person);
-    }
-
-    final maternalGm = visible[kMaternalGm];
-    if (maternalGm != null) {
-      final maternalGreat = parentsOf(maternalGm);
-      for (final person in maternalGreat) {
-        placePerson(visible, [kMaternalGgm, kMaternalGgf], person);
+      for (final slot in allowedSlots) {
+        if (!visible.containsKey(slot)) {
+          visible[slot] = person;
+          return;
+        }
       }
     }
-  }
 
-  if (father != null) {
-    final paternalGrand = parentsOf(father);
-    for (final person in paternalGrand) {
-      placePerson(visible, [kPaternalGm, kPaternalGf], person);
+    final visible = <String, Map<String, dynamic>>{};
+
+    final parents = parentsOf(viewer);
+    for (final parent in parents) {
+      placePerson(visible, [kMother, kFather], parent);
     }
 
-    final paternalGm = visible[kPaternalGm];
-    if (paternalGm != null) {
-      final paternalGreat = parentsOf(paternalGm);
-      for (final person in paternalGreat) {
-        placePerson(visible, [kPaternalGgm, kPaternalGgf], person);
+    final mother = visible[kMother];
+    final father = visible[kFather];
+
+    if (mother != null) {
+      final maternalGrand = parentsOf(mother);
+      for (final person in maternalGrand) {
+        placePerson(visible, [kMaternalGm, kMaternalGf], person);
+      }
+
+      final maternalAnchor =
+          _firstNonNullPerson([visible[kMaternalGm], visible[kMaternalGf]]);
+      if (maternalAnchor != null) {
+        final maternalGreat = parentsOf(maternalAnchor);
+        for (final person in maternalGreat) {
+          placePerson(visible, [kMaternalGgm, kMaternalGgf], person);
+        }
       }
     }
-  }
 
-  final siblings = <Map<String, dynamic>>[];
-  for (final parent in parents) {
-    for (final child in childrenOf(parent)) {
-      if (_samePerson(child, viewer)) continue;
-      _addUniquePerson(siblings, child);
+    if (father != null) {
+      final paternalGrand = parentsOf(father);
+      for (final person in paternalGrand) {
+        placePerson(visible, [kPaternalGm, kPaternalGf], person);
+      }
+
+      final paternalAnchor =
+          _firstNonNullPerson([visible[kPaternalGm], visible[kPaternalGf]]);
+      if (paternalAnchor != null) {
+        final paternalGreat = parentsOf(paternalAnchor);
+        for (final person in paternalGreat) {
+          placePerson(visible, [kPaternalGgm, kPaternalGgf], person);
+        }
+      }
     }
-  }
-  siblings.sort((a, b) => _comparePeople(global, a, b));
-  for (final sibling in siblings) {
-    placePerson(visible, [kSibling1, kSibling2, kSibling3], sibling);
-  }
 
-  final children = childrenOf(viewer);
-  for (final child in children) {
-    placePerson(visible, [kChild1, kChild2, kChild3, kChild4], child);
-  }
-
-  final placedChildren = [
-    visible[kChild1],
-    visible[kChild2],
-    visible[kChild3],
-    visible[kChild4],
-  ].whereType<Map<String, dynamic>>().toList();
-
-  final grandChildren = <Map<String, dynamic>>[];
-  for (final child in placedChildren) {
-    for (final grandChild in childrenOf(child)) {
-      _addUniquePerson(grandChildren, grandChild);
+    final siblings = <Map<String, dynamic>>[];
+    for (final parent in parents) {
+      for (final child in childrenOf(parent)) {
+        if (_samePerson(child, viewer)) continue;
+        _addUniquePerson(siblings, child);
+      }
     }
-  }
-  grandChildren.sort((a, b) => _comparePeople(global, a, b));
-  for (final grandChild in grandChildren) {
-    placePerson(
-      visible,
-      [kGrandchild1, kGrandchild2, kGrandchild3, kGrandchild4],
-      grandChild,
-    );
-  }
-
-  final placedGrandChildren = [
-    visible[kGrandchild1],
-    visible[kGrandchild2],
-    visible[kGrandchild3],
-    visible[kGrandchild4],
-  ].whereType<Map<String, dynamic>>().toList();
-
-  final greatGrandChildren = <Map<String, dynamic>>[];
-  for (final grandChild in placedGrandChildren) {
-    for (final greatGrandChild in childrenOf(grandChild)) {
-      _addUniquePerson(greatGrandChildren, greatGrandChild);
+    siblings.sort((a, b) => _comparePeople(global, a, b));
+    for (final sibling in siblings) {
+      placePerson(visible, [kSibling1, kSibling2, kSibling3], sibling);
     }
-  }
-  greatGrandChildren.sort((a, b) => _comparePeople(global, a, b));
-  for (final greatGrandChild in greatGrandChildren) {
-    placePerson(
-      visible,
-      [
-        kGreatGrandchild1,
-        kGreatGrandchild2,
-        kGreatGrandchild3,
-        kGreatGrandchild4,
-      ],
-      greatGrandChild,
-    );
-  }
 
-  Map<String, dynamic>? spouse;
-  for (final child in placedChildren) {
-    final coParents =
-        parentsOf(child).where((p) => !_samePerson(p, viewer)).toList();
-    if (coParents.isNotEmpty) {
-      spouse = coParents.first;
-      break;
+    final children = childrenOf(viewer);
+    for (final child in children) {
+      placePerson(visible, [kChild1, kChild2, kChild3, kChild4], child);
     }
-  }
 
-  if (spouse != null && !_samePerson(spouse, viewer)) {
-    placePerson(visible, [kSpouse1], spouse);
-  }
+    final placedChildren = [
+      visible[kChild1],
+      visible[kChild2],
+      visible[kChild3],
+      visible[kChild4],
+    ].whereType<Map<String, dynamic>>().toList();
 
-  return visible;
-}
+    final grandChildren = <Map<String, dynamic>>[];
+    for (final child in placedChildren) {
+      for (final grandChild in childrenOf(child)) {
+        _addUniquePerson(grandChildren, grandChild);
+      }
+    }
+    grandChildren.sort((a, b) => _comparePeople(global, a, b));
+    for (final grandChild in grandChildren) {
+      placePerson(
+        visible,
+        [kGrandchild1, kGrandchild2, kGrandchild3, kGrandchild4],
+        grandChild,
+      );
+    }
+
+    final placedGrandChildren = [
+      visible[kGrandchild1],
+      visible[kGrandchild2],
+      visible[kGrandchild3],
+      visible[kGrandchild4],
+    ].whereType<Map<String, dynamic>>().toList();
+
+    final greatGrandChildren = <Map<String, dynamic>>[];
+    for (final grandChild in placedGrandChildren) {
+      for (final greatGrandChild in childrenOf(grandChild)) {
+        _addUniquePerson(greatGrandChildren, greatGrandChild);
+      }
+    }
+    greatGrandChildren.sort((a, b) => _comparePeople(global, a, b));
+    for (final greatGrandChild in greatGrandChildren) {
+      placePerson(
+        visible,
+        [
+          kGreatGrandchild1,
+          kGreatGrandchild2,
+          kGreatGrandchild3,
+          kGreatGrandchild4,
+        ],
+        greatGrandChild,
+      );
+    }
+
+    Map<String, dynamic>? spouse;
+    for (final child in placedChildren) {
+      final coParents =
+          parentsOf(child).where((p) => !_samePerson(p, viewer)).toList();
+      if (coParents.isNotEmpty) {
+        spouse = coParents.first;
+        break;
+      }
+    }
+
+    if (spouse != null && !_samePerson(spouse, viewer)) {
+      placePerson(visible, [kSpouse1], spouse);
+    }
+
+    return visible;
+  }
 
   Future<void> _openYourVaultFallback() async {
     try {
@@ -1526,36 +1543,42 @@ Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
 
                       try {
                         final relation = _legacyRelationForSlot(slotKey);
-final anchorPerson = _legacyAnchorPersonForSlot(slotKey);
-final anchorRef = _nodeRefFromPerson(anchorPerson);
+                        final anchorPerson = _legacyAnchorPersonForSlot(slotKey);
+                        final anchorRef = _nodeRefFromPerson(anchorPerson);
 
-if (relation == null) {
-  throw Exception('Unsupported legacy relationship for slot: $slotKey');
-}
+                        if (relation == null) {
+                          throw Exception(
+                            'Unsupported legacy relationship for slot: $slotKey',
+                          );
+                        }
 
-if (anchorRef == null) {
-  throw Exception('Missing anchor person for slot: $slotKey');
-}
+                        if (anchorRef == null) {
+                          throw Exception(
+                            'Missing anchor person for slot: $slotKey',
+                          );
+                        }
 
-final legacyId = await _supabase.rpc(
-  'create_legacy_relative',
-  params: {
-    'p_family_id': widget.familyId,
-    'p_anchor_type': anchorRef.nodeType,
-    'p_anchor_id': anchorRef.nodeId,
-    'p_relation': relation,
-    'p_name': name,
-    'p_display_name': displayName.isEmpty ? null : displayName,
-    'p_birth_year': birthYear,
-    'p_death_year': deathYear,
-    'p_about_me_text': about.isEmpty ? null : about,
-  },
-);
+                        final legacyId = await _supabase.rpc(
+                          'create_legacy_relative',
+                          params: {
+                            'p_family_id': widget.familyId,
+                            'p_anchor_type': anchorRef.nodeType,
+                            'p_anchor_id': anchorRef.nodeId,
+                            'p_relation': relation,
+                            'p_name': name,
+                            'p_display_name':
+                                displayName.isEmpty ? null : displayName,
+                            'p_birth_year': birthYear,
+                            'p_death_year': deathYear,
+                            'p_about_me_text': about.isEmpty ? null : about,
+                          },
+                        );
 
-final createdLegacyId = (legacyId ?? '').toString().trim();
-if (createdLegacyId.isEmpty) {
-  throw Exception('Failed to create legacy relative');
-}
+                        final createdLegacyId =
+                            (legacyId ?? '').toString().trim();
+                        if (createdLegacyId.isEmpty) {
+                          throw Exception('Failed to create legacy relative');
+                        }
 
                         if (!ctx.mounted) return;
                         Navigator.pop(ctx);
