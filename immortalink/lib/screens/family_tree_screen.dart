@@ -132,14 +132,23 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     }
   }
 
-  Map<String, dynamic>? _firstNonNullPerson(List<Map<String, dynamic>?> people) {
-    for (final person in people) {
-      if (person != null) return person;
+  Map<String, dynamic>? _currentViewerPerson(_FamilyData? data) {
+    if (data == null) return null;
+    final uid = _supabase.auth.currentUser?.id;
+    if (uid == null) return null;
+
+    if (data.yourVault != null) return data.yourVault;
+
+    for (final v in data.vaults) {
+      if ((v['owner_id'] ?? '').toString().trim() == uid) {
+        return v;
+      }
     }
+
     return null;
   }
 
-  Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
+   Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
     switch (slotKey) {
       case kMother:
       case kFather:
@@ -654,53 +663,24 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       final plan = _relationshipAnchorForSlot(slotKey);
       if (plan == null) return;
 
-      _RelationshipNodeRef? anchorNode;
+      Map<String, dynamic>? anchorPerson;
 
       if (plan.anchorIsViewer) {
-        final viewer = _currentViewerPerson(_latestData);
-        anchorNode = _nodeRefFromPerson(viewer);
+        anchorPerson = _currentViewerPerson(_latestData);
       } else {
-        Map<String, dynamic>? anchorPerson;
-
-        if (slotKey == kGrandchild1 ||
-            slotKey == kGrandchild2 ||
-            slotKey == kGrandchild3 ||
-            slotKey == kGrandchild4) {
-          final children = [
-            _latestDisplaySlots[kChild1],
-            _latestDisplaySlots[kChild2],
-            _latestDisplaySlots[kChild3],
-            _latestDisplaySlots[kChild4],
-          ];
-          if (slotKey == kGrandchild1) anchorPerson = children[0];
-          if (slotKey == kGrandchild2) anchorPerson = children[1];
-          if (slotKey == kGrandchild3) anchorPerson = children[2];
-          if (slotKey == kGrandchild4) anchorPerson = children[3];
-        } else if (slotKey == kGreatGrandchild1 ||
-            slotKey == kGreatGrandchild2 ||
-            slotKey == kGreatGrandchild3 ||
-            slotKey == kGreatGrandchild4) {
-          final grandChildren = [
-            _latestDisplaySlots[kGrandchild1],
-            _latestDisplaySlots[kGrandchild2],
-            _latestDisplaySlots[kGrandchild3],
-            _latestDisplaySlots[kGrandchild4],
-          ];
-          if (slotKey == kGreatGrandchild1) anchorPerson = grandChildren[0];
-          if (slotKey == kGreatGrandchild2) anchorPerson = grandChildren[1];
-          if (slotKey == kGreatGrandchild3) anchorPerson = grandChildren[2];
-          if (slotKey == kGreatGrandchild4) anchorPerson = grandChildren[3];
-        } else {
-          final anchorSlotKey = plan.anchorSlotKey;
-          if (anchorSlotKey != null) {
-            anchorPerson = _latestDisplaySlots[anchorSlotKey];
-          }
+        final anchorSlotKey = plan.anchorSlotKey;
+        if (anchorSlotKey != null) {
+          anchorPerson = _latestDisplaySlots[anchorSlotKey];
         }
-
-        anchorNode = _nodeRefFromPerson(anchorPerson);
       }
 
-      if (anchorNode == null || anchorNode.nodeId.trim().isEmpty) return;
+      final anchorNode = _nodeRefFromPerson(anchorPerson);
+
+      // For slot-only ancestor entries like great-grandparents with no prior anchor,
+      // the exact slot still exists even if no relationship edge can be created yet.
+      if (anchorNode == null || anchorNode.nodeId.trim().isEmpty) {
+        return;
+      }
 
       late final String parentType;
       late final String parentId;
@@ -997,22 +977,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     return na.compareTo(nb);
   }
 
-  Map<String, dynamic>? _currentViewerPerson(_FamilyData? data) {
-    if (data == null) return null;
-    final uid = _supabase.auth.currentUser?.id;
-    if (uid == null) return null;
-
-    if (data.yourVault != null) return data.yourVault;
-
-    for (final v in data.vaults) {
-      if ((v['owner_id'] ?? '').toString().trim() == uid) {
-        return v;
-      }
-    }
-
-    return null;
-  }
-
   Map<String, dynamic>? _yourVault(_FamilyData data) {
     if (data.yourVault != null) return data.yourVault;
 
@@ -1095,212 +1059,235 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       );
     }
   }
+  List<Map<String, dynamic>> _sortedPeopleForDisplay(
+    Map<String, Map<String, dynamic>> global,
+    List<Map<String, dynamic>> people,
+  ) {
+    final copy = List<Map<String, dynamic>>.from(people);
+    copy.sort((a, b) => _comparePeople(global, a, b));
+    return copy;
+  }
 
-  Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
+  List<Map<String, dynamic>> _parentsOfPerson(
+    Map<String, List<Map<String, dynamic>>> parentsByChild,
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? person,
+  ) {
+    final key = _nodeKeyFromPerson(person);
+    if (key.isEmpty) return [];
+    final list = parentsByChild[key] ?? const [];
+    return _sortedPeopleForDisplay(global, list);
+  }
+
+  List<Map<String, dynamic>> _childrenOfPerson(
+    Map<String, List<Map<String, dynamic>>> childrenByParent,
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? person,
+  ) {
+    final key = _nodeKeyFromPerson(person);
+    if (key.isEmpty) return [];
+    final list = childrenByParent[key] ?? const [];
+    return _sortedPeopleForDisplay(global, list);
+  }
+
+  Map<String, dynamic>? _firstOrNull(List<Map<String, dynamic>> people, int index) {
+    if (index < 0 || index >= people.length) return null;
+    return people[index];
+  }
+
+  void _putIfPerson(
+    Map<String, Map<String, dynamic>> target,
+    String slotKey,
+    Map<String, dynamic>? person,
+  ) {
+    if (person == null) return;
+    target[slotKey] = person;
+  }
+
+  Map<String, dynamic>? _spouseForViewer(
+    Map<String, List<Map<String, dynamic>>> parentsByChild,
+    Map<String, List<Map<String, dynamic>>> childrenByParent,
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? viewer,
+  ) {
+    if (viewer == null) return null;
+
+    final viewerKey = _nodeKeyFromPerson(viewer);
+    if (viewerKey.isEmpty) return null;
+
+    final viewerChildren = _childrenOfPerson(childrenByParent, global, viewer);
+    for (final child in viewerChildren) {
+      final childParents = _parentsOfPerson(parentsByChild, global, child);
+      for (final parent in childParents) {
+        if (_nodeKeyFromPerson(parent) != viewerKey) {
+          return parent;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  List<Map<String, dynamic>> _siblingsForViewer(
+    Map<String, List<Map<String, dynamic>>> parentsByChild,
+    Map<String, List<Map<String, dynamic>>> childrenByParent,
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? viewer,
+  ) {
+    if (viewer == null) return [];
+
+    final viewerKey = _nodeKeyFromPerson(viewer);
+    if (viewerKey.isEmpty) return [];
+
+    final viewerParents = _parentsOfPerson(parentsByChild, global, viewer);
+    final siblings = <Map<String, dynamic>>[];
+
+    for (final parent in viewerParents) {
+      final kids = _childrenOfPerson(childrenByParent, global, parent);
+      for (final kid in kids) {
+        if (_nodeKeyFromPerson(kid) == viewerKey) continue;
+        _addUniquePerson(siblings, kid);
+      }
+    }
+
+    return _sortedPeopleForDisplay(global, siblings);
+  }
+   Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
     final global = _slotToGlobalPersonMap(data);
     final viewer = _currentViewerPerson(data);
 
-    if (viewer == null) return {};
+    if (viewer == null) {
+      final visible = <String, Map<String, dynamic>>{};
+      const allowedSlots = {
+        kMaternalGmMother,
+        kMaternalGmFather,
+        kMaternalGfMother,
+        kMaternalGfFather,
+        kPaternalGmMother,
+        kPaternalGmFather,
+        kPaternalGfMother,
+        kPaternalGfFather,
+        kMaternalGm,
+        kMaternalGf,
+        kPaternalGm,
+        kPaternalGf,
+        kMother,
+        kFather,
+        kSpouse1,
+        kSibling1,
+        kSibling2,
+        kSibling3,
+        kChild1,
+        kChild2,
+        kChild3,
+        kChild4,
+        kGrandchild1,
+        kGrandchild2,
+        kGrandchild3,
+        kGrandchild4,
+        kGreatGrandchild1,
+        kGreatGrandchild2,
+        kGreatGrandchild3,
+        kGreatGrandchild4,
+      };
+
+      for (final entry in global.entries) {
+        if (allowedSlots.contains(entry.key)) {
+          visible[entry.key] = entry.value;
+        }
+      }
+      return visible;
+    }
 
     final parentsByChild = <String, List<Map<String, dynamic>>>{};
     final childrenByParent = <String, List<Map<String, dynamic>>>{};
 
-    _buildRelationshipGraph(
-      data,
-      parentsByChild,
-      childrenByParent,
-    );
-
-    List<Map<String, dynamic>> parentsOf(Map<String, dynamic>? person) {
-      if (person == null) return [];
-      final key = _nodeKeyFromPerson(person);
-      final out = [...(parentsByChild[key] ?? const <Map<String, dynamic>>[])];
-      out.sort((a, b) => _comparePeople(global, a, b));
-      return out;
-    }
-
-    List<Map<String, dynamic>> childrenOf(Map<String, dynamic>? person) {
-      if (person == null) return [];
-      final key = _nodeKeyFromPerson(person);
-      final out = [...(childrenByParent[key] ?? const <Map<String, dynamic>>[])];
-      out.sort((a, b) => _comparePeople(global, a, b));
-      return out;
-    }
-
-    void placePerson(
-      Map<String, Map<String, dynamic>> visible,
-      List<String> allowedSlots,
-      Map<String, dynamic>? person,
-    ) {
-      if (person == null) return;
-
-      final actualSlot = _slotForPerson(global, person);
-      if (actualSlot.isNotEmpty &&
-          allowedSlots.contains(actualSlot) &&
-          !visible.containsKey(actualSlot)) {
-        visible[actualSlot] = person;
-        return;
-      }
-
-      for (final slot in allowedSlots) {
-        if (!visible.containsKey(slot)) {
-          visible[slot] = person;
-          return;
-        }
-      }
-    }
+    _buildRelationshipGraph(data, parentsByChild, childrenByParent);
 
     final visible = <String, Map<String, dynamic>>{};
 
-    final parents = parentsOf(viewer);
-    for (final parent in parents) {
-      placePerson(visible, [kMother, kFather], parent);
-    }
+    final viewerParents = _parentsOfPerson(parentsByChild, global, viewer);
+    final parentA = _firstOrNull(viewerParents, 0);
+    final parentB = _firstOrNull(viewerParents, 1);
 
-    final mother = visible[kMother];
-    final father = visible[kFather];
+    _putIfPerson(visible, kMother, parentA);
+    _putIfPerson(visible, kFather, parentB);
 
-    if (mother != null) {
-      final maternalGrand = parentsOf(mother);
-      for (final person in maternalGrand) {
-        placePerson(visible, [kMaternalGm, kMaternalGf], person);
-      }
+    final parentAGrandparents = _parentsOfPerson(parentsByChild, global, parentA);
+    final parentBGrandparents = _parentsOfPerson(parentsByChild, global, parentB);
 
-      final maternalGm = visible[kMaternalGm];
-      if (maternalGm != null) {
-        final maternalGmParents = parentsOf(maternalGm);
-        for (final person in maternalGmParents) {
-          placePerson(
-            visible,
-            [kMaternalGmMother, kMaternalGmFather],
-            person,
-          );
-        }
-      }
+    final maternalGm = _firstOrNull(parentAGrandparents, 0);
+    final maternalGf = _firstOrNull(parentAGrandparents, 1);
+    final paternalGm = _firstOrNull(parentBGrandparents, 0);
+    final paternalGf = _firstOrNull(parentBGrandparents, 1);
 
-      final maternalGf = visible[kMaternalGf];
-      if (maternalGf != null) {
-        final maternalGfParents = parentsOf(maternalGf);
-        for (final person in maternalGfParents) {
-          placePerson(
-            visible,
-            [kMaternalGfMother, kMaternalGfFather],
-            person,
-          );
-        }
-      }
-    }
+    _putIfPerson(visible, kMaternalGm, maternalGm);
+    _putIfPerson(visible, kMaternalGf, maternalGf);
+    _putIfPerson(visible, kPaternalGm, paternalGm);
+    _putIfPerson(visible, kPaternalGf, paternalGf);
 
-    if (father != null) {
-      final paternalGrand = parentsOf(father);
-      for (final person in paternalGrand) {
-        placePerson(visible, [kPaternalGm, kPaternalGf], person);
-      }
+    final maternalGmParents = _parentsOfPerson(parentsByChild, global, maternalGm);
+    final maternalGfParents = _parentsOfPerson(parentsByChild, global, maternalGf);
+    final paternalGmParents = _parentsOfPerson(parentsByChild, global, paternalGm);
+    final paternalGfParents = _parentsOfPerson(parentsByChild, global, paternalGf);
 
-      final paternalGm = visible[kPaternalGm];
-      if (paternalGm != null) {
-        final paternalGmParents = parentsOf(paternalGm);
-        for (final person in paternalGmParents) {
-          placePerson(
-            visible,
-            [kPaternalGmMother, kPaternalGmFather],
-            person,
-          );
-        }
-      }
+    _putIfPerson(visible, kMaternalGmMother, _firstOrNull(maternalGmParents, 0));
+    _putIfPerson(visible, kMaternalGmFather, _firstOrNull(maternalGmParents, 1));
+    _putIfPerson(visible, kMaternalGfMother, _firstOrNull(maternalGfParents, 0));
+    _putIfPerson(visible, kMaternalGfFather, _firstOrNull(maternalGfParents, 1));
+    _putIfPerson(visible, kPaternalGmMother, _firstOrNull(paternalGmParents, 0));
+    _putIfPerson(visible, kPaternalGmFather, _firstOrNull(paternalGmParents, 1));
+    _putIfPerson(visible, kPaternalGfMother, _firstOrNull(paternalGfParents, 0));
+    _putIfPerson(visible, kPaternalGfFather, _firstOrNull(paternalGfParents, 1));
 
-      final paternalGf = visible[kPaternalGf];
-      if (paternalGf != null) {
-        final paternalGfParents = parentsOf(paternalGf);
-        for (final person in paternalGfParents) {
-          placePerson(
-            visible,
-            [kPaternalGfMother, kPaternalGfFather],
-            person,
-          );
-        }
-      }
-    }
+    final spouse = _spouseForViewer(
+      parentsByChild,
+      childrenByParent,
+      global,
+      viewer,
+    );
+    _putIfPerson(visible, kSpouse1, spouse);
 
-    final siblings = <Map<String, dynamic>>[];
-    for (final parent in parents) {
-      for (final child in childrenOf(parent)) {
-        if (_samePerson(child, viewer)) continue;
-        _addUniquePerson(siblings, child);
-      }
-    }
-    siblings.sort((a, b) => _comparePeople(global, a, b));
-    for (final sibling in siblings) {
-      placePerson(visible, [kSibling1, kSibling2, kSibling3], sibling);
-    }
+    final siblings = _siblingsForViewer(
+      parentsByChild,
+      childrenByParent,
+      global,
+      viewer,
+    );
+    _putIfPerson(visible, kSibling1, _firstOrNull(siblings, 0));
+    _putIfPerson(visible, kSibling2, _firstOrNull(siblings, 1));
+    _putIfPerson(visible, kSibling3, _firstOrNull(siblings, 2));
 
-    final children = childrenOf(viewer);
-    for (final child in children) {
-      placePerson(visible, [kChild1, kChild2, kChild3, kChild4], child);
-    }
+    final children = _childrenOfPerson(childrenByParent, global, viewer);
+    final child1 = _firstOrNull(children, 0);
+    final child2 = _firstOrNull(children, 1);
+    final child3 = _firstOrNull(children, 2);
+    final child4 = _firstOrNull(children, 3);
 
-    final placedChildren = [
-      visible[kChild1],
-      visible[kChild2],
-      visible[kChild3],
-      visible[kChild4],
-    ].whereType<Map<String, dynamic>>().toList();
+    _putIfPerson(visible, kChild1, child1);
+    _putIfPerson(visible, kChild2, child2);
+    _putIfPerson(visible, kChild3, child3);
+    _putIfPerson(visible, kChild4, child4);
 
-    final grandChildren = <Map<String, dynamic>>[];
-    for (final child in placedChildren) {
-      for (final grandChild in childrenOf(child)) {
-        _addUniquePerson(grandChildren, grandChild);
-      }
-    }
-    grandChildren.sort((a, b) => _comparePeople(global, a, b));
-    for (final grandChild in grandChildren) {
-      placePerson(
-        visible,
-        [kGrandchild1, kGrandchild2, kGrandchild3, kGrandchild4],
-        grandChild,
-      );
-    }
+    final gc1 = _firstOrNull(_childrenOfPerson(childrenByParent, global, child1), 0);
+    final gc2 = _firstOrNull(_childrenOfPerson(childrenByParent, global, child2), 0);
+    final gc3 = _firstOrNull(_childrenOfPerson(childrenByParent, global, child3), 0);
+    final gc4 = _firstOrNull(_childrenOfPerson(childrenByParent, global, child4), 0);
 
-    final placedGrandChildren = [
-      visible[kGrandchild1],
-      visible[kGrandchild2],
-      visible[kGrandchild3],
-      visible[kGrandchild4],
-    ].whereType<Map<String, dynamic>>().toList();
+    _putIfPerson(visible, kGrandchild1, gc1);
+    _putIfPerson(visible, kGrandchild2, gc2);
+    _putIfPerson(visible, kGrandchild3, gc3);
+    _putIfPerson(visible, kGrandchild4, gc4);
 
-    final greatGrandChildren = <Map<String, dynamic>>[];
-    for (final grandChild in placedGrandChildren) {
-      for (final greatGrandChild in childrenOf(grandChild)) {
-        _addUniquePerson(greatGrandChildren, greatGrandChild);
-      }
-    }
-    greatGrandChildren.sort((a, b) => _comparePeople(global, a, b));
-    for (final greatGrandChild in greatGrandChildren) {
-      placePerson(
-        visible,
-        [
-          kGreatGrandchild1,
-          kGreatGrandchild2,
-          kGreatGrandchild3,
-          kGreatGrandchild4,
-        ],
-        greatGrandChild,
-      );
-    }
+    final ggc1 = _firstOrNull(_childrenOfPerson(childrenByParent, global, gc1), 0);
+    final ggc2 = _firstOrNull(_childrenOfPerson(childrenByParent, global, gc2), 0);
+    final ggc3 = _firstOrNull(_childrenOfPerson(childrenByParent, global, gc3), 0);
+    final ggc4 = _firstOrNull(_childrenOfPerson(childrenByParent, global, gc4), 0);
 
-    Map<String, dynamic>? spouse;
-    for (final child in placedChildren) {
-      final coParents =
-          parentsOf(child).where((p) => !_samePerson(p, viewer)).toList();
-      if (coParents.isNotEmpty) {
-        spouse = coParents.first;
-        break;
-      }
-    }
-
-    if (spouse != null && !_samePerson(spouse, viewer)) {
-      placePerson(visible, [kSpouse1], spouse);
-    }
+    _putIfPerson(visible, kGreatGrandchild1, ggc1);
+    _putIfPerson(visible, kGreatGrandchild2, ggc2);
+    _putIfPerson(visible, kGreatGrandchild3, ggc3);
+    _putIfPerson(visible, kGreatGrandchild4, ggc4);
 
     return visible;
   }
@@ -1456,224 +1443,229 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     }
   }
 
+  
+
   Future<void> _showLegacyPredecessorDialog({
-    required String slotKey,
-    required String title,
-  }) async {
-    final nameController = TextEditingController();
-    final displayNameController = TextEditingController();
-    final birthYearController = TextEditingController();
-    final deathYearController = TextEditingController();
-    final aboutController = TextEditingController();
+  required String slotKey,
+  required String title,
+}) async {
+  final nameController = TextEditingController();
+  final displayNameController = TextEditingController();
+  final birthYearController = TextEditingController();
+  final deathYearController = TextEditingController();
+  final aboutController = TextEditingController();
 
-    String? errorText;
-    bool saving = false;
+  String? errorText;
+  bool saving = false;
 
-    int? parseYear(String raw) {
-      final t = raw.trim();
-      if (t.isEmpty) return null;
-      return int.tryParse(t);
-    }
+  int? parseYear(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return null;
+    return int.tryParse(t);
+  }
 
-    if (!mounted) return;
+  if (!mounted) return;
 
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setInner) => AlertDialog(
-          title: Text(_legacyDialogTitleForSlot(slotKey, title.toLowerCase())),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _legacyDialogDescriptionForSlot(slotKey),
-                    style: TextStyle(color: Colors.black.withOpacity(0.65)),
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setInner) => AlertDialog(
+        title: Text(_legacyDialogTitleForSlot(slotKey, title.toLowerCase())),
+        content: SizedBox(
+          width: 460,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _legacyDialogDescriptionForSlot(slotKey),
+                  style: TextStyle(color: Colors.black.withOpacity(0.65)),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Name *',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nameController,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Name *',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: displayNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Display name (optional)',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: displayNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name (optional)',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: birthYearController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Birth year',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: birthYearController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Birth year',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: aboutController,
+                  minLines: 4,
+                  maxLines: 8,
+                  decoration: const InputDecoration(
+                    labelText: 'About me / notes (optional)',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: aboutController,
-                    minLines: 4,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      labelText: 'About me / notes (optional)',
-                      border: OutlineInputBorder(),
-                      alignLabelWithHint: true,
-                    ),
+                ),
+                const SizedBox(height: 10),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Optional extra details',
+                    style:
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
-                  const SizedBox(height: 10),
-                  ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: EdgeInsets.zero,
-                    title: const Text(
-                      'Optional extra details',
-                      style:
-                          TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                    ),
-                    children: [
-                      TextField(
-                        controller: deathYearController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Death year (optional)',
-                          border: OutlineInputBorder(),
-                        ),
+                  children: [
+                    TextField(
+                      controller: deathYearController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Death year (optional)',
+                        border: OutlineInputBorder(),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Slot: $slotKey',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.black.withOpacity(0.55),
-                    ),
-                  ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      errorText!,
-                      style: const TextStyle(color: Colors.red),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Slot: $slotKey',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.black.withOpacity(0.55),
+                  ),
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    errorText!,
+                    style: const TextStyle(color: Colors.red),
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: saving ? null : () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: saving
-                  ? null
-                  : () async {
-                      final name = nameController.text.trim();
-                      final displayName = displayNameController.text.trim();
-                      final birthYear = parseYear(birthYearController.text);
-                      final deathYear = parseYear(deathYearController.text);
-                      final about = aboutController.text.trim();
-
-                      if (name.isEmpty) {
-                        setInner(() => errorText = 'Name is required.');
-                        return;
-                      }
-
-                      if (birthYearController.text.trim().isNotEmpty &&
-                          birthYear == null) {
-                        setInner(() =>
-                            errorText = 'Birth year must be a valid number.');
-                        return;
-                      }
-
-                      if (deathYearController.text.trim().isNotEmpty &&
-                          deathYear == null) {
-                        setInner(() =>
-                            errorText = 'Death year must be a valid number.');
-                        return;
-                      }
-
-                      setInner(() {
-                        saving = true;
-                        errorText = null;
-                      });
-
-                      try {
-                        final relation = _legacyRelationForSlot(slotKey);
-                        final anchorPerson = _legacyAnchorPersonForSlot(slotKey);
-                        final anchorRef = _nodeRefFromPerson(anchorPerson);
-
-                        if (relation == null) {
-                          throw Exception(
-                            'Unsupported legacy relationship for slot: $slotKey',
-                          );
-                        }
-
-                        if (anchorRef == null) {
-                          throw Exception(
-                            'Missing anchor person for slot: $slotKey',
-                          );
-                        }
-
-                        final legacyId = await _supabase.rpc(
-                          'create_legacy_relative',
-                          params: {
-                            'p_family_id': widget.familyId,
-                            'p_anchor_type': anchorRef.nodeType,
-                            'p_anchor_id': anchorRef.nodeId,
-                            'p_relation': relation,
-                            'p_name': name,
-                            'p_display_name':
-                                displayName.isEmpty ? null : displayName,
-                            'p_birth_year': birthYear,
-                            'p_death_year': deathYear,
-                            'p_about_me_text': about.isEmpty ? null : about,
-                          },
-                        );
-
-                        final createdLegacyId =
-                            (legacyId ?? '').toString().trim();
-                        if (createdLegacyId.isEmpty) {
-                          throw Exception('Failed to create legacy relative');
-                        }
-
-                        if (!ctx.mounted) return;
-                        Navigator.pop(ctx);
-                        _refresh();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('$title added to the family tree.'),
-                          ),
-                        );
-                      } on PostgrestException catch (e) {
-                        setInner(() {
-                          saving = false;
-                          errorText = e.message;
-                        });
-                      } catch (e) {
-                        setInner(() {
-                          saving = false;
-                          errorText = e.toString();
-                        });
-                      }
-                    },
-              child: Text(saving ? 'Saving…' : 'Create'),
-            ),
-          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: saving ? null : () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: saving
+                ? null
+                : () async {
+                    final name = nameController.text.trim();
+                    final displayName = displayNameController.text.trim();
+                    final birthYear = parseYear(birthYearController.text);
+                    final deathYear = parseYear(deathYearController.text);
+                    final about = aboutController.text.trim();
+
+                    if (name.isEmpty) {
+                      setInner(() => errorText = 'Name is required.');
+                      return;
+                    }
+
+                    if (birthYearController.text.trim().isNotEmpty &&
+                        birthYear == null) {
+                      setInner(() =>
+                          errorText = 'Birth year must be a valid number.');
+                      return;
+                    }
+
+                    if (deathYearController.text.trim().isNotEmpty &&
+                        deathYear == null) {
+                      setInner(() =>
+                          errorText = 'Death year must be a valid number.');
+                      return;
+                    }
+
+                    setInner(() {
+                      saving = true;
+                      errorText = null;
+                    });
+
+                    try {
+                      final relation = _legacyRelationForSlot(slotKey);
+                      final anchorPerson = _legacyAnchorPersonForSlot(slotKey);
+                      final anchorRef = _nodeRefFromPerson(anchorPerson);
+
+                      if (relation == null) {
+                        throw Exception(
+                          'Unsupported legacy relationship for slot: $slotKey',
+                        );
+                      }
+
+                      if (anchorRef == null) {
+                        throw Exception(
+                          'No valid anchor exists yet for slot $slotKey. '
+                          'This exact great-grandparent slot also needs to be added '
+                          'to your database slot_key check before slot-only creation can work.',
+                        );
+                      }
+
+                      final legacyId = await _supabase.rpc(
+                        'create_legacy_relative',
+                        params: {
+                          'p_family_id': widget.familyId,
+                          'p_anchor_type': anchorRef.nodeType,
+                          'p_anchor_id': anchorRef.nodeId,
+                          'p_relation': relation,
+                          'p_name': name,
+                          'p_display_name':
+                              displayName.isEmpty ? null : displayName,
+                          'p_birth_year': birthYear,
+                          'p_death_year': deathYear,
+                          'p_about_me_text': about.isEmpty ? null : about,
+                        },
+                      );
+
+                      final createdLegacyId =
+                          (legacyId ?? '').toString().trim();
+
+                      if (createdLegacyId.isEmpty) {
+                        throw Exception('Failed to create legacy relative');
+                      }
+
+                      if (!ctx.mounted) return;
+                      Navigator.pop(ctx);
+                      _refresh();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('$title added to the family tree.'),
+                        ),
+                      );
+                    } on PostgrestException catch (e) {
+                      setInner(() {
+                        saving = false;
+                        errorText = e.message;
+                      });
+                    } catch (e) {
+                      setInner(() {
+                        saving = false;
+                        errorText = e.toString();
+                      });
+                    }
+                  },
+            child: Text(saving ? 'Saving…' : 'Create'),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Future<void> _openPredecessorAddOptions({
     required String slotKey,
@@ -3410,6 +3402,7 @@ class _TreeLinesPainter extends CustomPainter {
         oldDelegate.showGreatGrandkids != showGreatGrandkids;
   }
 }
+
 class _BottomVinesPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {

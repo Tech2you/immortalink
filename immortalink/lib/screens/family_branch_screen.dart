@@ -898,175 +898,150 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
   Future<_AncestorViewModel> _buildAncestorViewModel() async {
     final explicitRoot = _explicitRootNodeRef();
+    final slotMap = _slotToPersonMap();
 
     _NodeRef? focusRef;
-    _NodeRef? seedRef;
     String focusFallback = widget.rootLabel;
 
     if (explicitRoot != null) {
       focusRef = explicitRoot;
-      seedRef = explicitRoot;
       focusFallback = widget.rootLabel;
     } else {
-      final slotRoot = _rootNodeRefFromSlot();
-      if (slotRoot != null) {
-        focusRef = slotRoot;
-        seedRef = slotRoot;
-        focusFallback = widget.rootLabel;
-      }
+      focusRef = _rootNodeRefFromSlot();
+      focusFallback = widget.rootLabel;
     }
 
     final focusPerson = focusRef == null ? null : _personForNode(focusRef);
-
     final generations = <_AncestorGeneration>[];
 
-    List<_AncestorBranchNode> current = [
-      _AncestorBranchNode(
-        ref: seedRef,
-        childRefForAdd: focusRef,
-      ),
-    ];
-
-    int startDepth = 1;
-
-    if (explicitRoot == null && seedRef != null && _parentsOf(seedRef).isEmpty) {
-      final fallbackGroups = _slotFallbackGroupsForBranch();
-
-      int firstNonEmptyIndex = -1;
-      for (int i = 0; i < fallbackGroups.length; i++) {
-        if (fallbackGroups[i].any((e) => e != null)) {
-          firstNonEmptyIndex = i;
-          break;
-        }
-      }
-
-      if (firstNonEmptyIndex != -1) {
-        final firstGroup = fallbackGroups[firstNonEmptyIndex];
-        final firstNodes = <_AncestorBranchNode>[];
-
-        for (final ref in firstGroup) {
-          firstNodes.add(
-            _AncestorBranchNode(
-              ref: ref,
-              childRefForAdd: seedRef,
+    List<_AncestorBranchNode> generationFromSlots(List<String> slots) {
+      return slots
+          .map(
+            (slot) => _AncestorBranchNode(
+              ref: _nodeRefFromPerson(slotMap[slot]),
+              childRefForAdd: focusRef,
+              slotKeyForAdd: slot,
             ),
-          );
-        }
+          )
+          .toList();
+    }
 
-        final firstTargetCount = firstGroup.length;
-        while (firstNodes.length < firstTargetCount) {
-          firstNodes.add(
-            _AncestorBranchNode(
-              ref: null,
-              childRefForAdd: seedRef,
-            ),
-          );
-        }
-
+    switch (widget.rootSlotKey) {
+      case 'mother':
         generations.add(
           _AncestorGeneration(
             depth: 1,
-            nodes: firstNodes.take(firstTargetCount).toList(),
+            nodes: generationFromSlots([
+              'maternal_gm',
+              'maternal_gf',
+            ]),
           ),
         );
+        generations.add(
+          _AncestorGeneration(
+            depth: 2,
+            nodes: generationFromSlots([
+              'maternal_gm_mother',
+              'maternal_gm_father',
+              'maternal_gf_mother',
+              'maternal_gf_father',
+            ]),
+          ),
+        );
+        break;
 
-        current = firstNodes.take(firstTargetCount).toList();
-        startDepth = 2;
+      case 'father':
+        generations.add(
+          _AncestorGeneration(
+            depth: 1,
+            nodes: generationFromSlots([
+              'paternal_gm',
+              'paternal_gf',
+            ]),
+          ),
+        );
+        generations.add(
+          _AncestorGeneration(
+            depth: 2,
+            nodes: generationFromSlots([
+              'paternal_gm_mother',
+              'paternal_gm_father',
+              'paternal_gf_mother',
+              'paternal_gf_father',
+            ]),
+          ),
+        );
+        break;
 
-        for (int i = firstNonEmptyIndex + 1; i < fallbackGroups.length; i++) {
-          final group = fallbackGroups[i];
+      case 'maternal_gm':
+        generations.add(
+          _AncestorGeneration(
+            depth: 1,
+            nodes: generationFromSlots([
+              'maternal_gm_mother',
+              'maternal_gm_father',
+            ]),
+          ),
+        );
+        break;
+
+      case 'maternal_gf':
+        generations.add(
+          _AncestorGeneration(
+            depth: 1,
+            nodes: generationFromSlots([
+              'maternal_gf_mother',
+              'maternal_gf_father',
+            ]),
+          ),
+        );
+        break;
+
+      case 'paternal_gm':
+        generations.add(
+          _AncestorGeneration(
+            depth: 1,
+            nodes: generationFromSlots([
+              'paternal_gm_mother',
+              'paternal_gm_father',
+            ]),
+          ),
+        );
+        break;
+
+      case 'paternal_gf':
+        generations.add(
+          _AncestorGeneration(
+            depth: 1,
+            nodes: generationFromSlots([
+              'paternal_gf_mother',
+              'paternal_gf_father',
+            ]),
+          ),
+        );
+        break;
+
+      default:
+        final fallbackGroups = _slotFallbackGroupsForBranch();
+        for (int i = 0; i < fallbackGroups.length; i++) {
           final nodes = <_AncestorBranchNode>[];
-
-          for (final ref in group) {
+          for (final ref in fallbackGroups[i]) {
             nodes.add(
               _AncestorBranchNode(
                 ref: ref,
-                childRefForAdd: ref == null ? seedRef : ref,
+                childRefForAdd: focusRef,
+                slotKeyForAdd: null,
               ),
             );
           }
-
-          final targetCount = group.length;
-          while (nodes.length < targetCount) {
-            nodes.add(
-              _AncestorBranchNode(
-                ref: null,
-                childRefForAdd: seedRef,
-              ),
-            );
-          }
-
           generations.add(
             _AncestorGeneration(
-              depth: generations.length + 1,
-              nodes: nodes.take(targetCount).toList(),
+              depth: i + 1,
+              nodes: nodes,
             ),
           );
-
-          current = nodes.take(targetCount).toList();
-          startDepth = generations.length + 1;
         }
-
-        startDepth = generations.length + 1;
-      }
-    }
-
-    for (int depth = startDepth; depth <= _maxAncestorDepth; depth++) {
-      final next = <_AncestorBranchNode>[];
-
-      for (final child in current) {
-        if (child.ref == null) {
-          next.add(
-            _AncestorBranchNode(
-              ref: null,
-              childRefForAdd: child.childRefForAdd,
-            ),
-          );
-          next.add(
-            _AncestorBranchNode(
-              ref: null,
-              childRefForAdd: child.childRefForAdd,
-            ),
-          );
-          continue;
-        }
-
-        final parents = _parentsOf(child.ref!);
-        final first = parents.isNotEmpty ? parents[0] : null;
-        final second = parents.length > 1 ? parents[1] : null;
-
-        next.add(
-          _AncestorBranchNode(
-            ref: first,
-            childRefForAdd: child.ref,
-          ),
-        );
-        next.add(
-          _AncestorBranchNode(
-            ref: second,
-            childRefForAdd: child.ref,
-          ),
-        );
-      }
-
-      final targetCount = pow(2, depth).toInt();
-      while (next.length < targetCount) {
-        next.add(
-          _AncestorBranchNode(
-            ref: null,
-            childRefForAdd: seedRef,
-          ),
-        );
-      }
-
-      generations.add(
-        _AncestorGeneration(
-          depth: depth,
-          nodes: next.take(targetCount).toList(),
-        ),
-      );
-
-      current = next.take(targetCount).toList();
+        break;
     }
 
     return _AncestorViewModel(
@@ -1078,6 +1053,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
   Future<_DescendantViewModel> _buildDescendantViewModel() async {
     final explicitRoot = _explicitRootNodeRef();
+    final slotMap = _slotToPersonMap();
 
     _NodeRef? focusRef;
     String focusFallback = widget.rootLabel;
@@ -1096,72 +1072,66 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     final focusPerson = focusRef == null ? null : _personForNode(focusRef);
     final generations = <_DescendantGeneration>[];
 
-    List<_DescendantBranchNode> current = focusRef == null
-        ? []
-        : [
-            _DescendantBranchNode(
-              ref: focusRef,
+    List<_DescendantBranchNode> generationFromSlots(List<String> slots) {
+      return slots
+          .map(
+            (slot) => _DescendantBranchNode(
+              ref: _nodeRefFromPerson(slotMap[slot]),
               parentRefForAdd: focusRef,
+              slotKeyForAdd: slot,
             ),
-          ];
+          )
+          .toList();
+    }
 
-    for (int depth = 1; depth <= _maxDescendantDepth; depth++) {
-      final next = <_DescendantBranchNode>[];
-
-      for (final parentNode in current) {
-        final parentRef = parentNode.ref ?? parentNode.parentRefForAdd;
-        if (parentRef == null) {
-          next.add(
-            _DescendantBranchNode(
-              ref: null,
-              parentRefForAdd: null,
-            ),
-          );
-          next.add(
-            _DescendantBranchNode(
-              ref: null,
-              parentRefForAdd: null,
-            ),
-          );
-          continue;
-        }
-
-        final children = _childrenOf(parentRef);
-        final first = children.isNotEmpty ? children[0] : null;
-        final second = children.length > 1 ? children[1] : null;
-
-        next.add(
-          _DescendantBranchNode(
-            ref: first,
-            parentRefForAdd: parentRef,
+    switch (widget.rootSlotKey) {
+      case 'child_1':
+      case 'child_2':
+      case 'child_3':
+      case 'child_4':
+        generations.add(
+          _DescendantGeneration(
+            depth: 1,
+            nodes: generationFromSlots([
+              'grandchild_1',
+              'grandchild_2',
+              'grandchild_3',
+              'grandchild_4',
+            ]),
           ),
         );
-        next.add(
-          _DescendantBranchNode(
-            ref: second,
-            parentRefForAdd: parentRef,
+        generations.add(
+          _DescendantGeneration(
+            depth: 2,
+            nodes: generationFromSlots([
+              'greatgrandchild_1',
+              'greatgrandchild_2',
+              'greatgrandchild_3',
+              'greatgrandchild_4',
+            ]),
           ),
         );
-      }
+        break;
 
-      final targetCount = pow(2, depth).toInt();
-      while (next.length < targetCount) {
-        next.add(
-          _DescendantBranchNode(
-            ref: null,
-            parentRefForAdd: null,
+      case 'grandchild_1':
+      case 'grandchild_2':
+      case 'grandchild_3':
+      case 'grandchild_4':
+        generations.add(
+          _DescendantGeneration(
+            depth: 1,
+            nodes: generationFromSlots([
+              'greatgrandchild_1',
+              'greatgrandchild_2',
+              'greatgrandchild_3',
+              'greatgrandchild_4',
+            ]),
           ),
         );
-      }
+        break;
 
-      generations.add(
-        _DescendantGeneration(
-          depth: depth,
-          nodes: next.take(targetCount).toList(),
-        ),
-      );
-
-      current = next.take(targetCount).toList();
+      default:
+        break;
     }
 
     return _DescendantViewModel(
@@ -1229,6 +1199,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   Future<void> _createAncestorInvite({
     required _NodeRef childRef,
     required String title,
+    required String slotKey,
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
@@ -1254,7 +1225,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                 'family_id': widget.familyId,
                 'created_by': user.id,
                 'invite_code': nextCode,
-                'slot_key': widget.rootSlotKey,
+                'slot_key': slotKey,
                 'expires_at': expiresAt.toIso8601String(),
                 'inviter_vault_id': myVaultId,
               })
@@ -1349,6 +1320,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   Future<void> _createDescendantInvite({
     required _NodeRef parentRef,
     required String title,
+    required String slotKey,
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
@@ -1374,7 +1346,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                 'family_id': widget.familyId,
                 'created_by': user.id,
                 'invite_code': nextCode,
-                'slot_key': widget.rootSlotKey,
+                'slot_key': slotKey,
                 'expires_at': expiresAt.toIso8601String(),
                 'inviter_vault_id': myVaultId,
               })
@@ -1855,6 +1827,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   Future<void> _openAncestorAddOptions({
     required _NodeRef childRef,
     required String title,
+    required String slotKey,
   }) async {
     if (!mounted) return;
 
@@ -1895,6 +1868,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   _createAncestorInvite(
                     childRef: childRef,
                     title: title,
+                    slotKey: slotKey,
                   );
                 },
               ),
@@ -1924,6 +1898,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   Future<void> _openDescendantAddOptions({
     required _NodeRef parentRef,
     required String title,
+    required String slotKey,
   }) async {
     if (!mounted) return;
 
@@ -1964,6 +1939,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   _createDescendantInvite(
                     parentRef: parentRef,
                     title: title,
+                    slotKey: slotKey,
                   );
                 },
               ),
@@ -2063,11 +2039,13 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                               if (person == null) {
                                 return _MiniBranchAddCard(
                                   label: 'Add ancestor',
-                                  onTap: node.childRefForAdd == null
+                                  onTap: (node.childRefForAdd == null ||
+                                          node.slotKeyForAdd == null)
                                       ? null
                                       : () => _openAncestorAddOptions(
                                             childRef: node.childRefForAdd!,
                                             title: 'Ancestor',
+                                            slotKey: node.slotKeyForAdd!,
                                           ),
                                 );
                               }
@@ -2171,11 +2149,13 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                               if (person == null) {
                                 return _MiniBranchAddCard(
                                   label: 'Add descendant',
-                                  onTap: node.parentRefForAdd == null
+                                  onTap: (node.parentRefForAdd == null ||
+                                          node.slotKeyForAdd == null)
                                       ? null
                                       : () => _openDescendantAddOptions(
                                             parentRef: node.parentRefForAdd!,
                                             title: 'Descendant',
+                                            slotKey: node.slotKeyForAdd!,
                                           ),
                                 );
                               }
@@ -2613,20 +2593,24 @@ class _NodeRef {
 class _AncestorBranchNode {
   final _NodeRef? ref;
   final _NodeRef? childRefForAdd;
+  final String? slotKeyForAdd;
 
   const _AncestorBranchNode({
     required this.ref,
     this.childRefForAdd,
+    this.slotKeyForAdd,
   });
 }
 
 class _DescendantBranchNode {
   final _NodeRef? ref;
   final _NodeRef? parentRefForAdd;
+  final String? slotKeyForAdd;
 
   const _DescendantBranchNode({
     required this.ref,
     this.parentRefForAdd,
+    this.slotKeyForAdd,
   });
 }
 
