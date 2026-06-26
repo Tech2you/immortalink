@@ -148,7 +148,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     return null;
   }
 
-   Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
+  Map<String, dynamic>? _legacyAnchorPersonForSlot(String slotKey) {
     switch (slotKey) {
       case kMother:
       case kFather:
@@ -1059,6 +1059,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       );
     }
   }
+
   List<Map<String, dynamic>> _sortedPeopleForDisplay(
     Map<String, Map<String, dynamic>> global,
     List<Map<String, dynamic>> people,
@@ -1075,7 +1076,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   ) {
     final key = _nodeKeyFromPerson(person);
     if (key.isEmpty) return [];
-    final list = parentsByChild[key] ?? const [];
+    final list = parentsByChild[key] ?? const <Map<String, dynamic>>[];
     return _sortedPeopleForDisplay(global, list);
   }
 
@@ -1086,11 +1087,14 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   ) {
     final key = _nodeKeyFromPerson(person);
     if (key.isEmpty) return [];
-    final list = childrenByParent[key] ?? const [];
+    final list = childrenByParent[key] ?? const <Map<String, dynamic>>[];
     return _sortedPeopleForDisplay(global, list);
   }
 
-  Map<String, dynamic>? _firstOrNull(List<Map<String, dynamic>> people, int index) {
+  Map<String, dynamic>? _firstOrNull(
+    List<Map<String, dynamic>> people,
+    int index,
+  ) {
     if (index < 0 || index >= people.length) return null;
     return people[index];
   }
@@ -1152,7 +1156,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
     return _sortedPeopleForDisplay(global, siblings);
   }
-   Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
+  Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
     final global = _slotToGlobalPersonMap(data);
     final viewer = _currentViewerPerson(data);
 
@@ -1213,8 +1217,10 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     _putIfPerson(visible, kMother, parentA);
     _putIfPerson(visible, kFather, parentB);
 
-    final parentAGrandparents = _parentsOfPerson(parentsByChild, global, parentA);
-    final parentBGrandparents = _parentsOfPerson(parentsByChild, global, parentB);
+    final parentAGrandparents =
+        _parentsOfPerson(parentsByChild, global, parentA);
+    final parentBGrandparents =
+        _parentsOfPerson(parentsByChild, global, parentB);
 
     final maternalGm = _firstOrNull(parentAGrandparents, 0);
     final maternalGf = _firstOrNull(parentAGrandparents, 1);
@@ -1226,19 +1232,55 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     _putIfPerson(visible, kPaternalGm, paternalGm);
     _putIfPerson(visible, kPaternalGf, paternalGf);
 
-    final maternalGmParents = _parentsOfPerson(parentsByChild, global, maternalGm);
-    final maternalGfParents = _parentsOfPerson(parentsByChild, global, maternalGf);
-    final paternalGmParents = _parentsOfPerson(parentsByChild, global, paternalGm);
-    final paternalGfParents = _parentsOfPerson(parentsByChild, global, paternalGf);
+    final maternalGmParents =
+        _parentsOfPerson(parentsByChild, global, maternalGm);
+    final maternalGfParents =
+        _parentsOfPerson(parentsByChild, global, maternalGf);
+    final paternalGmParents =
+        _parentsOfPerson(parentsByChild, global, paternalGm);
+    final paternalGfParents =
+        _parentsOfPerson(parentsByChild, global, paternalGf);
 
-    _putIfPerson(visible, kMaternalGmMother, _firstOrNull(maternalGmParents, 0));
-    _putIfPerson(visible, kMaternalGmFather, _firstOrNull(maternalGmParents, 1));
-    _putIfPerson(visible, kMaternalGfMother, _firstOrNull(maternalGfParents, 0));
-    _putIfPerson(visible, kMaternalGfFather, _firstOrNull(maternalGfParents, 1));
-    _putIfPerson(visible, kPaternalGmMother, _firstOrNull(paternalGmParents, 0));
-    _putIfPerson(visible, kPaternalGmFather, _firstOrNull(paternalGmParents, 1));
-    _putIfPerson(visible, kPaternalGfMother, _firstOrNull(paternalGfParents, 0));
-    _putIfPerson(visible, kPaternalGfFather, _firstOrNull(paternalGfParents, 1));
+    _putIfPerson(
+      visible,
+      kMaternalGmMother,
+      _firstOrNull(maternalGmParents, 0),
+    );
+    _putIfPerson(
+      visible,
+      kMaternalGmFather,
+      _firstOrNull(maternalGmParents, 1),
+    );
+    _putIfPerson(
+      visible,
+      kMaternalGfMother,
+      _firstOrNull(maternalGfParents, 0),
+    );
+    _putIfPerson(
+      visible,
+      kMaternalGfFather,
+      _firstOrNull(maternalGfParents, 1),
+    );
+    _putIfPerson(
+      visible,
+      kPaternalGmMother,
+      _firstOrNull(paternalGmParents, 0),
+    );
+    _putIfPerson(
+      visible,
+      kPaternalGmFather,
+      _firstOrNull(paternalGmParents, 1),
+    );
+    _putIfPerson(
+      visible,
+      kPaternalGfMother,
+      _firstOrNull(paternalGfParents, 0),
+    );
+    _putIfPerson(
+      visible,
+      kPaternalGfFather,
+      _firstOrNull(paternalGfParents, 1),
+    );
 
     final spouse = _spouseForViewer(
       parentsByChild,
@@ -1269,20 +1311,28 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     _putIfPerson(visible, kChild3, child3);
     _putIfPerson(visible, kChild4, child4);
 
-    final gc1 = _firstOrNull(_childrenOfPerson(childrenByParent, global, child1), 0);
-    final gc2 = _firstOrNull(_childrenOfPerson(childrenByParent, global, child2), 0);
-    final gc3 = _firstOrNull(_childrenOfPerson(childrenByParent, global, child3), 0);
-    final gc4 = _firstOrNull(_childrenOfPerson(childrenByParent, global, child4), 0);
+    final gc1 =
+        _firstOrNull(_childrenOfPerson(childrenByParent, global, child1), 0);
+    final gc2 =
+        _firstOrNull(_childrenOfPerson(childrenByParent, global, child2), 0);
+    final gc3 =
+        _firstOrNull(_childrenOfPerson(childrenByParent, global, child3), 0);
+    final gc4 =
+        _firstOrNull(_childrenOfPerson(childrenByParent, global, child4), 0);
 
     _putIfPerson(visible, kGrandchild1, gc1);
     _putIfPerson(visible, kGrandchild2, gc2);
     _putIfPerson(visible, kGrandchild3, gc3);
     _putIfPerson(visible, kGrandchild4, gc4);
 
-    final ggc1 = _firstOrNull(_childrenOfPerson(childrenByParent, global, gc1), 0);
-    final ggc2 = _firstOrNull(_childrenOfPerson(childrenByParent, global, gc2), 0);
-    final ggc3 = _firstOrNull(_childrenOfPerson(childrenByParent, global, gc3), 0);
-    final ggc4 = _firstOrNull(_childrenOfPerson(childrenByParent, global, gc4), 0);
+    final ggc1 =
+        _firstOrNull(_childrenOfPerson(childrenByParent, global, gc1), 0);
+    final ggc2 =
+        _firstOrNull(_childrenOfPerson(childrenByParent, global, gc2), 0);
+    final ggc3 =
+        _firstOrNull(_childrenOfPerson(childrenByParent, global, gc3), 0);
+    final ggc4 =
+        _firstOrNull(_childrenOfPerson(childrenByParent, global, gc4), 0);
 
     _putIfPerson(visible, kGreatGrandchild1, ggc1);
     _putIfPerson(visible, kGreatGrandchild2, ggc2);
