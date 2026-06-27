@@ -1487,8 +1487,16 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       _refresh();
     } catch (e) {
       if (!mounted) return;
+
+      var message = 'Invite failed: $e';
+      if (e is PostgrestException &&
+          e.message.contains('family_invites_slot_key_check')) {
+        message =
+            'Invite failed because this slot key is not allowed yet in the family_invites table. Run the slot-key migration for family_invites, then try again.';
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Invite failed: $e')),
+        SnackBar(content: Text(message)),
       );
     }
   }
