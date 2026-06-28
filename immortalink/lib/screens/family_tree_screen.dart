@@ -1108,6 +1108,109 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     target[slotKey] = person;
   }
 
+  void _putIfPersonIfMissingAndUnique(
+    Map<String, Map<String, dynamic>> target,
+    String slotKey,
+    Map<String, dynamic>? person, {
+    Map<String, dynamic>? viewer,
+  }) {
+    if (target.containsKey(slotKey)) return;
+    if (person == null) return;
+    if (_samePerson(person, viewer)) return;
+    if (_containsPerson(target, person)) return;
+    target[slotKey] = person;
+  }
+
+  Map<String, Map<String, dynamic>> _normalizeVisibleSlots(
+    Map<String, Map<String, dynamic>> visible, {
+    Map<String, dynamic>? viewer,
+  }) {
+    const orderedSlots = <String>[
+      kMaternalGmMother,
+      kMaternalGmFather,
+      kMaternalGfMother,
+      kMaternalGfFather,
+      kPaternalGmMother,
+      kPaternalGmFather,
+      kPaternalGfMother,
+      kPaternalGfFather,
+      kMaternalGm,
+      kMaternalGf,
+      kPaternalGm,
+      kPaternalGf,
+      kMother,
+      kFather,
+      kSpouse1,
+      kSibling1,
+      kSibling2,
+      kSibling3,
+      kChild1,
+      kChild2,
+      kChild3,
+      kChild4,
+      kGrandchild1,
+      kGrandchild2,
+      kGrandchild3,
+      kGrandchild4,
+      kGreatGrandchild1,
+      kGreatGrandchild2,
+      kGreatGrandchild3,
+      kGreatGrandchild4,
+    ];
+
+    final normalized = <String, Map<String, dynamic>>{};
+    final seen = <String>{};
+    final viewerKey = _nodeKeyFromPerson(viewer);
+
+    for (final slotKey in orderedSlots) {
+      final person = visible[slotKey];
+      if (person == null) continue;
+
+      final key = _nodeKeyFromPerson(person);
+      if (key.isEmpty) continue;
+      if (viewerKey.isNotEmpty && key == viewerKey) continue;
+      if (seen.contains(key)) continue;
+
+      normalized[slotKey] = person;
+      seen.add(key);
+    }
+
+    return normalized;
+  }
+
+  List<Map<String, dynamic>> _withoutPerson(
+    List<Map<String, dynamic>> people,
+    Map<String, dynamic>? blocked,
+  ) {
+    if (blocked == null) return List<Map<String, dynamic>>.from(people);
+    return people.where((p) => !_samePerson(p, blocked)).toList();
+  }
+
+  bool _containsPerson(
+    Map<String, Map<String, dynamic>> target,
+    Map<String, dynamic>? person,
+  ) {
+    if (person == null) return false;
+    return target.values.any((existing) => _samePerson(existing, person));
+  }
+
+  void _putSlotFromGlobalIfMissing(
+    Map<String, Map<String, dynamic>> target,
+    Map<String, Map<String, dynamic>> global,
+    String slotKey, {
+    Map<String, dynamic>? viewer,
+  }) {
+    if (target.containsKey(slotKey)) return;
+
+    final person = global[slotKey];
+    if (person == null) return;
+
+    if (_samePerson(person, viewer)) return;
+    if (_containsPerson(target, person)) return;
+
+    target[slotKey] = person;
+  }
+
   Map<String, dynamic>? _spouseForViewer(
     Map<String, List<Map<String, dynamic>>> parentsByChild,
     Map<String, List<Map<String, dynamic>>> childrenByParent,
@@ -1119,9 +1222,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     final viewerKey = _nodeKeyFromPerson(viewer);
     if (viewerKey.isEmpty) return null;
 
-    final viewerChildren = _childrenOfPerson(childrenByParent, global, viewer);
+    final viewerChildren = _withoutPerson(
+      _childrenOfPerson(childrenByParent, global, viewer),
+      viewer,
+    );
     for (final child in viewerChildren) {
-      final childParents = _parentsOfPerson(parentsByChild, global, child);
+      final childParents = _withoutPerson(
+        _parentsOfPerson(parentsByChild, global, child),
+        viewer,
+      );
       for (final parent in childParents) {
         if (_nodeKeyFromPerson(parent) != viewerKey) {
           return parent;
@@ -1143,11 +1252,17 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     final viewerKey = _nodeKeyFromPerson(viewer);
     if (viewerKey.isEmpty) return [];
 
-    final viewerParents = _parentsOfPerson(parentsByChild, global, viewer);
+    final viewerParents = _withoutPerson(
+      _parentsOfPerson(parentsByChild, global, viewer),
+      viewer,
+    );
     final siblings = <Map<String, dynamic>>[];
 
     for (final parent in viewerParents) {
-      final kids = _childrenOfPerson(childrenByParent, global, parent);
+      final kids = _withoutPerson(
+        _childrenOfPerson(childrenByParent, global, parent),
+        viewer,
+      );
       for (final kid in kids) {
         if (_nodeKeyFromPerson(kid) == viewerKey) continue;
         _addUniquePerson(siblings, kid);
@@ -1200,7 +1315,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
           visible[entry.key] = entry.value;
         }
       }
-      return visible;
+      return _normalizeVisibleSlots(visible);
     }
 
     final parentsByChild = <String, List<Map<String, dynamic>>>{};
@@ -1210,77 +1325,181 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
     final visible = <String, Map<String, dynamic>>{};
 
-    final viewerParents = _parentsOfPerson(parentsByChild, global, viewer);
+    _putSlotFromGlobalIfMissing(visible, global, kMother, viewer: viewer);
+    _putSlotFromGlobalIfMissing(visible, global, kFather, viewer: viewer);
+    _putSlotFromGlobalIfMissing(visible, global, kMaternalGm, viewer: viewer);
+    _putSlotFromGlobalIfMissing(visible, global, kMaternalGf, viewer: viewer);
+    _putSlotFromGlobalIfMissing(visible, global, kPaternalGm, viewer: viewer);
+    _putSlotFromGlobalIfMissing(visible, global, kPaternalGf, viewer: viewer);
+    _putSlotFromGlobalIfMissing(
+      visible,
+      global,
+      kMaternalGmMother,
+      viewer: viewer,
+    );
+    _putSlotFromGlobalIfMissing(
+      visible,
+      global,
+      kMaternalGmFather,
+      viewer: viewer,
+    );
+    _putSlotFromGlobalIfMissing(
+      visible,
+      global,
+      kMaternalGfMother,
+      viewer: viewer,
+    );
+    _putSlotFromGlobalIfMissing(
+      visible,
+      global,
+      kMaternalGfFather,
+      viewer: viewer,
+    );
+    _putSlotFromGlobalIfMissing(
+      visible,
+      global,
+      kPaternalGmMother,
+      viewer: viewer,
+    );
+    _putSlotFromGlobalIfMissing(
+      visible,
+      global,
+      kPaternalGmFather,
+      viewer: viewer,
+    );
+    _putSlotFromGlobalIfMissing(
+      visible,
+      global,
+      kPaternalGfMother,
+      viewer: viewer,
+    );
+    _putSlotFromGlobalIfMissing(
+      visible,
+      global,
+      kPaternalGfFather,
+      viewer: viewer,
+    );
+
+    final viewerParents = _withoutPerson(
+      _parentsOfPerson(parentsByChild, global, viewer),
+      viewer,
+    );
     final parentA = _firstOrNull(viewerParents, 0);
-    final parentB = _firstOrNull(viewerParents, 1);
+    final parentB = _samePerson(_firstOrNull(viewerParents, 1), parentA)
+        ? null
+        : _firstOrNull(viewerParents, 1);
 
-    _putIfPerson(visible, kMother, parentA);
-    _putIfPerson(visible, kFather, parentB);
+    if (!visible.containsKey(kMother)) {
+      _putIfPerson(visible, kMother, parentA);
+    }
+    if (!visible.containsKey(kFather)) {
+      _putIfPerson(visible, kFather, parentB);
+    }
 
-    final parentAGrandparents =
-        _parentsOfPerson(parentsByChild, global, parentA);
-    final parentBGrandparents =
-        _parentsOfPerson(parentsByChild, global, parentB);
+    final parentAGrandparents = _withoutPerson(
+      _parentsOfPerson(parentsByChild, global, parentA),
+      viewer,
+    );
+    final parentBGrandparents = _withoutPerson(
+      _parentsOfPerson(parentsByChild, global, parentB),
+      viewer,
+    );
 
     final maternalGm = _firstOrNull(parentAGrandparents, 0);
-    final maternalGf = _firstOrNull(parentAGrandparents, 1);
+    final maternalGf = _samePerson(_firstOrNull(parentAGrandparents, 1), maternalGm)
+        ? null
+        : _firstOrNull(parentAGrandparents, 1);
     final paternalGm = _firstOrNull(parentBGrandparents, 0);
-    final paternalGf = _firstOrNull(parentBGrandparents, 1);
+    final paternalGf = _samePerson(_firstOrNull(parentBGrandparents, 1), paternalGm)
+        ? null
+        : _firstOrNull(parentBGrandparents, 1);
 
-    _putIfPerson(visible, kMaternalGm, maternalGm);
-    _putIfPerson(visible, kMaternalGf, maternalGf);
-    _putIfPerson(visible, kPaternalGm, paternalGm);
-    _putIfPerson(visible, kPaternalGf, paternalGf);
+    if (!visible.containsKey(kMaternalGm)) {
+      _putIfPerson(visible, kMaternalGm, maternalGm);
+    }
+    if (!visible.containsKey(kMaternalGf)) {
+      _putIfPerson(visible, kMaternalGf, maternalGf);
+    }
+    if (!visible.containsKey(kPaternalGm)) {
+      _putIfPerson(visible, kPaternalGm, paternalGm);
+    }
+    if (!visible.containsKey(kPaternalGf)) {
+      _putIfPerson(visible, kPaternalGf, paternalGf);
+    }
 
-    final maternalGmParents =
-        _parentsOfPerson(parentsByChild, global, maternalGm);
-    final maternalGfParents =
-        _parentsOfPerson(parentsByChild, global, maternalGf);
-    final paternalGmParents =
-        _parentsOfPerson(parentsByChild, global, paternalGm);
-    final paternalGfParents =
-        _parentsOfPerson(parentsByChild, global, paternalGf);
+    final maternalGmParents = _withoutPerson(
+      _parentsOfPerson(parentsByChild, global, maternalGm),
+      viewer,
+    );
+    final maternalGfParents = _withoutPerson(
+      _parentsOfPerson(parentsByChild, global, maternalGf),
+      viewer,
+    );
+    final paternalGmParents = _withoutPerson(
+      _parentsOfPerson(parentsByChild, global, paternalGm),
+      viewer,
+    );
+    final paternalGfParents = _withoutPerson(
+      _parentsOfPerson(parentsByChild, global, paternalGf),
+      viewer,
+    );
 
-    _putIfPerson(
-      visible,
-      kMaternalGmMother,
-      _firstOrNull(maternalGmParents, 0),
-    );
-    _putIfPerson(
-      visible,
-      kMaternalGmFather,
-      _firstOrNull(maternalGmParents, 1),
-    );
-    _putIfPerson(
-      visible,
-      kMaternalGfMother,
-      _firstOrNull(maternalGfParents, 0),
-    );
-    _putIfPerson(
-      visible,
-      kMaternalGfFather,
-      _firstOrNull(maternalGfParents, 1),
-    );
-    _putIfPerson(
-      visible,
-      kPaternalGmMother,
-      _firstOrNull(paternalGmParents, 0),
-    );
-    _putIfPerson(
-      visible,
-      kPaternalGmFather,
-      _firstOrNull(paternalGmParents, 1),
-    );
-    _putIfPerson(
-      visible,
-      kPaternalGfMother,
-      _firstOrNull(paternalGfParents, 0),
-    );
-    _putIfPerson(
-      visible,
-      kPaternalGfFather,
-      _firstOrNull(paternalGfParents, 1),
-    );
+    if (!visible.containsKey(kMaternalGmMother)) {
+      _putIfPerson(
+        visible,
+        kMaternalGmMother,
+        _firstOrNull(maternalGmParents, 0),
+      );
+    }
+    if (!visible.containsKey(kMaternalGmFather)) {
+      _putIfPerson(
+        visible,
+        kMaternalGmFather,
+        _firstOrNull(maternalGmParents, 1),
+      );
+    }
+    if (!visible.containsKey(kMaternalGfMother)) {
+      _putIfPerson(
+        visible,
+        kMaternalGfMother,
+        _firstOrNull(maternalGfParents, 0),
+      );
+    }
+    if (!visible.containsKey(kMaternalGfFather)) {
+      _putIfPerson(
+        visible,
+        kMaternalGfFather,
+        _firstOrNull(maternalGfParents, 1),
+      );
+    }
+    if (!visible.containsKey(kPaternalGmMother)) {
+      _putIfPerson(
+        visible,
+        kPaternalGmMother,
+        _firstOrNull(paternalGmParents, 0),
+      );
+    }
+    if (!visible.containsKey(kPaternalGmFather)) {
+      _putIfPerson(
+        visible,
+        kPaternalGmFather,
+        _firstOrNull(paternalGmParents, 1),
+      );
+    }
+    if (!visible.containsKey(kPaternalGfMother)) {
+      _putIfPerson(
+        visible,
+        kPaternalGfMother,
+        _firstOrNull(paternalGfParents, 0),
+      );
+    }
+    if (!visible.containsKey(kPaternalGfFather)) {
+      _putIfPerson(
+        visible,
+        kPaternalGfFather,
+        _firstOrNull(paternalGfParents, 1),
+      );
+    }
 
     final spouse = _spouseForViewer(
       parentsByChild,
@@ -1288,7 +1507,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       global,
       viewer,
     );
-    _putIfPerson(visible, kSpouse1, spouse);
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kSpouse1,
+      spouse,
+      viewer: viewer,
+    );
 
     final siblings = _siblingsForViewer(
       parentsByChild,
@@ -1296,50 +1520,175 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       global,
       viewer,
     );
-    _putIfPerson(visible, kSibling1, _firstOrNull(siblings, 0));
-    _putIfPerson(visible, kSibling2, _firstOrNull(siblings, 1));
-    _putIfPerson(visible, kSibling3, _firstOrNull(siblings, 2));
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kSibling1,
+      _firstOrNull(siblings, 0),
+      viewer: viewer,
+    );
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kSibling2,
+      _firstOrNull(siblings, 1),
+      viewer: viewer,
+    );
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kSibling3,
+      _firstOrNull(siblings, 2),
+      viewer: viewer,
+    );
 
-    final children = _childrenOfPerson(childrenByParent, global, viewer);
+    final children = _withoutPerson(
+      _childrenOfPerson(childrenByParent, global, viewer),
+      viewer,
+    );
     final child1 = _firstOrNull(children, 0);
-    final child2 = _firstOrNull(children, 1);
-    final child3 = _firstOrNull(children, 2);
-    final child4 = _firstOrNull(children, 3);
+    final child2 = _samePerson(_firstOrNull(children, 1), child1)
+        ? null
+        : _firstOrNull(children, 1);
+    final child3 = _samePerson(_firstOrNull(children, 2), child2) ||
+            _samePerson(_firstOrNull(children, 2), child1)
+        ? null
+        : _firstOrNull(children, 2);
+    final child4 = _samePerson(_firstOrNull(children, 3), child3) ||
+            _samePerson(_firstOrNull(children, 3), child2) ||
+            _samePerson(_firstOrNull(children, 3), child1)
+        ? null
+        : _firstOrNull(children, 3);
 
-    _putIfPerson(visible, kChild1, child1);
-    _putIfPerson(visible, kChild2, child2);
-    _putIfPerson(visible, kChild3, child3);
-    _putIfPerson(visible, kChild4, child4);
+    _putIfPersonIfMissingAndUnique(visible, kChild1, child1, viewer: viewer);
+    _putIfPersonIfMissingAndUnique(visible, kChild2, child2, viewer: viewer);
+    _putIfPersonIfMissingAndUnique(visible, kChild3, child3, viewer: viewer);
+    _putIfPersonIfMissingAndUnique(visible, kChild4, child4, viewer: viewer);
 
-    final gc1 =
-        _firstOrNull(_childrenOfPerson(childrenByParent, global, child1), 0);
-    final gc2 =
-        _firstOrNull(_childrenOfPerson(childrenByParent, global, child2), 0);
-    final gc3 =
-        _firstOrNull(_childrenOfPerson(childrenByParent, global, child3), 0);
-    final gc4 =
-        _firstOrNull(_childrenOfPerson(childrenByParent, global, child4), 0);
+    final gc1 = _firstOrNull(
+      _withoutPerson(_childrenOfPerson(childrenByParent, global, child1), viewer),
+      0,
+    );
+    final gc2 = _firstOrNull(
+      _withoutPerson(_childrenOfPerson(childrenByParent, global, child2), viewer),
+      0,
+    );
+    final gc3 = _firstOrNull(
+      _withoutPerson(_childrenOfPerson(childrenByParent, global, child3), viewer),
+      0,
+    );
+    final gc4 = _firstOrNull(
+      _withoutPerson(_childrenOfPerson(childrenByParent, global, child4), viewer),
+      0,
+    );
 
-    _putIfPerson(visible, kGrandchild1, gc1);
-    _putIfPerson(visible, kGrandchild2, gc2);
-    _putIfPerson(visible, kGrandchild3, gc3);
-    _putIfPerson(visible, kGrandchild4, gc4);
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kGrandchild1,
+      gc1,
+      viewer: viewer,
+    );
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kGrandchild2,
+      gc2,
+      viewer: viewer,
+    );
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kGrandchild3,
+      gc3,
+      viewer: viewer,
+    );
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kGrandchild4,
+      gc4,
+      viewer: viewer,
+    );
 
-    final ggc1 =
-        _firstOrNull(_childrenOfPerson(childrenByParent, global, gc1), 0);
-    final ggc2 =
-        _firstOrNull(_childrenOfPerson(childrenByParent, global, gc2), 0);
-    final ggc3 =
-        _firstOrNull(_childrenOfPerson(childrenByParent, global, gc3), 0);
-    final ggc4 =
-        _firstOrNull(_childrenOfPerson(childrenByParent, global, gc4), 0);
+    final ggc1 = _firstOrNull(
+      _withoutPerson(_childrenOfPerson(childrenByParent, global, gc1), viewer),
+      0,
+    );
+    final ggc2 = _firstOrNull(
+      _withoutPerson(_childrenOfPerson(childrenByParent, global, gc2), viewer),
+      0,
+    );
+    final ggc3 = _firstOrNull(
+      _withoutPerson(_childrenOfPerson(childrenByParent, global, gc3), viewer),
+      0,
+    );
+    final ggc4 = _firstOrNull(
+      _withoutPerson(_childrenOfPerson(childrenByParent, global, gc4), viewer),
+      0,
+    );
 
-    _putIfPerson(visible, kGreatGrandchild1, ggc1);
-    _putIfPerson(visible, kGreatGrandchild2, ggc2);
-    _putIfPerson(visible, kGreatGrandchild3, ggc3);
-    _putIfPerson(visible, kGreatGrandchild4, ggc4);
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kGreatGrandchild1,
+      ggc1,
+      viewer: viewer,
+    );
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kGreatGrandchild2,
+      ggc2,
+      viewer: viewer,
+    );
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kGreatGrandchild3,
+      ggc3,
+      viewer: viewer,
+    );
+    _putIfPersonIfMissingAndUnique(
+      visible,
+      kGreatGrandchild4,
+      ggc4,
+      viewer: viewer,
+    );
 
-    return visible;
+    const fallbackSlots = <String>[
+      kMaternalGmMother,
+      kMaternalGmFather,
+      kMaternalGfMother,
+      kMaternalGfFather,
+      kPaternalGmMother,
+      kPaternalGmFather,
+      kPaternalGfMother,
+      kPaternalGfFather,
+      kMaternalGm,
+      kMaternalGf,
+      kPaternalGm,
+      kPaternalGf,
+      kMother,
+      kFather,
+      kSpouse1,
+      kSibling1,
+      kSibling2,
+      kSibling3,
+      kChild1,
+      kChild2,
+      kChild3,
+      kChild4,
+      kGrandchild1,
+      kGrandchild2,
+      kGrandchild3,
+      kGrandchild4,
+      kGreatGrandchild1,
+      kGreatGrandchild2,
+      kGreatGrandchild3,
+      kGreatGrandchild4,
+    ];
+
+    for (final slotKey in fallbackSlots) {
+      _putSlotFromGlobalIfMissing(
+        visible,
+        global,
+        slotKey,
+        viewer: viewer,
+      );
+    }
+
+    return _normalizeVisibleSlots(visible, viewer: viewer);
   }
 
   Future<void> _openYourVaultFallback() async {
@@ -1666,32 +2015,52 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                         );
                       }
 
+                      String createdLegacyId = '';
+
                       if (anchorRef == null) {
-                        throw Exception(
-                          'No valid anchor exists yet for slot $slotKey. '
-                          'This exact great-grandparent slot also needs to be added '
-                          'to your database slot_key check before slot-only creation can work.',
+                        final uid = _supabase.auth.currentUser?.id;
+                        if (uid == null || uid.trim().isEmpty) {
+                          throw Exception('You must be signed in to create a legacy relative.');
+                        }
+
+                        final inserted = await _supabase
+                            .from('legacy_family_members')
+                            .insert({
+                              'family_id': widget.familyId,
+                              'slot_key': slotKey,
+                              'name': name,
+                              'display_name':
+                                  displayName.isEmpty ? null : displayName,
+                              'birth_year': birthYear,
+                              'death_year': deathYear,
+                              'created_by': uid,
+                              'about_me_text': about.isEmpty ? null : about,
+                            })
+                            .select('id')
+                            .maybeSingle();
+
+                        createdLegacyId =
+                            (inserted?['id'] ?? '').toString().trim();
+                      } else {
+                        final legacyId = await _supabase.rpc(
+                          'create_legacy_relative',
+                          params: {
+                            'p_family_id': widget.familyId,
+                            'p_anchor_type': anchorRef.nodeType,
+                            'p_anchor_id': anchorRef.nodeId,
+                            'p_relation': relation,
+                            'p_name': name,
+                            'p_display_name':
+                                displayName.isEmpty ? null : displayName,
+                            'p_birth_year': birthYear,
+                            'p_death_year': deathYear,
+                            'p_about_me_text': about.isEmpty ? null : about,
+                          },
                         );
+
+                        createdLegacyId =
+                            (legacyId ?? '').toString().trim();
                       }
-
-                      final legacyId = await _supabase.rpc(
-                        'create_legacy_relative',
-                        params: {
-                          'p_family_id': widget.familyId,
-                          'p_anchor_type': anchorRef.nodeType,
-                          'p_anchor_id': anchorRef.nodeId,
-                          'p_relation': relation,
-                          'p_name': name,
-                          'p_display_name':
-                              displayName.isEmpty ? null : displayName,
-                          'p_birth_year': birthYear,
-                          'p_death_year': deathYear,
-                          'p_about_me_text': about.isEmpty ? null : about,
-                        },
-                      );
-
-                      final createdLegacyId =
-                          (legacyId ?? '').toString().trim();
 
                       if (createdLegacyId.isEmpty) {
                         throw Exception('Failed to create legacy relative');
@@ -1711,9 +2080,16 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                         errorText = e.message;
                       });
                     } catch (e) {
+                      var message = e.toString();
+                      if (e is PostgrestException &&
+                          e.message.contains('slot_key_check')) {
+                        message =
+                            'This slot key is not allowed yet by the database constraint. Run the slot-key migration for legacy_family_members and family_invites, then try again.';
+                      }
+
                       setInner(() {
                         saving = false;
-                        errorText = e.toString();
+                        errorText = message;
                       });
                     }
                   },
