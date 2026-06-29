@@ -676,8 +676,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
       final anchorNode = _nodeRefFromPerson(anchorPerson);
 
-      // For slot-only ancestor entries like great-grandparents with no prior anchor,
-      // the exact slot still exists even if no relationship edge can be created yet.
       if (anchorNode == null || anchorNode.nodeId.trim().isEmpty) {
         return;
       }
@@ -964,15 +962,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     if (pa != pb) return pa.compareTo(pb);
 
     final na = (((a['display_name'] ?? '').toString().trim().isNotEmpty)
-            ? a['display_name']
-            : (a['name'] ?? ''))
-        .toString()
-        .toLowerCase();
+                ? a['display_name']
+                : (a['name'] ?? ''))
+            .toString()
+            .toLowerCase();
     final nb = (((b['display_name'] ?? '').toString().trim().isNotEmpty)
-            ? b['display_name']
-            : (b['name'] ?? ''))
-        .toString()
-        .toLowerCase();
+                ? b['display_name']
+                : (b['name'] ?? ''))
+            .toString()
+            .toLowerCase();
 
     return na.compareTo(nb);
   }
@@ -1195,20 +1193,31 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   }
 
   void _putSlotFromGlobalIfMissing(
-    Map<String, Map<String, dynamic>> target,
+    Map<String, Map<String, dynamic>> visible,
     Map<String, Map<String, dynamic>> global,
     String slotKey, {
-    Map<String, dynamic>? viewer,
+    required Map<String, dynamic> viewer,
   }) {
-    if (target.containsKey(slotKey)) return;
+    if (visible.containsKey(slotKey)) return;
 
     final person = global[slotKey];
     if (person == null) return;
 
-    if (_samePerson(person, viewer)) return;
-    if (_containsPerson(target, person)) return;
+    visible[slotKey] = {
+      ...person,
+      '__viewer_relation_slot': slotKey,
+      '__viewer_person_id': viewer['id'],
+    };
+  }
 
-    target[slotKey] = person;
+  void _putSlotFromGlobal(
+    Map<String, Map<String, dynamic>> target,
+    Map<String, Map<String, dynamic>> global,
+    String slotKey,
+  ) {
+    final person = global[slotKey];
+    if (person == null) return;
+    target.putIfAbsent(slotKey, () => person);
   }
 
   Map<String, dynamic>? _spouseForViewer(
@@ -1271,6 +1280,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
     return _sortedPeopleForDisplay(global, siblings);
   }
+
   Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
     final global = _slotToGlobalPersonMap(data);
     final viewer = _currentViewerPerson(data);
@@ -1406,13 +1416,15 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     );
 
     final maternalGm = _firstOrNull(parentAGrandparents, 0);
-    final maternalGf = _samePerson(_firstOrNull(parentAGrandparents, 1), maternalGm)
-        ? null
-        : _firstOrNull(parentAGrandparents, 1);
+    final maternalGf =
+        _samePerson(_firstOrNull(parentAGrandparents, 1), maternalGm)
+            ? null
+            : _firstOrNull(parentAGrandparents, 1);
     final paternalGm = _firstOrNull(parentBGrandparents, 0);
-    final paternalGf = _samePerson(_firstOrNull(parentBGrandparents, 1), paternalGm)
-        ? null
-        : _firstOrNull(parentBGrandparents, 1);
+    final paternalGf =
+        _samePerson(_firstOrNull(parentBGrandparents, 1), paternalGm)
+            ? null
+            : _firstOrNull(parentBGrandparents, 1);
 
     if (!visible.containsKey(kMaternalGm)) {
       _putIfPerson(visible, kMaternalGm, maternalGm);
@@ -1850,256 +1862,255 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     }
   }
 
-  
-
   Future<void> _showLegacyPredecessorDialog({
-  required String slotKey,
-  required String title,
-}) async {
-  final nameController = TextEditingController();
-  final displayNameController = TextEditingController();
-  final birthYearController = TextEditingController();
-  final deathYearController = TextEditingController();
-  final aboutController = TextEditingController();
+    required String slotKey,
+    required String title,
+  }) async {
+    final nameController = TextEditingController();
+    final displayNameController = TextEditingController();
+    final birthYearController = TextEditingController();
+    final deathYearController = TextEditingController();
+    final aboutController = TextEditingController();
 
-  String? errorText;
-  bool saving = false;
+    String? errorText;
+    bool saving = false;
 
-  int? parseYear(String raw) {
-    final t = raw.trim();
-    if (t.isEmpty) return null;
-    return int.tryParse(t);
-  }
+    int? parseYear(String raw) {
+      final t = raw.trim();
+      if (t.isEmpty) return null;
+      return int.tryParse(t);
+    }
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  await showDialog<void>(
-    context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setInner) => AlertDialog(
-        title: Text(_legacyDialogTitleForSlot(slotKey, title.toLowerCase())),
-        content: SizedBox(
-          width: 460,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _legacyDialogDescriptionForSlot(slotKey),
-                  style: TextStyle(color: Colors.black.withOpacity(0.65)),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: nameController,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Name *',
-                    border: OutlineInputBorder(),
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setInner) => AlertDialog(
+          title: Text(_legacyDialogTitleForSlot(slotKey, title.toLowerCase())),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _legacyDialogDescriptionForSlot(slotKey),
+                    style: TextStyle(color: Colors.black.withOpacity(0.65)),
                   ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: displayNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Display name (optional)',
-                    border: OutlineInputBorder(),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Name *',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: birthYearController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Birth year',
-                    border: OutlineInputBorder(),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: displayNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Display name (optional)',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: aboutController,
-                  minLines: 4,
-                  maxLines: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'About me / notes (optional)',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: birthYearController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Birth year',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  childrenPadding: EdgeInsets.zero,
-                  title: const Text(
-                    'Optional extra details',
-                    style:
-                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: aboutController,
+                    minLines: 4,
+                    maxLines: 8,
+                    decoration: const InputDecoration(
+                      labelText: 'About me / notes (optional)',
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                    ),
                   ),
-                  children: [
-                    TextField(
-                      controller: deathYearController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Death year (optional)',
-                        border: OutlineInputBorder(),
+                  const SizedBox(height: 10),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Optional extra details',
+                      style:
+                          TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    children: [
+                      TextField(
+                        controller: deathYearController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Death year (optional)',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Slot: $slotKey',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.black.withOpacity(0.55),
+                    ),
+                  ),
+                  if (errorText != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      errorText!,
+                      style: const TextStyle(color: Colors.red),
                     ),
                   ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Slot: $slotKey',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.black.withOpacity(0.55),
-                  ),
-                ),
-                if (errorText != null) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    errorText!,
-                    style: const TextStyle(color: Colors.red),
-                  ),
                 ],
-              ],
+              ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: saving ? null : () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: saving
-                ? null
-                : () async {
-                    final name = nameController.text.trim();
-                    final displayName = displayNameController.text.trim();
-                    final birthYear = parseYear(birthYearController.text);
-                    final deathYear = parseYear(deathYearController.text);
-                    final about = aboutController.text.trim();
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final name = nameController.text.trim();
+                      final displayName = displayNameController.text.trim();
+                      final birthYear = parseYear(birthYearController.text);
+                      final deathYear = parseYear(deathYearController.text);
+                      final about = aboutController.text.trim();
 
-                    if (name.isEmpty) {
-                      setInner(() => errorText = 'Name is required.');
-                      return;
-                    }
-
-                    if (birthYearController.text.trim().isNotEmpty &&
-                        birthYear == null) {
-                      setInner(() =>
-                          errorText = 'Birth year must be a valid number.');
-                      return;
-                    }
-
-                    if (deathYearController.text.trim().isNotEmpty &&
-                        deathYear == null) {
-                      setInner(() =>
-                          errorText = 'Death year must be a valid number.');
-                      return;
-                    }
-
-                    setInner(() {
-                      saving = true;
-                      errorText = null;
-                    });
-
-                    try {
-                      final relation = _legacyRelationForSlot(slotKey);
-                      final anchorPerson = _legacyAnchorPersonForSlot(slotKey);
-                      final anchorRef = _nodeRefFromPerson(anchorPerson);
-
-                      if (relation == null) {
-                        throw Exception(
-                          'Unsupported legacy relationship for slot: $slotKey',
-                        );
+                      if (name.isEmpty) {
+                        setInner(() => errorText = 'Name is required.');
+                        return;
                       }
 
-                      String createdLegacyId = '';
+                      if (birthYearController.text.trim().isNotEmpty &&
+                          birthYear == null) {
+                        setInner(() =>
+                            errorText = 'Birth year must be a valid number.');
+                        return;
+                      }
 
-                      if (anchorRef == null) {
-                        final uid = _supabase.auth.currentUser?.id;
-                        if (uid == null || uid.trim().isEmpty) {
-                          throw Exception('You must be signed in to create a legacy relative.');
+                      if (deathYearController.text.trim().isNotEmpty &&
+                          deathYear == null) {
+                        setInner(() =>
+                            errorText = 'Death year must be a valid number.');
+                        return;
+                      }
+
+                      setInner(() {
+                        saving = true;
+                        errorText = null;
+                      });
+
+                      try {
+                        final relation = _legacyRelationForSlot(slotKey);
+                        final anchorPerson = _legacyAnchorPersonForSlot(slotKey);
+                        final anchorRef = _nodeRefFromPerson(anchorPerson);
+
+                        if (relation == null) {
+                          throw Exception(
+                            'Unsupported legacy relationship for slot: $slotKey',
+                          );
                         }
 
-                        final inserted = await _supabase
-                            .from('legacy_family_members')
-                            .insert({
-                              'family_id': widget.familyId,
-                              'slot_key': slotKey,
-                              'name': name,
-                              'display_name':
+                        String createdLegacyId = '';
+
+                        if (anchorRef == null) {
+                          final uid = _supabase.auth.currentUser?.id;
+                          if (uid == null || uid.trim().isEmpty) {
+                            throw Exception(
+                              'You must be signed in to create a legacy relative.',
+                            );
+                          }
+
+                          final inserted = await _supabase
+                              .from('legacy_family_members')
+                              .insert({
+                                'family_id': widget.familyId,
+                                'slot_key': slotKey,
+                                'name': name,
+                                'display_name':
+                                    displayName.isEmpty ? null : displayName,
+                                'birth_year': birthYear,
+                                'death_year': deathYear,
+                                'created_by': uid,
+                                'about_me_text': about.isEmpty ? null : about,
+                              })
+                              .select('id')
+                              .maybeSingle();
+
+                          createdLegacyId =
+                              (inserted?['id'] ?? '').toString().trim();
+                        } else {
+                          final legacyId = await _supabase.rpc(
+                            'create_legacy_relative',
+                            params: {
+                              'p_family_id': widget.familyId,
+                              'p_anchor_type': anchorRef.nodeType,
+                              'p_anchor_id': anchorRef.nodeId,
+                              'p_relation': relation,
+                              'p_name': name,
+                              'p_display_name':
                                   displayName.isEmpty ? null : displayName,
-                              'birth_year': birthYear,
-                              'death_year': deathYear,
-                              'created_by': uid,
-                              'about_me_text': about.isEmpty ? null : about,
-                            })
-                            .select('id')
-                            .maybeSingle();
+                              'p_birth_year': birthYear,
+                              'p_death_year': deathYear,
+                              'p_about_me_text': about.isEmpty ? null : about,
+                            },
+                          );
 
-                        createdLegacyId =
-                            (inserted?['id'] ?? '').toString().trim();
-                      } else {
-                        final legacyId = await _supabase.rpc(
-                          'create_legacy_relative',
-                          params: {
-                            'p_family_id': widget.familyId,
-                            'p_anchor_type': anchorRef.nodeType,
-                            'p_anchor_id': anchorRef.nodeId,
-                            'p_relation': relation,
-                            'p_name': name,
-                            'p_display_name':
-                                displayName.isEmpty ? null : displayName,
-                            'p_birth_year': birthYear,
-                            'p_death_year': deathYear,
-                            'p_about_me_text': about.isEmpty ? null : about,
-                          },
+                          createdLegacyId = (legacyId ?? '').toString().trim();
+                        }
+
+                        if (createdLegacyId.isEmpty) {
+                          throw Exception('Failed to create legacy relative');
+                        }
+
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx);
+                        _refresh();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('$title added to the family tree.'),
+                          ),
                         );
+                      } on PostgrestException catch (e) {
+                        setInner(() {
+                          saving = false;
+                          errorText = e.message;
+                        });
+                      } catch (e) {
+                        var message = e.toString();
+                        if (e is PostgrestException &&
+                            e.message.contains('slot_key_check')) {
+                          message =
+                              'This slot key is not allowed yet by the database constraint. Run the slot-key migration for legacy_family_members and family_invites, then try again.';
+                        }
 
-                        createdLegacyId =
-                            (legacyId ?? '').toString().trim();
+                        setInner(() {
+                          saving = false;
+                          errorText = message;
+                        });
                       }
-
-                      if (createdLegacyId.isEmpty) {
-                        throw Exception('Failed to create legacy relative');
-                      }
-
-                      if (!ctx.mounted) return;
-                      Navigator.pop(ctx);
-                      _refresh();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('$title added to the family tree.'),
-                        ),
-                      );
-                    } on PostgrestException catch (e) {
-                      setInner(() {
-                        saving = false;
-                        errorText = e.message;
-                      });
-                    } catch (e) {
-                      var message = e.toString();
-                      if (e is PostgrestException &&
-                          e.message.contains('slot_key_check')) {
-                        message =
-                            'This slot key is not allowed yet by the database constraint. Run the slot-key migration for legacy_family_members and family_invites, then try again.';
-                      }
-
-                      setInner(() {
-                        saving = false;
-                        errorText = message;
-                      });
-                    }
-                  },
-            child: Text(saving ? 'Saving…' : 'Create'),
-          ),
-        ],
+                    },
+              child: Text(saving ? 'Saving…' : 'Create'),
+            ),
+          ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Future<void> _openPredecessorAddOptions({
     required String slotKey,
@@ -2363,8 +2374,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     return _PersonSlot(
       key: _keyFor(slotKey),
       filled: slotVault[slotKey],
-      avatarUrl: data.avatarUrlByVaultId[
-          (slotVault[slotKey]?['id'] ?? '').toString()],
+      avatarUrl:
+          data.avatarUrlByVaultId[(slotVault[slotKey]?['id'] ?? '').toString()],
       onInvite: () => _openPredecessorAddOptions(
         slotKey: slotKey,
         title: 'Great-grandparent',
@@ -2624,8 +2635,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kMaternalGm),
-                                                  filled:
-                                                      slotVault[kMaternalGm],
+                                                  filled: slotVault[kMaternalGm],
                                                   avatarUrl: data.avatarUrlByVaultId[
                                                       (slotVault[kMaternalGm]
                                                                   ?['id'] ??
@@ -2660,8 +2670,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kMaternalGf),
-                                                  filled:
-                                                      slotVault[kMaternalGf],
+                                                  filled: slotVault[kMaternalGf],
                                                   avatarUrl: data.avatarUrlByVaultId[
                                                       (slotVault[kMaternalGf]
                                                                   ?['id'] ??
@@ -2705,8 +2714,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kPaternalGm),
-                                                  filled:
-                                                      slotVault[kPaternalGm],
+                                                  filled: slotVault[kPaternalGm],
                                                   avatarUrl: data.avatarUrlByVaultId[
                                                       (slotVault[kPaternalGm]
                                                                   ?['id'] ??
@@ -2741,8 +2749,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kPaternalGf),
-                                                  filled:
-                                                      slotVault[kPaternalGf],
+                                                  filled: slotVault[kPaternalGf],
                                                   avatarUrl: data.avatarUrlByVaultId[
                                                       (slotVault[kPaternalGf]
                                                                   ?['id'] ??

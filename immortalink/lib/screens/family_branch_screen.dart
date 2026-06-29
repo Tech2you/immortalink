@@ -15,7 +15,6 @@ class FamilyBranchScreen extends StatefulWidget {
   final String rootSlotKey;
   final String direction; // 'ancestor' or 'descendant'
 
-  // Optional direct-node branch opening for perpetual lineage drilling
   final String? rootNodeType; // 'vault' or 'legacy'
   final String? rootNodeId;
 
@@ -39,9 +38,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   static const String _logoPath = 'assets/images/immortalink_logo.png';
   static const String _vaultAvatarBucket = 'avatars';
   static const String _legacyAvatarBucket = 'vault_photos';
-
-  static const int _maxAncestorDepth = 3;
-  static const int _maxDescendantDepth = 2;
 
   bool _loading = true;
   String? _error;
@@ -234,13 +230,10 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       if (slotKey.isEmpty) continue;
       if (replacedByVaultId.isNotEmpty) continue;
 
-      result.putIfAbsent(
-        slotKey,
-        () => {
-          ...legacy,
-          '__legacy': true,
-        },
-      );
+      result[slotKey] = {
+        ...legacy,
+        '__legacy': true,
+      };
     }
 
     return result;
@@ -280,6 +273,91 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   String _nodeKey(_NodeRef ref) => '${ref.type}:${ref.id}';
+
+  _NodeRef? _slotRef(String? slotKey) {
+    final normalized = (slotKey ?? '').trim();
+    if (normalized.isEmpty) return null;
+    final person = _slotToPersonMap()[normalized];
+    return _nodeRefFromPerson(person);
+  }
+
+ List<_NodeRef?> _refsForDisplaySlots({
+  required List<String?> slotKeys,
+  required List<_NodeRef> relatedRefs,
+}) {
+  final result = List<_NodeRef?>.filled(slotKeys.length, null);
+  final used = <String>{};
+
+  int nextOpenIndex() {
+    for (int i = 0; i < result.length; i++) {
+      if (result[i] == null) return i;
+    }
+    return -1;
+  }
+
+  // First priority: actual relationship-linked people for this branch.
+  for (final ref in relatedRefs) {
+    final key = _nodeKey(ref);
+    if (used.contains(key)) continue;
+
+    final hintedSlot = _slotHintForNode(ref);
+    final hintedIndex = slotKeys.indexOf(hintedSlot);
+
+    if (hintedIndex != -1 && result[hintedIndex] == null) {
+      result[hintedIndex] = ref;
+      used.add(key);
+    }
+  }
+
+  // Second priority: place remaining related people left-to-right in open slots.
+  for (final ref in relatedRefs) {
+    final key = _nodeKey(ref);
+    if (used.contains(key)) continue;
+
+    final openIndex = nextOpenIndex();
+    if (openIndex == -1) break;
+
+    result[openIndex] = ref;
+    used.add(key);
+  }
+
+  // Only if there are NO relationship-linked people at all do we fall back
+  // to slot-bound people.
+  if (relatedRefs.isEmpty) {
+    for (int i = 0; i < slotKeys.length; i++) {
+      final slotRef = _slotRef(slotKeys[i]);
+      if (slotRef != null) {
+        result[i] = slotRef;
+      }
+    }
+  }
+
+  return result;
+} 
+
+  List<_NodeRef?> _ancestorRefsForDisplay(
+    _NodeRef? childRef,
+    String? childSlotKey,
+  ) {
+    final slotKeys = _ancestorSlotKeysForNodeFromSlot(childSlotKey);
+    final relatedRefs = childRef == null ? <_NodeRef>[] : _parentsOf(childRef);
+    return _refsForDisplaySlots(
+      slotKeys: slotKeys,
+      relatedRefs: relatedRefs,
+    );
+  }
+
+  List<_NodeRef?> _descendantRefsForDisplay(
+    _NodeRef? parentRef,
+    String? parentSlotKey,
+  ) {
+    final slotKeys = _descendantSlotKeysForNodeFromSlot(parentSlotKey);
+    final relatedRefs = parentRef == null ? <_NodeRef>[] : _childrenOf(parentRef);
+    return _refsForDisplaySlots(
+      slotKeys: slotKeys,
+      relatedRefs: relatedRefs,
+    );
+  }
 
   String _slotHintForNode(_NodeRef ref) {
     final slotMap = _slotToPersonMap();
@@ -329,7 +407,23 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     final idx = ordered.indexOf(slot);
     return idx == -1 ? 999 : idx;
   }
+void _putSlotFromGlobalIfMissing(
+  Map<String, Map<String, dynamic>> visible,
+  Map<String, Map<String, dynamic>> global,
+  String slotKey, {
+  required Map<String, dynamic> viewer,
+}) {
+  if (visible.containsKey(slotKey)) return;
 
+  final person = global[slotKey];
+  if (person == null) return;
+
+  visible[slotKey] = {
+    ...person,
+    '__viewer_relation_slot': slotKey,
+    '__viewer_person_id': viewer['id'],
+  };
+}
   void _sortNodeRefs(List<_NodeRef> refs) {
     refs.sort((a, b) {
       final slotA = _slotHintForNode(a);
@@ -348,6 +442,63 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
       return nameA.compareTo(nameB);
     });
+  }
+
+
+  List<String?> _ancestorSlotKeysForNodeFromSlot(String? slot) {
+    switch ((slot ?? '').trim()) {
+      case 'mother':
+        return const ['maternal_gm', 'maternal_gf'];
+      case 'father':
+        return const ['paternal_gm', 'paternal_gf'];
+      case 'maternal_gm':
+        return const ['maternal_gm_mother', 'maternal_gm_father'];
+      case 'maternal_gf':
+        return const ['maternal_gf_mother', 'maternal_gf_father'];
+      case 'paternal_gm':
+        return const ['paternal_gm_mother', 'paternal_gm_father'];
+      case 'paternal_gf':
+        return const ['paternal_gf_mother', 'paternal_gf_father'];
+      default:
+        return const [null, null];
+    }
+  }
+
+  List<String?> _ancestorSlotKeysForNode(_NodeRef? nodeRef) {
+    final slot = nodeRef == null ? '' : _slotHintForNode(nodeRef);
+    return _ancestorSlotKeysForNodeFromSlot(slot);
+  }
+
+  List<String?> _descendantSlotKeysForNodeFromSlot(String? slot) {
+    switch ((slot ?? '').trim()) {
+      case 'child_1':
+      case 'child_2':
+      case 'child_3':
+      case 'child_4':
+        return const [
+          'grandchild_1',
+          'grandchild_2',
+          'grandchild_3',
+          'grandchild_4',
+        ];
+      case 'grandchild_1':
+      case 'grandchild_2':
+      case 'grandchild_3':
+      case 'grandchild_4':
+        return const [
+          'greatgrandchild_1',
+          'greatgrandchild_2',
+          'greatgrandchild_3',
+          'greatgrandchild_4',
+        ];
+      default:
+        return const [null, null, null, null];
+    }
+  }
+
+  List<String?> _descendantSlotKeysForNode(_NodeRef? nodeRef) {
+    final slot = nodeRef == null ? '' : _slotHintForNode(nodeRef);
+    return _descendantSlotKeysForNodeFromSlot(slot);
   }
 
   Future<void> _openPerson(Map<String, dynamic> person) async {
@@ -650,127 +801,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     return _avatarUrlByVaultId[id];
   }
 
-  _BranchConfig _buildBranchConfig() {
-    final isAncestor = widget.direction == 'ancestor';
-
-    if (isAncestor) {
-      switch (widget.rootSlotKey) {
-        case 'mother':
-          return const _BranchConfig(
-            title: 'Mother branch',
-            centerSlot: 'mother',
-            centerFallback: 'Mother',
-            primarySlots: [],
-            primaryLabels: [],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        case 'father':
-          return const _BranchConfig(
-            title: 'Father branch',
-            centerSlot: 'father',
-            centerFallback: 'Father',
-            primarySlots: [],
-            primaryLabels: [],
-            secondarySlots: [],
-            secondaryLabels: [],
-          );
-        default:
-          return _BranchConfig(
-            title: '${widget.rootLabel} branch',
-            centerSlot: widget.rootSlotKey,
-            centerFallback: widget.rootLabel,
-            primarySlots: const [],
-            primaryLabels: const [],
-            secondarySlots: const [],
-            secondaryLabels: const [],
-          );
-      }
-    }
-
-    switch (widget.rootSlotKey) {
-      case 'child_1':
-      case 'child_2':
-      case 'child_3':
-      case 'child_4':
-        return _BranchConfig(
-          title: 'Descendant branch',
-          centerSlot: widget.rootSlotKey,
-          centerFallback: 'Child',
-          primarySlots: const [
-            'grandchild_1',
-            'grandchild_2',
-            'grandchild_3',
-            'grandchild_4',
-          ],
-          primaryLabels: const [
-            'Grandchild',
-            'Grandchild',
-            'Grandchild',
-            'Grandchild',
-          ],
-          secondarySlots: const [
-            'greatgrandchild_1',
-            'greatgrandchild_2',
-            'greatgrandchild_3',
-            'greatgrandchild_4',
-          ],
-          secondaryLabels: const [
-            'Great-grandchild',
-            'Great-grandchild',
-            'Great-grandchild',
-            'Great-grandchild',
-          ],
-        );
-      case 'grandchild_1':
-      case 'grandchild_2':
-      case 'grandchild_3':
-      case 'grandchild_4':
-        return _BranchConfig(
-          title: 'Grandchild branch',
-          centerSlot: widget.rootSlotKey,
-          centerFallback: 'Grandchild',
-          primarySlots: const [
-            'greatgrandchild_1',
-            'greatgrandchild_2',
-            'greatgrandchild_3',
-            'greatgrandchild_4',
-          ],
-          primaryLabels: const [
-            'Great-grandchild',
-            'Great-grandchild',
-            'Great-grandchild',
-            'Great-grandchild',
-          ],
-          secondarySlots: const [],
-          secondaryLabels: const [],
-        );
-      case 'greatgrandchild_1':
-      case 'greatgrandchild_2':
-      case 'greatgrandchild_3':
-      case 'greatgrandchild_4':
-        return _BranchConfig(
-          title: 'Great-grandchild branch',
-          centerSlot: widget.rootSlotKey,
-          centerFallback: 'Great-grandchild',
-          primarySlots: const [],
-          primaryLabels: const [],
-          secondarySlots: const [],
-          secondaryLabels: const [],
-        );
-      default:
-        return _BranchConfig(
-          title: widget.rootLabel,
-          centerSlot: widget.rootSlotKey,
-          centerFallback: widget.rootLabel,
-          primarySlots: const [],
-          primaryLabels: const [],
-          secondarySlots: const [],
-          secondaryLabels: const [],
-        );
-    }
-  }
-
   _NodeRef? _rootNodeRefFromSlot() {
     final slotMap = _slotToPersonMap();
     final person = slotMap[widget.rootSlotKey];
@@ -798,7 +828,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       final parentType = (row['parent_type'] ?? '').toString().trim();
       final parentId = (row['parent_id'] ?? '').toString().trim();
       if (parentType.isEmpty || parentId.isEmpty) continue;
-
       if (parentType == 'invite') continue;
 
       final ref = _NodeRef(type: parentType, id: parentId);
@@ -824,7 +853,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       final childType = (row['child_type'] ?? '').toString().trim();
       final childId = (row['child_id'] ?? '').toString().trim();
       if (childType.isEmpty || childId.isEmpty) continue;
-
       if (childType == 'invite') continue;
 
       final ref = _NodeRef(type: childType, id: childId);
@@ -836,310 +864,159 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     return refs;
   }
 
-  List<List<_NodeRef?>> _slotFallbackGroupsForBranch() {
-    final slotMap = _slotToPersonMap();
+  Future<_AncestorViewModel> _buildAncestorViewModel() async {
+  final explicitRoot = _explicitRootNodeRef();
 
-    List<List<String>> slotGroups;
-    switch (widget.rootSlotKey) {
-      case 'mother':
-        slotGroups = const [
-          ['maternal_gm', 'maternal_gf'],
-          [
-            'maternal_gm_mother',
-            'maternal_gm_father',
-            'maternal_gf_mother',
-            'maternal_gf_father',
-          ],
-        ];
-        break;
-      case 'father':
-        slotGroups = const [
-          ['paternal_gm', 'paternal_gf'],
-          [
-            'paternal_gm_mother',
-            'paternal_gm_father',
-            'paternal_gf_mother',
-            'paternal_gf_father',
-          ],
-        ];
-        break;
-      case 'maternal_gm':
-        slotGroups = const [
-          ['maternal_gm_mother', 'maternal_gm_father'],
-        ];
-        break;
-      case 'maternal_gf':
-        slotGroups = const [
-          ['maternal_gf_mother', 'maternal_gf_father'],
-        ];
-        break;
-      case 'paternal_gm':
-        slotGroups = const [
-          ['paternal_gm_mother', 'paternal_gm_father'],
-        ];
-        break;
-      case 'paternal_gf':
-        slotGroups = const [
-          ['paternal_gf_mother', 'paternal_gf_father'],
-        ];
-        break;
-      default:
-        slotGroups = const [];
-    }
+  _NodeRef? focusRef;
+  String focusFallback = widget.rootLabel;
 
-    final groups = <List<_NodeRef?>>[];
-    for (final group in slotGroups) {
-      groups.add(
-        group.map((slot) => _nodeRefFromPerson(slotMap[slot])).toList(),
+  if (explicitRoot != null) {
+    focusRef = explicitRoot;
+  } else {
+    focusRef = _rootNodeRefFromSlot();
+  }
+
+  final focusPerson = focusRef == null ? null : _personForNode(focusRef);
+  final generations = <_AncestorGeneration>[];
+
+  final firstGenSlotKeys =
+      _ancestorSlotKeysForNodeFromSlot(widget.rootSlotKey);
+  final firstGenRefs = _ancestorRefsForDisplay(
+    focusRef,
+    widget.rootSlotKey,
+  );
+
+  if (firstGenSlotKeys.isNotEmpty) {
+    generations.add(
+      _AncestorGeneration(
+        depth: 1,
+        nodes: List.generate(firstGenSlotKeys.length, (index) {
+          final ref = index < firstGenRefs.length ? firstGenRefs[index] : null;
+          return _AncestorBranchNode(
+            ref: ref,
+            childRefForAdd: focusRef,
+            slotKeyForAdd: firstGenSlotKeys[index],
+          );
+        }),
+      ),
+    );
+  }
+
+  final secondGenNodes = <_AncestorBranchNode>[];
+  for (int firstIndex = 0; firstIndex < firstGenSlotKeys.length; firstIndex++) {
+    final firstGenRef =
+        firstIndex < firstGenRefs.length ? firstGenRefs[firstIndex] : null;
+    final firstGenSlotKey = firstGenSlotKeys[firstIndex];
+    final parentSlots = _ancestorSlotKeysForNodeFromSlot(firstGenSlotKey);
+    final parentRefs = _ancestorRefsForDisplay(
+      firstGenRef,
+      firstGenSlotKey,
+    );
+
+    for (int i = 0; i < parentSlots.length; i++) {
+      final ref = i < parentRefs.length ? parentRefs[i] : null;
+      secondGenNodes.add(
+        _AncestorBranchNode(
+          ref: ref,
+          childRefForAdd: firstGenRef,
+          slotKeyForAdd: parentSlots[i],
+        ),
       );
     }
-    return groups;
   }
 
-  Future<_AncestorViewModel> _buildAncestorViewModel() async {
-    final explicitRoot = _explicitRootNodeRef();
-    final slotMap = _slotToPersonMap();
-
-    _NodeRef? focusRef;
-    String focusFallback = widget.rootLabel;
-
-    if (explicitRoot != null) {
-      focusRef = explicitRoot;
-      focusFallback = widget.rootLabel;
-    } else {
-      focusRef = _rootNodeRefFromSlot();
-      focusFallback = widget.rootLabel;
-    }
-
-    final focusPerson = focusRef == null ? null : _personForNode(focusRef);
-    final generations = <_AncestorGeneration>[];
-
-    List<_AncestorBranchNode> generationFromSlots(List<String> slots) {
-      return slots
-          .map(
-            (slot) => _AncestorBranchNode(
-              ref: _nodeRefFromPerson(slotMap[slot]),
-              childRefForAdd: focusRef,
-              slotKeyForAdd: slot,
-            ),
-          )
-          .toList();
-    }
-
-    switch (widget.rootSlotKey) {
-      case 'mother':
-        generations.add(
-          _AncestorGeneration(
-            depth: 1,
-            nodes: generationFromSlots([
-              'maternal_gm',
-              'maternal_gf',
-            ]),
-          ),
-        );
-        generations.add(
-          _AncestorGeneration(
-            depth: 2,
-            nodes: generationFromSlots([
-              'maternal_gm_mother',
-              'maternal_gm_father',
-              'maternal_gf_mother',
-              'maternal_gf_father',
-            ]),
-          ),
-        );
-        break;
-
-      case 'father':
-        generations.add(
-          _AncestorGeneration(
-            depth: 1,
-            nodes: generationFromSlots([
-              'paternal_gm',
-              'paternal_gf',
-            ]),
-          ),
-        );
-        generations.add(
-          _AncestorGeneration(
-            depth: 2,
-            nodes: generationFromSlots([
-              'paternal_gm_mother',
-              'paternal_gm_father',
-              'paternal_gf_mother',
-              'paternal_gf_father',
-            ]),
-          ),
-        );
-        break;
-
-      case 'maternal_gm':
-        generations.add(
-          _AncestorGeneration(
-            depth: 1,
-            nodes: generationFromSlots([
-              'maternal_gm_mother',
-              'maternal_gm_father',
-            ]),
-          ),
-        );
-        break;
-
-      case 'maternal_gf':
-        generations.add(
-          _AncestorGeneration(
-            depth: 1,
-            nodes: generationFromSlots([
-              'maternal_gf_mother',
-              'maternal_gf_father',
-            ]),
-          ),
-        );
-        break;
-
-      case 'paternal_gm':
-        generations.add(
-          _AncestorGeneration(
-            depth: 1,
-            nodes: generationFromSlots([
-              'paternal_gm_mother',
-              'paternal_gm_father',
-            ]),
-          ),
-        );
-        break;
-
-      case 'paternal_gf':
-        generations.add(
-          _AncestorGeneration(
-            depth: 1,
-            nodes: generationFromSlots([
-              'paternal_gf_mother',
-              'paternal_gf_father',
-            ]),
-          ),
-        );
-        break;
-
-      default:
-        final fallbackGroups = _slotFallbackGroupsForBranch();
-        for (int i = 0; i < fallbackGroups.length; i++) {
-          final nodes = <_AncestorBranchNode>[];
-          for (final ref in fallbackGroups[i]) {
-            nodes.add(
-              _AncestorBranchNode(
-                ref: ref,
-                childRefForAdd: focusRef,
-                slotKeyForAdd: null,
-              ),
-            );
-          }
-          generations.add(
-            _AncestorGeneration(
-              depth: i + 1,
-              nodes: nodes,
-            ),
-          );
-        }
-        break;
-    }
-
-    return _AncestorViewModel(
-      focusPerson: focusPerson,
-      focusFallback: focusFallback,
-      generations: generations,
+  if (secondGenNodes.isNotEmpty) {
+    generations.add(
+      _AncestorGeneration(
+        depth: 2,
+        nodes: secondGenNodes,
+      ),
     );
   }
+
+  return _AncestorViewModel(
+    focusPerson: focusPerson,
+    focusFallback: focusFallback,
+    generations: generations,
+  );
+}
 
   Future<_DescendantViewModel> _buildDescendantViewModel() async {
-    final explicitRoot = _explicitRootNodeRef();
-    final slotMap = _slotToPersonMap();
+  final explicitRoot = _explicitRootNodeRef();
 
-    _NodeRef? focusRef;
-    String focusFallback = widget.rootLabel;
+  _NodeRef? focusRef;
+  String focusFallback = widget.rootLabel;
 
-    if (explicitRoot != null) {
-      focusRef = explicitRoot;
-      focusFallback = widget.rootLabel;
-    } else {
-      final slotRoot = _rootNodeRefFromSlot();
-      if (slotRoot != null) {
-        focusRef = slotRoot;
-        focusFallback = widget.rootLabel;
-      }
-    }
+  if (explicitRoot != null) {
+    focusRef = explicitRoot;
+  } else {
+    focusRef = _rootNodeRefFromSlot();
+  }
 
-    final focusPerson = focusRef == null ? null : _personForNode(focusRef);
-    final generations = <_DescendantGeneration>[];
+  final focusPerson = focusRef == null ? null : _personForNode(focusRef);
+  final generations = <_DescendantGeneration>[];
 
-    List<_DescendantBranchNode> generationFromSlots(List<String> slots) {
-      return slots
-          .map(
-            (slot) => _DescendantBranchNode(
-              ref: _nodeRefFromPerson(slotMap[slot]),
-              parentRefForAdd: focusRef,
-              slotKeyForAdd: slot,
-            ),
-          )
-          .toList();
-    }
+  final firstGenSlotKeys =
+      _descendantSlotKeysForNodeFromSlot(widget.rootSlotKey);
+  final firstGenRefs = _descendantRefsForDisplay(
+    focusRef,
+    widget.rootSlotKey,
+  );
 
-    switch (widget.rootSlotKey) {
-      case 'child_1':
-      case 'child_2':
-      case 'child_3':
-      case 'child_4':
-        generations.add(
-          _DescendantGeneration(
-            depth: 1,
-            nodes: generationFromSlots([
-              'grandchild_1',
-              'grandchild_2',
-              'grandchild_3',
-              'grandchild_4',
-            ]),
-          ),
-        );
-        generations.add(
-          _DescendantGeneration(
-            depth: 2,
-            nodes: generationFromSlots([
-              'greatgrandchild_1',
-              'greatgrandchild_2',
-              'greatgrandchild_3',
-              'greatgrandchild_4',
-            ]),
-          ),
-        );
-        break;
-
-      case 'grandchild_1':
-      case 'grandchild_2':
-      case 'grandchild_3':
-      case 'grandchild_4':
-        generations.add(
-          _DescendantGeneration(
-            depth: 1,
-            nodes: generationFromSlots([
-              'greatgrandchild_1',
-              'greatgrandchild_2',
-              'greatgrandchild_3',
-              'greatgrandchild_4',
-            ]),
-          ),
-        );
-        break;
-
-      default:
-        break;
-    }
-
-    return _DescendantViewModel(
-      focusPerson: focusPerson,
-      focusFallback: focusFallback,
-      generations: generations,
+  if (firstGenSlotKeys.isNotEmpty) {
+    generations.add(
+      _DescendantGeneration(
+        depth: 1,
+        nodes: List.generate(firstGenSlotKeys.length, (index) {
+          final ref = index < firstGenRefs.length ? firstGenRefs[index] : null;
+          return _DescendantBranchNode(
+            ref: ref,
+            parentRefForAdd: focusRef,
+            slotKeyForAdd: firstGenSlotKeys[index],
+          );
+        }),
+      ),
     );
   }
+
+  final secondGenNodes = <_DescendantBranchNode>[];
+  for (int firstIndex = 0; firstIndex < firstGenSlotKeys.length; firstIndex++) {
+    final firstGenRef =
+        firstIndex < firstGenRefs.length ? firstGenRefs[firstIndex] : null;
+    final firstGenSlotKey = firstGenSlotKeys[firstIndex];
+    final childSlots = _descendantSlotKeysForNodeFromSlot(firstGenSlotKey);
+    final childRefs = _descendantRefsForDisplay(
+      firstGenRef,
+      firstGenSlotKey,
+    );
+
+    for (int i = 0; i < childSlots.length; i++) {
+      final ref = i < childRefs.length ? childRefs[i] : null;
+      secondGenNodes.add(
+        _DescendantBranchNode(
+          ref: ref,
+          parentRefForAdd: firstGenRef,
+          slotKeyForAdd: childSlots[i],
+        ),
+      );
+    }
+  }
+
+  if (secondGenNodes.isNotEmpty) {
+    generations.add(
+      _DescendantGeneration(
+        depth: 2,
+        nodes: secondGenNodes,
+      ),
+    );
+  }
+
+  return _DescendantViewModel(
+    focusPerson: focusPerson,
+    focusFallback: focusFallback,
+    generations: generations,
+  );
+}
 
   String _generationTitle(int depth) {
     if (depth == 1) return 'One generation further back';
@@ -1197,9 +1074,9 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Future<void> _createAncestorInvite({
-    required _NodeRef childRef,
+    _NodeRef? childRef,
     required String title,
-    required String slotKey,
+    String? slotKey,
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
@@ -1239,9 +1116,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
           final msg = e.message.toLowerCase();
           final duplicate =
               e.code == '23505' || msg.contains('duplicate key value');
-          if (duplicate) {
-            continue;
-          }
+          if (duplicate) continue;
           rethrow;
         }
       }
@@ -1250,14 +1125,16 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         throw Exception('Invite creation failed after multiple retries.');
       }
 
-      await _supabase.from('family_relationships').insert({
-        'family_id': widget.familyId,
-        'parent_type': 'invite',
-        'parent_id': inviteId,
-        'child_type': childRef.type,
-        'child_id': childRef.id,
-        'relationship_kind': 'parent_child',
-      });
+      if (childRef != null) {
+        await _supabase.from('family_relationships').insert({
+          'family_id': widget.familyId,
+          'parent_type': 'invite',
+          'parent_id': inviteId,
+          'child_type': childRef.type,
+          'child_id': childRef.id,
+          'relationship_kind': 'parent_child',
+        });
+      }
 
       if (!mounted) return;
 
@@ -1299,9 +1176,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
               child: const Text('Copy'),
             ),
             TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-              },
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('OK'),
             ),
           ],
@@ -1318,9 +1193,9 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Future<void> _createDescendantInvite({
-    required _NodeRef parentRef,
+    _NodeRef? parentRef,
     required String title,
-    required String slotKey,
+    String? slotKey,
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
@@ -1360,9 +1235,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
           final msg = e.message.toLowerCase();
           final duplicate =
               e.code == '23505' || msg.contains('duplicate key value');
-          if (duplicate) {
-            continue;
-          }
+          if (duplicate) continue;
           rethrow;
         }
       }
@@ -1371,14 +1244,16 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         throw Exception('Invite creation failed after multiple retries.');
       }
 
-      await _supabase.from('family_relationships').insert({
-        'family_id': widget.familyId,
-        'parent_type': parentRef.type,
-        'parent_id': parentRef.id,
-        'child_type': 'invite',
-        'child_id': inviteId,
-        'relationship_kind': 'parent_child',
-      });
+      if (parentRef != null) {
+        await _supabase.from('family_relationships').insert({
+          'family_id': widget.familyId,
+          'parent_type': parentRef.type,
+          'parent_id': parentRef.id,
+          'child_type': 'invite',
+          'child_id': inviteId,
+          'relationship_kind': 'parent_child',
+        });
+      }
 
       if (!mounted) return;
 
@@ -1420,9 +1295,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
               child: const Text('Copy'),
             ),
             TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-              },
+              onPressed: () => Navigator.pop(ctx),
               child: const Text('OK'),
             ),
           ],
@@ -1439,8 +1312,9 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Future<void> _showLegacyAncestorDialog({
-    required _NodeRef childRef,
+    _NodeRef? childRef,
     required String title,
+    String? slotKey,
   }) async {
     final nameController = TextEditingController();
     final displayNameController = TextEditingController();
@@ -1582,24 +1456,64 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                       });
 
                       try {
-                        final legacyId = await _supabase.rpc(
-                          'create_legacy_relative',
-                          params: {
-                            'p_family_id': widget.familyId,
-                            'p_anchor_type': childRef.type,
-                            'p_anchor_id': childRef.id,
-                            'p_relation': 'parent',
-                            'p_name': name,
-                            'p_display_name':
-                                displayName.isEmpty ? null : displayName,
-                            'p_birth_year': birthYear,
-                            'p_death_year': deathYear,
-                            'p_about_me_text': about.isEmpty ? null : about,
-                          },
-                        );
+                        String createdLegacyId = '';
 
-                        final createdLegacyId =
-                            (legacyId ?? '').toString().trim();
+                        if (childRef == null) {
+                          final uid = _supabase.auth.currentUser?.id;
+                          if (uid == null || uid.trim().isEmpty) {
+                            throw Exception(
+                              'You must be signed in to create a legacy ancestor.',
+                            );
+                          }
+
+                          final inserted = await _supabase
+                              .from('legacy_family_members')
+                              .insert({
+                                'family_id': widget.familyId,
+                                'slot_key': slotKey,
+                                'name': name,
+                                'display_name':
+                                    displayName.isEmpty ? null : displayName,
+                                'birth_year': birthYear,
+                                'death_year': deathYear,
+                                'created_by': uid,
+                                'about_me_text': about.isEmpty ? null : about,
+                              })
+                              .select('id')
+                              .maybeSingle();
+
+                          createdLegacyId =
+                              (inserted?['id'] ?? '').toString().trim();
+                        } else {
+                          final legacyId = await _supabase.rpc(
+                            'create_legacy_relative',
+                            params: {
+                              'p_family_id': widget.familyId,
+                              'p_anchor_type': childRef.type,
+                              'p_anchor_id': childRef.id,
+                              'p_relation': 'parent',
+                              'p_name': name,
+                              'p_display_name':
+                                  displayName.isEmpty ? null : displayName,
+                              'p_birth_year': birthYear,
+                              'p_death_year': deathYear,
+                              'p_about_me_text': about.isEmpty ? null : about,
+                            },
+                          );
+
+                          createdLegacyId =
+                              (legacyId ?? '').toString().trim();
+
+                          if (createdLegacyId.isNotEmpty &&
+                              slotKey != null &&
+                              slotKey.trim().isNotEmpty) {
+                            await _supabase
+                                .from('legacy_family_members')
+                                .update({'slot_key': slotKey})
+                                .eq('id', createdLegacyId);
+                          }
+                        }
+
                         if (createdLegacyId.isEmpty) {
                           throw Exception('Failed to create legacy ancestor.');
                         }
@@ -1632,8 +1546,9 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Future<void> _showLegacyDescendantDialog({
-    required _NodeRef parentRef,
+    _NodeRef? parentRef,
     required String title,
+    String? slotKey,
   }) async {
     final nameController = TextEditingController();
     final displayNameController = TextEditingController();
@@ -1775,26 +1690,68 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                       });
 
                       try {
-                        final legacyId = await _supabase.rpc(
-                          'create_legacy_relative',
-                          params: {
-                            'p_family_id': widget.familyId,
-                            'p_anchor_type': parentRef.type,
-                            'p_anchor_id': parentRef.id,
-                            'p_relation': 'child',
-                            'p_name': name,
-                            'p_display_name':
-                                displayName.isEmpty ? null : displayName,
-                            'p_birth_year': birthYear,
-                            'p_death_year': deathYear,
-                            'p_about_me_text': about.isEmpty ? null : about,
-                          },
-                        );
+                        String createdLegacyId = '';
 
-                        final createdLegacyId =
-                            (legacyId ?? '').toString().trim();
+                        if (parentRef == null) {
+                          final uid = _supabase.auth.currentUser?.id;
+                          if (uid == null || uid.trim().isEmpty) {
+                            throw Exception(
+                              'You must be signed in to create a legacy descendant.',
+                            );
+                          }
+
+                          final inserted = await _supabase
+                              .from('legacy_family_members')
+                              .insert({
+                                'family_id': widget.familyId,
+                                'slot_key': slotKey,
+                                'name': name,
+                                'display_name':
+                                    displayName.isEmpty ? null : displayName,
+                                'birth_year': birthYear,
+                                'death_year': deathYear,
+                                'created_by': uid,
+                                'about_me_text': about.isEmpty ? null : about,
+                              })
+                              .select('id')
+                              .maybeSingle();
+
+                          createdLegacyId =
+                              (inserted?['id'] ?? '').toString().trim();
+                        } else {
+                          final legacyId = await _supabase.rpc(
+                            'create_legacy_relative',
+                            params: {
+                              'p_family_id': widget.familyId,
+                              'p_anchor_type': parentRef.type,
+                              'p_anchor_id': parentRef.id,
+                              'p_relation': 'child',
+                              'p_name': name,
+                              'p_display_name':
+                                  displayName.isEmpty ? null : displayName,
+                              'p_birth_year': birthYear,
+                              'p_death_year': deathYear,
+                              'p_about_me_text': about.isEmpty ? null : about,
+                            },
+                          );
+
+                          createdLegacyId =
+                              (legacyId ?? '').toString().trim();
+
+                          if (createdLegacyId.isNotEmpty &&
+                              slotKey != null &&
+                              slotKey.trim().isNotEmpty) {
+                            await _supabase
+                                .from('legacy_family_members')
+                                .update({'slot_key': slotKey})
+                                .eq('id', createdLegacyId);
+                          }
+                        }
+
                         if (createdLegacyId.isEmpty) {
-                          throw Exception('Failed to create legacy descendant.');
+                          throw Exception(
+                            'Failed to create legacy descendant.',
+                          );
                         }
 
                         if (!ctx.mounted) return;
@@ -1825,9 +1782,9 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Future<void> _openAncestorAddOptions({
-    required _NodeRef childRef,
+    _NodeRef? childRef,
     required String title,
-    required String slotKey,
+    String? slotKey,
   }) async {
     if (!mounted) return;
 
@@ -1885,6 +1842,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   _showLegacyAncestorDialog(
                     childRef: childRef,
                     title: title,
+                    slotKey: slotKey,
                   );
                 },
               ),
@@ -1896,9 +1854,9 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   }
 
   Future<void> _openDescendantAddOptions({
-    required _NodeRef parentRef,
+    _NodeRef? parentRef,
     required String title,
-    required String slotKey,
+    String? slotKey,
   }) async {
     if (!mounted) return;
 
@@ -1956,6 +1914,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   _showLegacyDescendantDialog(
                     parentRef: parentRef,
                     title: title,
+                    slotKey: slotKey,
                   );
                 },
               ),
@@ -2033,19 +1992,21 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                             runSpacing: 12,
                             alignment: WrapAlignment.center,
                             children: generation.nodes.map((node) {
-                              final person =
-                                  node.ref == null ? null : _personForNode(node.ref!);
+                              final person = node.ref == null
+                                  ? null
+                                  : _personForNode(node.ref!);
 
                               if (person == null) {
                                 return _MiniBranchAddCard(
                                   label: 'Add ancestor',
-                                  onTap: (node.childRefForAdd == null ||
-                                          node.slotKeyForAdd == null)
+                                  onTap: (node.childRefForAdd == null &&
+                                          (node.slotKeyForAdd == null ||
+                                              node.slotKeyForAdd!.trim().isEmpty))
                                       ? null
                                       : () => _openAncestorAddOptions(
-                                            childRef: node.childRefForAdd!,
+                                            childRef: node.childRefForAdd,
                                             title: 'Ancestor',
-                                            slotKey: node.slotKeyForAdd!,
+                                            slotKey: node.slotKeyForAdd,
                                           ),
                                 );
                               }
@@ -2143,19 +2104,21 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                             runSpacing: 12,
                             alignment: WrapAlignment.center,
                             children: generation.nodes.map((node) {
-                              final person =
-                                  node.ref == null ? null : _personForNode(node.ref!);
+                              final person = node.ref == null
+                                  ? null
+                                  : _personForNode(node.ref!);
 
                               if (person == null) {
                                 return _MiniBranchAddCard(
                                   label: 'Add descendant',
-                                  onTap: (node.parentRefForAdd == null ||
-                                          node.slotKeyForAdd == null)
+                                  onTap: (node.parentRefForAdd == null &&
+                                          (node.slotKeyForAdd == null ||
+                                              node.slotKeyForAdd!.trim().isEmpty))
                                       ? null
                                       : () => _openDescendantAddOptions(
-                                            parentRef: node.parentRefForAdd!,
+                                            parentRef: node.parentRefForAdd,
                                             title: 'Descendant',
-                                            slotKey: node.slotKeyForAdd!,
+                                            slotKey: node.slotKeyForAdd,
                                           ),
                                 );
                               }
@@ -2248,26 +2211,6 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
                   : _buildDescendantRelationshipView(),
     );
   }
-}
-
-class _BranchConfig {
-  final String title;
-  final String centerSlot;
-  final String centerFallback;
-  final List<String> primarySlots;
-  final List<String> primaryLabels;
-  final List<String> secondarySlots;
-  final List<String> secondaryLabels;
-
-  const _BranchConfig({
-    required this.title,
-    required this.centerSlot,
-    required this.centerFallback,
-    required this.primarySlots,
-    required this.primaryLabels,
-    required this.secondarySlots,
-    required this.secondaryLabels,
-  });
 }
 
 class _AncestorViewModel {
