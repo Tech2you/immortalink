@@ -26,7 +26,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   static const String _vaultAvatarBucket = 'avatars';
   static const String _legacyAvatarBucket = 'vault_photos';
 
-  // Great-grandparents: two parents for each grandparent = 8 total slots.
   static const String kMaternalGmMother = 'maternal_gm_mother';
   static const String kMaternalGmFather = 'maternal_gm_father';
   static const String kMaternalGfMother = 'maternal_gf_mother';
@@ -450,7 +449,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       }
     }
 
-    return _FamilyData(
+        var familyData = _FamilyData(
       vaults: vaults,
       members: members,
       relationships: relationships,
@@ -460,6 +459,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       yourAvatarUrl: yourAvatarUrl,
       joinContext: joinCtx,
     );
+
+    return familyData;
   }
 
   _RelationshipAnchorSpec? _relationshipAnchorForSlot(String slotKey) {
@@ -721,6 +722,220 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
         'relationship_kind': plan.relationshipKind,
       });
     } catch (_) {}
+  }
+
+  Future<bool> _backfillMissingSlotRelationships(_FamilyData data) async {
+    final global = _slotToGlobalPersonMap(data);
+    var insertedAny = false;
+
+    for (final pair in _slotRelationshipPairs()) {
+      final parentPerson = global[pair.parentSlotKey];
+      final childPerson = global[pair.childSlotKey];
+      if (parentPerson == null || childPerson == null) continue;
+      if (_samePerson(parentPerson, childPerson)) continue;
+
+      final parentRef = _nodeRefFromPerson(parentPerson);
+      final childRef = _nodeRefFromPerson(childPerson);
+      if (parentRef == null || childRef == null) continue;
+
+      final existing = await _supabase
+          .from('family_relationships')
+          .select('id')
+          .eq('family_id', widget.familyId)
+          .eq('parent_type', parentRef.nodeType)
+          .eq('parent_id', parentRef.nodeId)
+          .eq('child_type', childRef.nodeType)
+          .eq('child_id', childRef.nodeId)
+          .limit(1);
+
+      final existingRows = (existing as List).cast<Map<String, dynamic>>();
+      if (existingRows.isNotEmpty) continue;
+
+      await _supabase.from('family_relationships').insert({
+        'family_id': widget.familyId,
+        'parent_type': parentRef.nodeType,
+        'parent_id': parentRef.nodeId,
+        'child_type': childRef.nodeType,
+        'child_id': childRef.nodeId,
+        'relationship_kind': 'parent_child',
+      });
+
+      insertedAny = true;
+    }
+
+    return insertedAny;
+  }
+
+  Future<List<Map<String, dynamic>>> _reloadRelationships() async {
+    try {
+      final relRes = await _supabase
+          .from('family_relationships')
+          .select(
+            'id, family_id, parent_type, parent_id, child_type, child_id, relationship_kind, created_at',
+          )
+          .eq('family_id', widget.familyId)
+          .order('created_at', ascending: true);
+
+      return (relRes as List).cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Map<String, Map<String, dynamic>> _normalizeVisibleSlots(
+    Map<String, Map<String, dynamic>> visible, {
+    Map<String, dynamic>? viewer,
+  }) {
+    const orderedSlots = <String>[
+      kMaternalGmMother,
+      kMaternalGmFather,
+      kMaternalGfMother,
+      kMaternalGfFather,
+      kPaternalGmMother,
+      kPaternalGmFather,
+      kPaternalGfMother,
+      kPaternalGfFather,
+      kMaternalGm,
+      kMaternalGf,
+      kPaternalGm,
+      kPaternalGf,
+      kMother,
+      kFather,
+      kSpouse1,
+      kSibling1,
+      kSibling2,
+      kSibling3,
+      kChild1,
+      kChild2,
+      kChild3,
+      kChild4,
+      kGrandchild1,
+      kGrandchild2,
+      kGrandchild3,
+      kGrandchild4,
+      kGreatGrandchild1,
+      kGreatGrandchild2,
+      kGreatGrandchild3,
+      kGreatGrandchild4,
+    ];
+
+    final normalized = <String, Map<String, dynamic>>{};
+    final seen = <String>{};
+    final viewerKey = _nodeKeyFromPerson(viewer);
+
+    for (final slotKey in orderedSlots) {
+      final person = visible[slotKey];
+      if (person == null) continue;
+
+      final key = _nodeKeyFromPerson(person);
+      if (key.isEmpty) continue;
+      if (viewerKey.isNotEmpty && key == viewerKey) continue;
+      if (seen.contains(key)) continue;
+
+      normalized[slotKey] = person;
+      seen.add(key);
+    }
+
+    return normalized;
+  }
+
+  void _fillLineageBreakSlotsFromGlobal({
+    required Map<String, Map<String, dynamic>> visible,
+    required Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? viewer,
+  }) {
+    const orderedSlots = <String>[
+      kMaternalGmMother,
+      kMaternalGmFather,
+      kMaternalGfMother,
+      kMaternalGfFather,
+      kPaternalGmMother,
+      kPaternalGmFather,
+      kPaternalGfMother,
+      kPaternalGfFather,
+      kMaternalGm,
+      kMaternalGf,
+      kPaternalGm,
+      kPaternalGf,
+      kMother,
+      kFather,
+      kSpouse1,
+      kSibling1,
+      kSibling2,
+      kSibling3,
+      kChild1,
+      kChild2,
+      kChild3,
+      kChild4,
+      kGrandchild1,
+      kGrandchild2,
+      kGrandchild3,
+      kGrandchild4,
+      kGreatGrandchild1,
+      kGreatGrandchild2,
+      kGreatGrandchild3,
+      kGreatGrandchild4,
+    ];
+
+    for (final slotKey in orderedSlots) {
+      if (visible.containsKey(slotKey)) continue;
+
+      final person = global[slotKey];
+      if (person == null) continue;
+      if (_samePerson(person, viewer)) continue;
+      if (_containsPerson(visible, person)) continue;
+
+      visible[slotKey] = person;
+    }
+  }
+
+  Map<String, dynamic>? _spouseForViewer(
+    Map<String, List<Map<String, dynamic>>> parentsByChild,
+    Map<String, List<Map<String, dynamic>>> childrenByParent,
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? viewer,
+  ) {
+    if (viewer == null) return null;
+
+    final viewerKey = _nodeKeyFromPerson(viewer);
+    if (viewerKey.isEmpty) return null;
+
+    final viewerChildren = _childrenOfPerson(childrenByParent, global, viewer);
+    for (final child in viewerChildren) {
+      final childParents = _parentsOfPerson(parentsByChild, global, child);
+      for (final parent in childParents) {
+        if (_nodeKeyFromPerson(parent) != viewerKey) {
+          return parent;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  List<Map<String, dynamic>> _siblingsForViewer(
+    Map<String, List<Map<String, dynamic>>> parentsByChild,
+    Map<String, List<Map<String, dynamic>>> childrenByParent,
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? viewer,
+  ) {
+    if (viewer == null) return [];
+
+    final viewerKey = _nodeKeyFromPerson(viewer);
+    if (viewerKey.isEmpty) return [];
+
+    final viewerParents = _parentsOfPerson(parentsByChild, global, viewer);
+    final siblings = <Map<String, dynamic>>[];
+
+    for (final parent in viewerParents) {
+      final kids = _childrenOfPerson(childrenByParent, global, parent);
+      for (final kid in kids) {
+        if (_nodeKeyFromPerson(kid) == viewerKey) continue;
+        _addUniquePerson(siblings, kid);
+      }
+    }
+
+    return _sortedPeopleForDisplay(global, siblings);
   }
 
   void _refresh() {
@@ -1089,6 +1304,103 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     return _sortedPeopleForDisplay(global, list);
   }
 
+  List<Map<String, dynamic>> _reachableDescendants(
+    Map<String, List<Map<String, dynamic>>> childrenByParent,
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? ancestor,
+  ) {
+    final ancestorKey = _nodeKeyFromPerson(ancestor);
+    if (ancestorKey.isEmpty) return [];
+
+    final result = <Map<String, dynamic>>[];
+    final seen = <String>{ancestorKey};
+    final queue = <Map<String, dynamic>>[];
+
+    final firstChildren =
+        childrenByParent[ancestorKey] ?? const <Map<String, dynamic>>[];
+    for (final child in firstChildren) {
+      final childKey = _nodeKeyFromPerson(child);
+      if (childKey.isEmpty || !seen.add(childKey)) continue;
+      result.add(child);
+      queue.add(child);
+    }
+
+    while (queue.isNotEmpty) {
+      final current = queue.removeAt(0);
+      final currentKey = _nodeKeyFromPerson(current);
+      if (currentKey.isEmpty) continue;
+
+      final children =
+          childrenByParent[currentKey] ?? const <Map<String, dynamic>>[];
+      for (final child in children) {
+        final childKey = _nodeKeyFromPerson(child);
+        if (childKey.isEmpty || !seen.add(childKey)) continue;
+        result.add(child);
+        queue.add(child);
+      }
+    }
+
+    return _sortedPeopleForDisplay(global, result);
+  }
+
+  bool _isDescendantOf(
+    Map<String, List<Map<String, dynamic>>> childrenByParent,
+    Map<String, dynamic>? ancestor,
+    Map<String, dynamic>? descendant,
+  ) {
+    final ancestorKey = _nodeKeyFromPerson(ancestor);
+    final descendantKey = _nodeKeyFromPerson(descendant);
+
+    if (ancestorKey.isEmpty || descendantKey.isEmpty) return false;
+    if (ancestorKey == descendantKey) return false;
+
+    final visited = <String>{};
+    final queue = <String>[ancestorKey];
+
+    while (queue.isNotEmpty) {
+      final currentKey = queue.removeAt(0);
+      if (!visited.add(currentKey)) continue;
+
+      final children =
+          childrenByParent[currentKey] ?? const <Map<String, dynamic>>[];
+      for (final child in children) {
+        final childKey = _nodeKeyFromPerson(child);
+        if (childKey.isEmpty) continue;
+        if (childKey == descendantKey) return true;
+        if (!visited.contains(childKey)) {
+          queue.add(childKey);
+        }
+      }
+    }
+
+    return false;
+  }
+
+  List<Map<String, dynamic>> _pruneNestedDescendants(
+    Map<String, List<Map<String, dynamic>>> childrenByParent,
+    List<Map<String, dynamic>> people,
+  ) {
+    final result = <Map<String, dynamic>>[];
+
+    for (final person in people) {
+      var nestedUnderAnother = false;
+
+      for (final other in people) {
+        if (_samePerson(person, other)) continue;
+        if (_isDescendantOf(childrenByParent, other, person)) {
+          nestedUnderAnother = true;
+          break;
+        }
+      }
+
+      if (!nestedUnderAnother) {
+        result.add(person);
+      }
+    }
+
+    return result;
+  }
+
   Map<String, dynamic>? _firstOrNull(
     List<Map<String, dynamic>> people,
     int index,
@@ -1106,84 +1418,6 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     target[slotKey] = person;
   }
 
-  void _putIfPersonIfMissingAndUnique(
-    Map<String, Map<String, dynamic>> target,
-    String slotKey,
-    Map<String, dynamic>? person, {
-    Map<String, dynamic>? viewer,
-  }) {
-    if (target.containsKey(slotKey)) return;
-    if (person == null) return;
-    if (_samePerson(person, viewer)) return;
-    if (_containsPerson(target, person)) return;
-    target[slotKey] = person;
-  }
-
-  Map<String, Map<String, dynamic>> _normalizeVisibleSlots(
-    Map<String, Map<String, dynamic>> visible, {
-    Map<String, dynamic>? viewer,
-  }) {
-    const orderedSlots = <String>[
-      kMaternalGmMother,
-      kMaternalGmFather,
-      kMaternalGfMother,
-      kMaternalGfFather,
-      kPaternalGmMother,
-      kPaternalGmFather,
-      kPaternalGfMother,
-      kPaternalGfFather,
-      kMaternalGm,
-      kMaternalGf,
-      kPaternalGm,
-      kPaternalGf,
-      kMother,
-      kFather,
-      kSpouse1,
-      kSibling1,
-      kSibling2,
-      kSibling3,
-      kChild1,
-      kChild2,
-      kChild3,
-      kChild4,
-      kGrandchild1,
-      kGrandchild2,
-      kGrandchild3,
-      kGrandchild4,
-      kGreatGrandchild1,
-      kGreatGrandchild2,
-      kGreatGrandchild3,
-      kGreatGrandchild4,
-    ];
-
-    final normalized = <String, Map<String, dynamic>>{};
-    final seen = <String>{};
-    final viewerKey = _nodeKeyFromPerson(viewer);
-
-    for (final slotKey in orderedSlots) {
-      final person = visible[slotKey];
-      if (person == null) continue;
-
-      final key = _nodeKeyFromPerson(person);
-      if (key.isEmpty) continue;
-      if (viewerKey.isNotEmpty && key == viewerKey) continue;
-      if (seen.contains(key)) continue;
-
-      normalized[slotKey] = person;
-      seen.add(key);
-    }
-
-    return normalized;
-  }
-
-  List<Map<String, dynamic>> _withoutPerson(
-    List<Map<String, dynamic>> people,
-    Map<String, dynamic>? blocked,
-  ) {
-    if (blocked == null) return List<Map<String, dynamic>>.from(people);
-    return people.where((p) => !_samePerson(p, blocked)).toList();
-  }
-
   bool _containsPerson(
     Map<String, Map<String, dynamic>> target,
     Map<String, dynamic>? person,
@@ -1192,473 +1426,296 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     return target.values.any((existing) => _samePerson(existing, person));
   }
 
-  void _putSlotFromGlobalIfMissing(
-    Map<String, Map<String, dynamic>> visible,
+  String? _preferredSlotWithinGroup(
     Map<String, Map<String, dynamic>> global,
-    String slotKey, {
-    required Map<String, dynamic> viewer,
-  }) {
-    if (visible.containsKey(slotKey)) return;
-
-    final person = global[slotKey];
-    if (person == null) return;
-
-    visible[slotKey] = {
-      ...person,
-      '__viewer_relation_slot': slotKey,
-      '__viewer_person_id': viewer['id'],
-    };
-  }
-
-  void _putSlotFromGlobal(
-    Map<String, Map<String, dynamic>> target,
-    Map<String, Map<String, dynamic>> global,
-    String slotKey,
+    Map<String, dynamic>? person,
+    List<String> allowedSlots,
   ) {
-    final person = global[slotKey];
-    if (person == null) return;
-    target.putIfAbsent(slotKey, () => person);
-  }
-
-  Map<String, dynamic>? _spouseForViewer(
-    Map<String, List<Map<String, dynamic>>> parentsByChild,
-    Map<String, List<Map<String, dynamic>>> childrenByParent,
-    Map<String, Map<String, dynamic>> global,
-    Map<String, dynamic>? viewer,
-  ) {
-    if (viewer == null) return null;
-
-    final viewerKey = _nodeKeyFromPerson(viewer);
-    if (viewerKey.isEmpty) return null;
-
-    final viewerChildren = _withoutPerson(
-      _childrenOfPerson(childrenByParent, global, viewer),
-      viewer,
-    );
-    for (final child in viewerChildren) {
-      final childParents = _withoutPerson(
-        _parentsOfPerson(parentsByChild, global, child),
-        viewer,
-      );
-      for (final parent in childParents) {
-        if (_nodeKeyFromPerson(parent) != viewerKey) {
-          return parent;
-        }
-      }
-    }
-
+    final slot = _slotForPerson(global, person);
+    if (allowedSlots.contains(slot)) return slot;
     return null;
   }
 
-  List<Map<String, dynamic>> _siblingsForViewer(
-    Map<String, List<Map<String, dynamic>>> parentsByChild,
-    Map<String, List<Map<String, dynamic>>> childrenByParent,
-    Map<String, Map<String, dynamic>> global,
+  void _placePersonIntoGroupSlots({
+    required Map<String, Map<String, dynamic>> target,
+    required Map<String, Map<String, dynamic>> global,
+    required Map<String, dynamic>? person,
+    required List<String> allowedSlots,
     Map<String, dynamic>? viewer,
-  ) {
-    if (viewer == null) return [];
+  }) {
+    if (person == null) return;
+    if (_samePerson(person, viewer)) return;
+    if (_containsPerson(target, person)) return;
 
-    final viewerKey = _nodeKeyFromPerson(viewer);
-    if (viewerKey.isEmpty) return [];
-
-    final viewerParents = _withoutPerson(
-      _parentsOfPerson(parentsByChild, global, viewer),
-      viewer,
-    );
-    final siblings = <Map<String, dynamic>>[];
-
-    for (final parent in viewerParents) {
-      final kids = _withoutPerson(
-        _childrenOfPerson(childrenByParent, global, parent),
-        viewer,
-      );
-      for (final kid in kids) {
-        if (_nodeKeyFromPerson(kid) == viewerKey) continue;
-        _addUniquePerson(siblings, kid);
-      }
+    final preferred = _preferredSlotWithinGroup(global, person, allowedSlots);
+    if (preferred != null && !target.containsKey(preferred)) {
+      target[preferred] = person;
+      return;
     }
 
-    return _sortedPeopleForDisplay(global, siblings);
+    for (final slot in allowedSlots) {
+      if (!target.containsKey(slot)) {
+        target[slot] = person;
+        return;
+      }
+    }
   }
 
-  Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
-    final global = _slotToGlobalPersonMap(data);
-    final viewer = _currentViewerPerson(data);
+ List<String> _parentSlotsForDisplayedChildSlot(String slotKey) {
+  switch (slotKey) {
+    case kMother:
+      return const [kMaternalGm, kMaternalGf];
+    case kFather:
+      return const [kPaternalGm, kPaternalGf];
+    case kMaternalGm:
+      return const [kMaternalGmMother, kMaternalGmFather];
+    case kMaternalGf:
+      return const [kMaternalGfMother, kMaternalGfFather];
+    case kPaternalGm:
+      return const [kPaternalGmMother, kPaternalGmFather];
+    case kPaternalGf:
+      return const [kPaternalGfMother, kPaternalGfFather];
+    default:
+      return const [];
+  }
+}
 
-    if (viewer == null) {
-      final visible = <String, Map<String, dynamic>>{};
-      const allowedSlots = {
-        kMaternalGmMother,
-        kMaternalGmFather,
-        kMaternalGfMother,
-        kMaternalGfFather,
-        kPaternalGmMother,
-        kPaternalGmFather,
-        kPaternalGfMother,
-        kPaternalGfFather,
-        kMaternalGm,
-        kMaternalGf,
-        kPaternalGm,
-        kPaternalGf,
-        kMother,
-        kFather,
-        kSpouse1,
-        kSibling1,
-        kSibling2,
-        kSibling3,
-        kChild1,
-        kChild2,
-        kChild3,
-        kChild4,
-        kGrandchild1,
-        kGrandchild2,
-        kGrandchild3,
-        kGrandchild4,
-        kGreatGrandchild1,
-        kGreatGrandchild2,
-        kGreatGrandchild3,
-        kGreatGrandchild4,
-      };
+String? _nextDescendantSlotForDisplayedParent(String slotKey) {
+  switch (slotKey) {
+    case kChild1:
+      return kGrandchild1;
+    case kChild2:
+      return kGrandchild2;
+    case kChild3:
+      return kGrandchild3;
+    case kChild4:
+      return kGrandchild4;
+    case kGrandchild1:
+      return kGreatGrandchild1;
+    case kGrandchild2:
+      return kGreatGrandchild2;
+    case kGrandchild3:
+      return kGreatGrandchild3;
+    case kGrandchild4:
+      return kGreatGrandchild4;
+    default:
+      return null;
+  }
+}
 
-      for (final entry in global.entries) {
-        if (allowedSlots.contains(entry.key)) {
-          visible[entry.key] = entry.value;
-        }
-      }
-      return _normalizeVisibleSlots(visible);
+String? _binaryRoleFromExactSlot(
+  Map<String, Map<String, dynamic>> global,
+  Map<String, dynamic>? person,
+) {
+  final slot = _slotForPerson(global, person);
+
+  switch (slot) {
+    case kMother:
+    case kMaternalGm:
+    case kPaternalGm:
+    case kMaternalGmMother:
+    case kMaternalGfMother:
+    case kPaternalGmMother:
+    case kPaternalGfMother:
+      return 'left';
+
+    case kFather:
+    case kMaternalGf:
+    case kPaternalGf:
+    case kMaternalGmFather:
+    case kMaternalGfFather:
+    case kPaternalGmFather:
+    case kPaternalGfFather:
+      return 'right';
+
+    default:
+      return null;
+  }
+}
+
+
+
+void _placePersonIntoExactOrFirstFreeSlots({
+  required Map<String, Map<String, dynamic>> target,
+  required Map<String, Map<String, dynamic>> global,
+  required Map<String, dynamic>? person,
+  required List<String> allowedSlots,
+  Map<String, dynamic>? viewer,
+}) {
+  if (person == null) return;
+  if (_samePerson(person, viewer)) return;
+  if (_containsPerson(target, person)) return;
+  if (allowedSlots.isEmpty) return;
+
+  final preferred = _preferredSlotWithinGroup(global, person, allowedSlots);
+  if (preferred != null && !target.containsKey(preferred)) {
+    target[preferred] = person;
+    return;
+  }
+
+  if (allowedSlots.length == 2) {
+    final role = _binaryRoleFromExactSlot(global, person);
+    if (role == 'left' && !target.containsKey(allowedSlots.first)) {
+      target[allowedSlots.first] = person;
+      return;
     }
+    if (role == 'right' && !target.containsKey(allowedSlots.last)) {
+      target[allowedSlots.last] = person;
+      return;
+    }
+  }
 
-    final parentsByChild = <String, List<Map<String, dynamic>>>{};
-    final childrenByParent = <String, List<Map<String, dynamic>>>{};
+  for (final slot in allowedSlots) {
+    if (!target.containsKey(slot)) {
+      target[slot] = person;
+      return;
+    }
+  }
+}
 
-    _buildRelationshipGraph(data, parentsByChild, childrenByParent);
+void _placeAncestorsForDisplayedSlot({
+  required Map<String, Map<String, dynamic>> visible,
+  required Map<String, Map<String, dynamic>> global,
+  required Map<String, List<Map<String, dynamic>>> parentsByChild,
+  required String displayedChildSlot,
+  Map<String, dynamic>? viewer,
+}) {
+  final childPerson = visible[displayedChildSlot];
+  if (childPerson == null) return;
 
+  final allowedSlots = _parentSlotsForDisplayedChildSlot(displayedChildSlot);
+  if (allowedSlots.isEmpty) return;
+
+  final parents = _parentsOfPerson(parentsByChild, global, childPerson);
+
+    for (final parent in parents) {
+    _placePersonIntoExactOrFirstFreeSlots(
+      target: visible,
+      global: global,
+      person: parent,
+      allowedSlots: allowedSlots,
+      viewer: viewer,
+    );
+  }
+}
+
+  void _placeSingleDescendantForDisplayedSlot({
+    required Map<String, Map<String, dynamic>> visible,
+    required Map<String, Map<String, dynamic>> global,
+    required Map<String, List<Map<String, dynamic>>> childrenByParent,
+    required String displayedParentSlot,
+    Map<String, dynamic>? viewer,
+  }) {
+    final parentPerson = visible[displayedParentSlot];
+    if (parentPerson == null) return;
+
+    final targetSlot = _nextDescendantSlotForDisplayedParent(displayedParentSlot);
+    if (targetSlot == null) return;
+    if (visible.containsKey(targetSlot)) return;
+
+    final children = _childrenOfPerson(childrenByParent, global, parentPerson);
+    if (children.isEmpty) return;
+
+    final child = children.first;
+    if (_samePerson(child, viewer)) return;
+    if (_containsPerson(visible, child)) return;
+
+    visible[targetSlot] = child;
+  }
+
+  List<_SlotRelationshipPair> _slotRelationshipPairs() {
+    return const <_SlotRelationshipPair>[
+      _SlotRelationshipPair(
+        parentSlotKey: kMaternalGmMother,
+        childSlotKey: kMaternalGm,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kMaternalGmFather,
+        childSlotKey: kMaternalGm,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kMaternalGfMother,
+        childSlotKey: kMaternalGf,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kMaternalGfFather,
+        childSlotKey: kMaternalGf,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kPaternalGmMother,
+        childSlotKey: kPaternalGm,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kPaternalGmFather,
+        childSlotKey: kPaternalGm,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kPaternalGfMother,
+        childSlotKey: kPaternalGf,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kPaternalGfFather,
+        childSlotKey: kPaternalGf,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kMaternalGm,
+        childSlotKey: kMother,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kMaternalGf,
+        childSlotKey: kMother,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kPaternalGm,
+        childSlotKey: kFather,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kPaternalGf,
+        childSlotKey: kFather,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kChild1,
+        childSlotKey: kGrandchild1,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kChild2,
+        childSlotKey: kGrandchild2,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kChild3,
+        childSlotKey: kGrandchild3,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kChild4,
+        childSlotKey: kGrandchild4,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kGrandchild1,
+        childSlotKey: kGreatGrandchild1,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kGrandchild2,
+        childSlotKey: kGreatGrandchild2,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kGrandchild3,
+        childSlotKey: kGreatGrandchild3,
+      ),
+      _SlotRelationshipPair(
+        parentSlotKey: kGrandchild4,
+        childSlotKey: kGreatGrandchild4,
+      ),
+    ];
+  }
+
+
+Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
+  final global = _slotToGlobalPersonMap(data);
+  final viewer = _currentViewerPerson(data);
+
+  if (viewer == null) {
     final visible = <String, Map<String, dynamic>>{};
-
-    _putSlotFromGlobalIfMissing(visible, global, kMother, viewer: viewer);
-    _putSlotFromGlobalIfMissing(visible, global, kFather, viewer: viewer);
-    _putSlotFromGlobalIfMissing(visible, global, kMaternalGm, viewer: viewer);
-    _putSlotFromGlobalIfMissing(visible, global, kMaternalGf, viewer: viewer);
-    _putSlotFromGlobalIfMissing(visible, global, kPaternalGm, viewer: viewer);
-    _putSlotFromGlobalIfMissing(visible, global, kPaternalGf, viewer: viewer);
-    _putSlotFromGlobalIfMissing(
-      visible,
-      global,
-      kMaternalGmMother,
-      viewer: viewer,
-    );
-    _putSlotFromGlobalIfMissing(
-      visible,
-      global,
-      kMaternalGmFather,
-      viewer: viewer,
-    );
-    _putSlotFromGlobalIfMissing(
-      visible,
-      global,
-      kMaternalGfMother,
-      viewer: viewer,
-    );
-    _putSlotFromGlobalIfMissing(
-      visible,
-      global,
-      kMaternalGfFather,
-      viewer: viewer,
-    );
-    _putSlotFromGlobalIfMissing(
-      visible,
-      global,
-      kPaternalGmMother,
-      viewer: viewer,
-    );
-    _putSlotFromGlobalIfMissing(
-      visible,
-      global,
-      kPaternalGmFather,
-      viewer: viewer,
-    );
-    _putSlotFromGlobalIfMissing(
-      visible,
-      global,
-      kPaternalGfMother,
-      viewer: viewer,
-    );
-    _putSlotFromGlobalIfMissing(
-      visible,
-      global,
-      kPaternalGfFather,
-      viewer: viewer,
-    );
-
-    final viewerParents = _withoutPerson(
-      _parentsOfPerson(parentsByChild, global, viewer),
-      viewer,
-    );
-    final parentA = _firstOrNull(viewerParents, 0);
-    final parentB = _samePerson(_firstOrNull(viewerParents, 1), parentA)
-        ? null
-        : _firstOrNull(viewerParents, 1);
-
-    if (!visible.containsKey(kMother)) {
-      _putIfPerson(visible, kMother, parentA);
-    }
-    if (!visible.containsKey(kFather)) {
-      _putIfPerson(visible, kFather, parentB);
-    }
-
-    final parentAGrandparents = _withoutPerson(
-      _parentsOfPerson(parentsByChild, global, parentA),
-      viewer,
-    );
-    final parentBGrandparents = _withoutPerson(
-      _parentsOfPerson(parentsByChild, global, parentB),
-      viewer,
-    );
-
-    final maternalGm = _firstOrNull(parentAGrandparents, 0);
-    final maternalGf =
-        _samePerson(_firstOrNull(parentAGrandparents, 1), maternalGm)
-            ? null
-            : _firstOrNull(parentAGrandparents, 1);
-    final paternalGm = _firstOrNull(parentBGrandparents, 0);
-    final paternalGf =
-        _samePerson(_firstOrNull(parentBGrandparents, 1), paternalGm)
-            ? null
-            : _firstOrNull(parentBGrandparents, 1);
-
-    if (!visible.containsKey(kMaternalGm)) {
-      _putIfPerson(visible, kMaternalGm, maternalGm);
-    }
-    if (!visible.containsKey(kMaternalGf)) {
-      _putIfPerson(visible, kMaternalGf, maternalGf);
-    }
-    if (!visible.containsKey(kPaternalGm)) {
-      _putIfPerson(visible, kPaternalGm, paternalGm);
-    }
-    if (!visible.containsKey(kPaternalGf)) {
-      _putIfPerson(visible, kPaternalGf, paternalGf);
-    }
-
-    final maternalGmParents = _withoutPerson(
-      _parentsOfPerson(parentsByChild, global, maternalGm),
-      viewer,
-    );
-    final maternalGfParents = _withoutPerson(
-      _parentsOfPerson(parentsByChild, global, maternalGf),
-      viewer,
-    );
-    final paternalGmParents = _withoutPerson(
-      _parentsOfPerson(parentsByChild, global, paternalGm),
-      viewer,
-    );
-    final paternalGfParents = _withoutPerson(
-      _parentsOfPerson(parentsByChild, global, paternalGf),
-      viewer,
-    );
-
-    if (!visible.containsKey(kMaternalGmMother)) {
-      _putIfPerson(
-        visible,
-        kMaternalGmMother,
-        _firstOrNull(maternalGmParents, 0),
-      );
-    }
-    if (!visible.containsKey(kMaternalGmFather)) {
-      _putIfPerson(
-        visible,
-        kMaternalGmFather,
-        _firstOrNull(maternalGmParents, 1),
-      );
-    }
-    if (!visible.containsKey(kMaternalGfMother)) {
-      _putIfPerson(
-        visible,
-        kMaternalGfMother,
-        _firstOrNull(maternalGfParents, 0),
-      );
-    }
-    if (!visible.containsKey(kMaternalGfFather)) {
-      _putIfPerson(
-        visible,
-        kMaternalGfFather,
-        _firstOrNull(maternalGfParents, 1),
-      );
-    }
-    if (!visible.containsKey(kPaternalGmMother)) {
-      _putIfPerson(
-        visible,
-        kPaternalGmMother,
-        _firstOrNull(paternalGmParents, 0),
-      );
-    }
-    if (!visible.containsKey(kPaternalGmFather)) {
-      _putIfPerson(
-        visible,
-        kPaternalGmFather,
-        _firstOrNull(paternalGmParents, 1),
-      );
-    }
-    if (!visible.containsKey(kPaternalGfMother)) {
-      _putIfPerson(
-        visible,
-        kPaternalGfMother,
-        _firstOrNull(paternalGfParents, 0),
-      );
-    }
-    if (!visible.containsKey(kPaternalGfFather)) {
-      _putIfPerson(
-        visible,
-        kPaternalGfFather,
-        _firstOrNull(paternalGfParents, 1),
-      );
-    }
-
-    final spouse = _spouseForViewer(
-      parentsByChild,
-      childrenByParent,
-      global,
-      viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kSpouse1,
-      spouse,
-      viewer: viewer,
-    );
-
-    final siblings = _siblingsForViewer(
-      parentsByChild,
-      childrenByParent,
-      global,
-      viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kSibling1,
-      _firstOrNull(siblings, 0),
-      viewer: viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kSibling2,
-      _firstOrNull(siblings, 1),
-      viewer: viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kSibling3,
-      _firstOrNull(siblings, 2),
-      viewer: viewer,
-    );
-
-    final children = _withoutPerson(
-      _childrenOfPerson(childrenByParent, global, viewer),
-      viewer,
-    );
-    final child1 = _firstOrNull(children, 0);
-    final child2 = _samePerson(_firstOrNull(children, 1), child1)
-        ? null
-        : _firstOrNull(children, 1);
-    final child3 = _samePerson(_firstOrNull(children, 2), child2) ||
-            _samePerson(_firstOrNull(children, 2), child1)
-        ? null
-        : _firstOrNull(children, 2);
-    final child4 = _samePerson(_firstOrNull(children, 3), child3) ||
-            _samePerson(_firstOrNull(children, 3), child2) ||
-            _samePerson(_firstOrNull(children, 3), child1)
-        ? null
-        : _firstOrNull(children, 3);
-
-    _putIfPersonIfMissingAndUnique(visible, kChild1, child1, viewer: viewer);
-    _putIfPersonIfMissingAndUnique(visible, kChild2, child2, viewer: viewer);
-    _putIfPersonIfMissingAndUnique(visible, kChild3, child3, viewer: viewer);
-    _putIfPersonIfMissingAndUnique(visible, kChild4, child4, viewer: viewer);
-
-    final gc1 = _firstOrNull(
-      _withoutPerson(_childrenOfPerson(childrenByParent, global, child1), viewer),
-      0,
-    );
-    final gc2 = _firstOrNull(
-      _withoutPerson(_childrenOfPerson(childrenByParent, global, child2), viewer),
-      0,
-    );
-    final gc3 = _firstOrNull(
-      _withoutPerson(_childrenOfPerson(childrenByParent, global, child3), viewer),
-      0,
-    );
-    final gc4 = _firstOrNull(
-      _withoutPerson(_childrenOfPerson(childrenByParent, global, child4), viewer),
-      0,
-    );
-
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kGrandchild1,
-      gc1,
-      viewer: viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kGrandchild2,
-      gc2,
-      viewer: viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kGrandchild3,
-      gc3,
-      viewer: viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kGrandchild4,
-      gc4,
-      viewer: viewer,
-    );
-
-    final ggc1 = _firstOrNull(
-      _withoutPerson(_childrenOfPerson(childrenByParent, global, gc1), viewer),
-      0,
-    );
-    final ggc2 = _firstOrNull(
-      _withoutPerson(_childrenOfPerson(childrenByParent, global, gc2), viewer),
-      0,
-    );
-    final ggc3 = _firstOrNull(
-      _withoutPerson(_childrenOfPerson(childrenByParent, global, gc3), viewer),
-      0,
-    );
-    final ggc4 = _firstOrNull(
-      _withoutPerson(_childrenOfPerson(childrenByParent, global, gc4), viewer),
-      0,
-    );
-
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kGreatGrandchild1,
-      ggc1,
-      viewer: viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kGreatGrandchild2,
-      ggc2,
-      viewer: viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kGreatGrandchild3,
-      ggc3,
-      viewer: viewer,
-    );
-    _putIfPersonIfMissingAndUnique(
-      visible,
-      kGreatGrandchild4,
-      ggc4,
-      viewer: viewer,
-    );
-
-    const fallbackSlots = <String>[
+    const allowedSlots = {
       kMaternalGmMother,
       kMaternalGmFather,
       kMaternalGfMother,
@@ -1689,19 +1746,190 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       kGreatGrandchild2,
       kGreatGrandchild3,
       kGreatGrandchild4,
-    ];
+    };
 
-    for (final slotKey in fallbackSlots) {
-      _putSlotFromGlobalIfMissing(
-        visible,
-        global,
-        slotKey,
-        viewer: viewer,
-      );
+    for (final entry in global.entries) {
+      if (allowedSlots.contains(entry.key)) {
+        visible[entry.key] = entry.value;
+      }
     }
 
-    return _normalizeVisibleSlots(visible, viewer: viewer);
+    _fillLineageBreakSlotsFromGlobal(
+      visible: visible,
+      global: global,
+    );
+
+    return _normalizeVisibleSlots(visible);
   }
+
+  final parentsByChild = <String, List<Map<String, dynamic>>>{};
+  final childrenByParent = <String, List<Map<String, dynamic>>>{};
+  _buildRelationshipGraph(data, parentsByChild, childrenByParent);
+
+  final visible = <String, Map<String, dynamic>>{};
+
+  final viewerParents = _parentsOfPerson(parentsByChild, global, viewer);
+  for (final parent in viewerParents) {
+    _placePersonIntoExactOrFirstFreeSlots(
+      target: visible,
+      global: global,
+      person: parent,
+      allowedSlots: const [kMother, kFather],
+      viewer: viewer,
+    );
+  }
+
+  _placeAncestorsForDisplayedSlot(
+    visible: visible,
+    global: global,
+    parentsByChild: parentsByChild,
+    displayedChildSlot: kMother,
+    viewer: viewer,
+  );
+  _placeAncestorsForDisplayedSlot(
+    visible: visible,
+    global: global,
+    parentsByChild: parentsByChild,
+    displayedChildSlot: kFather,
+    viewer: viewer,
+  );
+  _placeAncestorsForDisplayedSlot(
+    visible: visible,
+    global: global,
+    parentsByChild: parentsByChild,
+    displayedChildSlot: kMaternalGm,
+    viewer: viewer,
+  );
+  _placeAncestorsForDisplayedSlot(
+    visible: visible,
+    global: global,
+    parentsByChild: parentsByChild,
+    displayedChildSlot: kMaternalGf,
+    viewer: viewer,
+  );
+  _placeAncestorsForDisplayedSlot(
+    visible: visible,
+    global: global,
+    parentsByChild: parentsByChild,
+    displayedChildSlot: kPaternalGm,
+    viewer: viewer,
+  );
+  _placeAncestorsForDisplayedSlot(
+    visible: visible,
+    global: global,
+    parentsByChild: parentsByChild,
+    displayedChildSlot: kPaternalGf,
+    viewer: viewer,
+  );
+
+  final spouse = _spouseForViewer(
+    parentsByChild,
+    childrenByParent,
+    global,
+    viewer,
+  );
+  _placePersonIntoExactOrFirstFreeSlots(
+    target: visible,
+    global: global,
+    person: spouse,
+    allowedSlots: const [kSpouse1],
+    viewer: viewer,
+  );
+
+  final siblings = _siblingsForViewer(
+    parentsByChild,
+    childrenByParent,
+    global,
+    viewer,
+  );
+  for (final sibling in siblings) {
+    _placePersonIntoExactOrFirstFreeSlots(
+      target: visible,
+      global: global,
+      person: sibling,
+      allowedSlots: const [kSibling1, kSibling2, kSibling3],
+      viewer: viewer,
+    );
+  }
+
+  final viewerChildren = _childrenOfPerson(childrenByParent, global, viewer);
+  for (final child in viewerChildren) {
+    _placePersonIntoExactOrFirstFreeSlots(
+      target: visible,
+      global: global,
+      person: child,
+      allowedSlots: const [kChild1, kChild2, kChild3, kChild4],
+      viewer: viewer,
+    );
+  }
+
+  _placeSingleDescendantForDisplayedSlot(
+    visible: visible,
+    global: global,
+    childrenByParent: childrenByParent,
+    displayedParentSlot: kChild1,
+    viewer: viewer,
+  );
+  _placeSingleDescendantForDisplayedSlot(
+    visible: visible,
+    global: global,
+    childrenByParent: childrenByParent,
+    displayedParentSlot: kChild2,
+    viewer: viewer,
+  );
+  _placeSingleDescendantForDisplayedSlot(
+    visible: visible,
+    global: global,
+    childrenByParent: childrenByParent,
+    displayedParentSlot: kChild3,
+    viewer: viewer,
+  );
+  _placeSingleDescendantForDisplayedSlot(
+    visible: visible,
+    global: global,
+    childrenByParent: childrenByParent,
+    displayedParentSlot: kChild4,
+    viewer: viewer,
+  );
+
+  _placeSingleDescendantForDisplayedSlot(
+    visible: visible,
+    global: global,
+    childrenByParent: childrenByParent,
+    displayedParentSlot: kGrandchild1,
+    viewer: viewer,
+  );
+  _placeSingleDescendantForDisplayedSlot(
+    visible: visible,
+    global: global,
+    childrenByParent: childrenByParent,
+    displayedParentSlot: kGrandchild2,
+    viewer: viewer,
+  );
+  _placeSingleDescendantForDisplayedSlot(
+    visible: visible,
+    global: global,
+    childrenByParent: childrenByParent,
+    displayedParentSlot: kGrandchild3,
+    viewer: viewer,
+  );
+  _placeSingleDescendantForDisplayedSlot(
+    visible: visible,
+    global: global,
+    childrenByParent: childrenByParent,
+    displayedParentSlot: kGrandchild4,
+    viewer: viewer,
+  );
+
+  _fillLineageBreakSlotsFromGlobal(
+    visible: visible,
+    global: global,
+    viewer: viewer,
+  );
+
+  return _normalizeVisibleSlots(visible, viewer: viewer);
+}
+
 
   Future<void> _openYourVaultFallback() async {
     try {
@@ -2071,6 +2299,14 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                           );
 
                           createdLegacyId = (legacyId ?? '').toString().trim();
+
+                          if (createdLegacyId.isNotEmpty &&
+                              slotKey.trim().isNotEmpty) {
+                            await _supabase
+                                .from('legacy_family_members')
+                                .update({'slot_key': slotKey})
+                                .eq('id', createdLegacyId);
+                          }
                         }
 
                         if (createdLegacyId.isEmpty) {
@@ -3725,6 +3961,16 @@ class _NodeGeom {
   const _NodeGeom({required this.center, required this.size});
 }
 
+class _DepthNode {
+  final Map<String, dynamic> person;
+  final int depth;
+
+  const _DepthNode({
+    required this.person,
+    required this.depth,
+  });
+}
+
 class _TreeLinesPainter extends CustomPainter {
   final Map<String, _NodeGeom> geom;
 
@@ -3907,7 +4153,15 @@ class _BottomVinesPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+class _SlotRelationshipPair {
+  final String parentSlotKey;
+  final String childSlotKey;
 
+  const _SlotRelationshipPair({
+    required this.parentSlotKey,
+    required this.childSlotKey,
+  });
+}
 class _JoinContext {
   final String inviterVaultId;
   final String slotKey;
