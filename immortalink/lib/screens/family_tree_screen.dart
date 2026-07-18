@@ -9,6 +9,7 @@ import 'vaults_screen.dart';
 import 'legacy_vault_screen.dart';
 import 'family_branch_screen.dart';
 import 'sign_in_screen.dart';
+import 'relationship_tree_screen.dart';
 
 class FamilyTreeScreen extends StatefulWidget {
   final String familyId;
@@ -213,8 +214,9 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
     required String path,
   }) async {
     try {
-      final signed =
-          await _supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
+      final signed = await _supabase.storage
+          .from(bucket)
+          .createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (_) {
@@ -239,8 +241,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
       if (res is List && res.isNotEmpty && res.first is Map) {
         final m = res.first as Map;
-        final inviterVaultId =
-            (m['inviter_vault_id'] ?? '').toString().trim();
+        final inviterVaultId = (m['inviter_vault_id'] ?? '').toString().trim();
         final slotKey = (m['slot_key'] ?? '').toString().trim();
         if (inviterVaultId.isNotEmpty && slotKey.isNotEmpty) {
           return _JoinContext(inviterVaultId: inviterVaultId, slotKey: slotKey);
@@ -275,8 +276,9 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
           continue;
         }
 
-        final existingIsProfile =
-            existing.toLowerCase().contains('/profile_picture/');
+        final existingIsProfile = existing.toLowerCase().contains(
+          '/profile_picture/',
+        );
 
         if (!existingIsProfile && isProfilePath) {
           result[legacyId] = path;
@@ -330,8 +332,9 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       if (myVault != null) {
         myVaultMap = Map<String, dynamic>.from(myVault);
         final myId = (myVaultMap['id'] ?? '').toString();
-        final alreadyInList =
-            vaults.any((v) => (v['id'] ?? '').toString() == myId);
+        final alreadyInList = vaults.any(
+          (v) => (v['id'] ?? '').toString() == myId,
+        );
         if (!alreadyInList) {
           vaults.add(myVaultMap);
         }
@@ -342,8 +345,9 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
     if (joinCtx != null) {
       final inviterVaultId = joinCtx.inviterVaultId;
-      final already =
-          vaults.any((v) => (v['id'] ?? '').toString() == inviterVaultId);
+      final already = vaults.any(
+        (v) => (v['id'] ?? '').toString() == inviterVaultId,
+      );
       if (!already) {
         try {
           final v = await _supabase
@@ -449,36 +453,36 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       }
     }
 
-      var familyData = _FamilyData(
-  vaults: vaults,
-  members: members,
-  relationships: relationships,
-  avatarUrlByVaultId: avatarUrlByVaultId,
-  legacyMembers: legacyMembers,
-  yourVault: myVaultMap,
-  yourAvatarUrl: yourAvatarUrl,
-  joinContext: joinCtx,
-);
+    var familyData = _FamilyData(
+      vaults: vaults,
+      members: members,
+      relationships: relationships,
+      avatarUrlByVaultId: avatarUrlByVaultId,
+      legacyMembers: legacyMembers,
+      yourVault: myVaultMap,
+      yourAvatarUrl: yourAvatarUrl,
+      joinContext: joinCtx,
+    );
 
-final backfilled = await _backfillMissingSlotRelationships(familyData);
-if (backfilled) {
-  final refreshedRelationships = await _reloadRelationships();
-  familyData = _FamilyData(
-    vaults: vaults,
-    members: members,
-    relationships: refreshedRelationships,
-    avatarUrlByVaultId: avatarUrlByVaultId,
-    legacyMembers: legacyMembers,
-    yourVault: myVaultMap,
-    yourAvatarUrl: yourAvatarUrl,
-    joinContext: joinCtx,
-  );
-}
+    final backfilled = await _backfillMissingSlotRelationships(familyData);
+    if (backfilled) {
+      final refreshedRelationships = await _reloadRelationships();
+      familyData = _FamilyData(
+        vaults: vaults,
+        members: members,
+        relationships: refreshedRelationships,
+        avatarUrlByVaultId: avatarUrlByVaultId,
+        legacyMembers: legacyMembers,
+        yourVault: myVaultMap,
+        yourAvatarUrl: yourAvatarUrl,
+        joinContext: joinCtx,
+      );
+    }
 
-return familyData;
-}
+    return familyData;
+  }
 
-    _RelationshipAnchorSpec? _relationshipAnchorForSlot(String slotKey) {
+  _RelationshipAnchorSpec? _relationshipAnchorForSlot(String slotKey) {
     switch (slotKey) {
       case kMother:
       case kFather:
@@ -880,7 +884,7 @@ return familyData;
     }
   }
 
-    Map<String, dynamic>? _spouseForViewer(
+  Map<String, dynamic>? _spouseForViewer(
     Map<String, List<Map<String, dynamic>>> parentsByChild,
     Map<String, List<Map<String, dynamic>>> childrenByParent,
     Map<String, List<Map<String, dynamic>>> spousesByPerson,
@@ -909,6 +913,7 @@ return familyData;
 
     return null;
   }
+
   List<Map<String, dynamic>> _spousesOfPerson(
     Map<String, List<Map<String, dynamic>>> spousesByPerson,
     Map<String, Map<String, dynamic>> global,
@@ -943,6 +948,7 @@ return familyData;
 
     return _sortedPeopleForDisplay(global, combined);
   }
+
   List<Map<String, dynamic>> _siblingsForViewer(
     Map<String, List<Map<String, dynamic>>> parentsByChild,
     Map<String, List<Map<String, dynamic>>> childrenByParent,
@@ -1006,9 +1012,9 @@ return familyData;
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to sign out: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to sign out: $e')));
     }
   }
 
@@ -1036,9 +1042,10 @@ return familyData;
     if (confirmed != true) return;
 
     try {
-      await _supabase.rpc('leave_family', params: {
-        'p_family_id': widget.familyId,
-      });
+      await _supabase.rpc(
+        'leave_family',
+        params: {'p_family_id': widget.familyId},
+      );
 
       if (!mounted) return;
 
@@ -1048,9 +1055,9 @@ return familyData;
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to leave family: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to leave family: $e')));
     }
   }
 
@@ -1081,19 +1088,14 @@ return familyData;
 
     for (final legacy in data.legacyMembers) {
       final slotKey = (legacy['slot_key'] ?? '').toString().trim();
-      final replacedByVaultId =
-          (legacy['replaced_by_vault_id'] ?? '').toString().trim();
+      final replacedByVaultId = (legacy['replaced_by_vault_id'] ?? '')
+          .toString()
+          .trim();
 
       if (slotKey.isEmpty) continue;
       if (replacedByVaultId.isNotEmpty) continue;
 
-      result.putIfAbsent(
-        slotKey,
-        () => {
-          ...legacy,
-          '__legacy': true,
-        },
-      );
+      result.putIfAbsent(slotKey, () => {...legacy, '__legacy': true});
     }
 
     return result;
@@ -1128,13 +1130,11 @@ return familyData;
     if (nodeType == 'legacy') {
       for (final l in data.legacyMembers) {
         if ((l['id'] ?? '').toString() == nodeId) {
-          final replacedByVaultId =
-              (l['replaced_by_vault_id'] ?? '').toString().trim();
+          final replacedByVaultId = (l['replaced_by_vault_id'] ?? '')
+              .toString()
+              .trim();
           if (replacedByVaultId.isNotEmpty) return null;
-          return {
-            ...l,
-            '__legacy': true,
-          };
+          return {...l, '__legacy': true};
         }
       }
     }
@@ -1206,12 +1206,14 @@ return familyData;
     final pb = _slotPriority(sb);
     if (pa != pb) return pa.compareTo(pb);
 
-    final na = (((a['display_name'] ?? '').toString().trim().isNotEmpty)
+    final na =
+        (((a['display_name'] ?? '').toString().trim().isNotEmpty)
                 ? a['display_name']
                 : (a['name'] ?? ''))
             .toString()
             .toLowerCase();
-    final nb = (((b['display_name'] ?? '').toString().trim().isNotEmpty)
+    final nb =
+        (((b['display_name'] ?? '').toString().trim().isNotEmpty)
                 ? b['display_name']
                 : (b['name'] ?? ''))
             .toString()
@@ -1514,55 +1516,54 @@ return familyData;
     return !allowedSlots.contains(exactSlot);
   }
 
-
-
- List<String> _parentSlotsForDisplayedChildSlot(String slotKey) {
-  switch (slotKey) {
-    case kMother:
-      return const [kMaternalGm, kMaternalGf];
-    case kFather:
-      return const [kPaternalGm, kPaternalGf];
-    case kMaternalGm:
-      return const [kMaternalGmMother, kMaternalGmFather];
-    case kMaternalGf:
-      return const [kMaternalGfMother, kMaternalGfFather];
-    case kPaternalGm:
-      return const [kPaternalGmMother, kPaternalGmFather];
-    case kPaternalGf:
-      return const [kPaternalGfMother, kPaternalGfFather];
-    default:
-      return const [];
+  List<String> _parentSlotsForDisplayedChildSlot(String slotKey) {
+    switch (slotKey) {
+      case kMother:
+        return const [kMaternalGm, kMaternalGf];
+      case kFather:
+        return const [kPaternalGm, kPaternalGf];
+      case kMaternalGm:
+        return const [kMaternalGmMother, kMaternalGmFather];
+      case kMaternalGf:
+        return const [kMaternalGfMother, kMaternalGfFather];
+      case kPaternalGm:
+        return const [kPaternalGmMother, kPaternalGmFather];
+      case kPaternalGf:
+        return const [kPaternalGfMother, kPaternalGfFather];
+      default:
+        return const [];
+    }
   }
-}
-List<String> _preferredParentSlotsForViewer(
-  Map<String, Map<String, dynamic>> global,
-  Map<String, dynamic>? viewer,
-) {
-  final viewerSlot = _slotForPerson(global, viewer);
 
-  switch (viewerSlot) {
-    case kFather:
-    case kPaternalGm:
-    case kPaternalGf:
-    case kPaternalGmMother:
-    case kPaternalGmFather:
-    case kPaternalGfMother:
-    case kPaternalGfFather:
-      return const [kFather, kMother];
+  List<String> _preferredParentSlotsForViewer(
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? viewer,
+  ) {
+    final viewerSlot = _slotForPerson(global, viewer);
 
-    case kMother:
-    case kMaternalGm:
-    case kMaternalGf:
-    case kMaternalGmMother:
-    case kMaternalGmFather:
-    case kMaternalGfMother:
-    case kMaternalGfFather:
-      return const [kMother, kFather];
+    switch (viewerSlot) {
+      case kFather:
+      case kPaternalGm:
+      case kPaternalGf:
+      case kPaternalGmMother:
+      case kPaternalGmFather:
+      case kPaternalGfMother:
+      case kPaternalGfFather:
+        return const [kFather, kMother];
 
-    default:
-      return const [kMother, kFather];
+      case kMother:
+      case kMaternalGm:
+      case kMaternalGf:
+      case kMaternalGmMother:
+      case kMaternalGmFather:
+      case kMaternalGfMother:
+      case kMaternalGfFather:
+        return const [kMother, kFather];
+
+      default:
+        return const [kMother, kFather];
+    }
   }
-}
 
   String? _canonicalDisplayedSlotForViewer({
     required String displayedSlot,
@@ -1573,10 +1574,12 @@ List<String> _preferredParentSlotsForViewer(
     if (viewerSlot.isEmpty) return displayedSlot;
 
     final viewerParentSlots = _parentSlotsForDisplayedChildSlot(viewerSlot);
-    final canonicalMother =
-        viewerParentSlots.length == 2 ? viewerParentSlots.first : null;
-    final canonicalFather =
-        viewerParentSlots.length == 2 ? viewerParentSlots.last : null;
+    final canonicalMother = viewerParentSlots.length == 2
+        ? viewerParentSlots.first
+        : null;
+    final canonicalFather = viewerParentSlots.length == 2
+        ? viewerParentSlots.last
+        : null;
 
     switch (displayedSlot) {
       case kMother:
@@ -1665,6 +1668,7 @@ List<String> _preferredParentSlotsForViewer(
         ) ??
         slotKey;
   }
+
   void _fillCanonicalAncestorSlotsForViewer({
     required Map<String, Map<String, dynamic>> visible,
     required Map<String, Map<String, dynamic>> global,
@@ -1709,6 +1713,7 @@ List<String> _preferredParentSlotsForViewer(
       visible[displayedSlot] = person!;
     }
   }
+
   List<String> _exactFallbackSlotsForViewer(
     Map<String, Map<String, dynamic>> global,
     Map<String, dynamic>? viewer,
@@ -1844,139 +1849,137 @@ List<String> _preferredParentSlotsForViewer(
     }
   }
 
-String? _nextDescendantSlotForDisplayedParent(String slotKey) {
-  switch (slotKey) {
-    case kChild1:
-      return kGrandchild1;
-    case kChild2:
-      return kGrandchild2;
-    case kChild3:
-      return kGrandchild3;
-    case kChild4:
-      return kGrandchild4;
-    case kGrandchild1:
-      return kGreatGrandchild1;
-    case kGrandchild2:
-      return kGreatGrandchild2;
-    case kGrandchild3:
-      return kGreatGrandchild3;
-    case kGrandchild4:
-      return kGreatGrandchild4;
-    default:
-      return null;
-  }
-}
-
-String? _binaryRoleFromExactSlot(
-  Map<String, Map<String, dynamic>> global,
-  Map<String, dynamic>? person,
-) {
-  final slot = _slotForPerson(global, person);
-
-  switch (slot) {
-    case kMother:
-    case kMaternalGm:
-    case kPaternalGm:
-    case kMaternalGmMother:
-    case kMaternalGfMother:
-    case kPaternalGmMother:
-    case kPaternalGfMother:
-      return 'left';
-
-    case kFather:
-    case kMaternalGf:
-    case kPaternalGf:
-    case kMaternalGmFather:
-    case kMaternalGfFather:
-    case kPaternalGmFather:
-    case kPaternalGfFather:
-      return 'right';
-
-    default:
-      return null;
-  }
-}
-
-
-
-void _placePersonIntoExactOrFirstFreeSlots({
-  required Map<String, Map<String, dynamic>> target,
-  required Map<String, Map<String, dynamic>> global,
-  required Map<String, dynamic>? person,
-  required List<String> allowedSlots,
-  Map<String, dynamic>? viewer,
-  List<String>? preferredOrder,
-}) {
-  if (person == null) return;
-  if (_samePerson(person, viewer)) return;
-  if (_containsPerson(target, person)) return;
-  if (allowedSlots.isEmpty) return;
-
-  final exact = _preferredSlotWithinGroup(global, person, allowedSlots);
-  if (exact != null && !target.containsKey(exact)) {
-    target[exact] = person;
-    return;
-  }
-
-  // Insert role-preserving block for binary slots
-  if (allowedSlots.length == 2) {
-    final role = _binaryRoleFromExactSlot(global, person);
-    if (role == 'left' && !target.containsKey(allowedSlots.first)) {
-      target[allowedSlots.first] = person;
-      return;
-    }
-    if (role == 'right' && !target.containsKey(allowedSlots.last)) {
-      target[allowedSlots.last] = person;
-      return;
+  String? _nextDescendantSlotForDisplayedParent(String slotKey) {
+    switch (slotKey) {
+      case kChild1:
+        return kGrandchild1;
+      case kChild2:
+        return kGrandchild2;
+      case kChild3:
+        return kGrandchild3;
+      case kChild4:
+        return kGrandchild4;
+      case kGrandchild1:
+        return kGreatGrandchild1;
+      case kGrandchild2:
+        return kGreatGrandchild2;
+      case kGrandchild3:
+        return kGreatGrandchild3;
+      case kGrandchild4:
+        return kGreatGrandchild4;
+      default:
+        return null;
     }
   }
 
-  final ordered = <String>[
-    ...(preferredOrder ?? const <String>[]),
-    ...allowedSlots.where(
-      (slot) => !(preferredOrder ?? const <String>[]).contains(slot),
-    ),
-  ];
+  String? _binaryRoleFromExactSlot(
+    Map<String, Map<String, dynamic>> global,
+    Map<String, dynamic>? person,
+  ) {
+    final slot = _slotForPerson(global, person);
 
-  for (final slot in ordered) {
-    if (!target.containsKey(slot)) {
-      target[slot] = person;
-      return;
+    switch (slot) {
+      case kMother:
+      case kMaternalGm:
+      case kPaternalGm:
+      case kMaternalGmMother:
+      case kMaternalGfMother:
+      case kPaternalGmMother:
+      case kPaternalGfMother:
+        return 'left';
+
+      case kFather:
+      case kMaternalGf:
+      case kPaternalGf:
+      case kMaternalGmFather:
+      case kMaternalGfFather:
+      case kPaternalGmFather:
+      case kPaternalGfFather:
+        return 'right';
+
+      default:
+        return null;
     }
   }
-}
 
-void _placeAncestorsForDisplayedSlot({
-  required Map<String, Map<String, dynamic>> visible,
-  required Map<String, Map<String, dynamic>> global,
-  required Map<String, List<Map<String, dynamic>>> parentsByChild,
-  required Map<String, List<Map<String, dynamic>>> spousesByPerson,
-  required String displayedChildSlot,
-  Map<String, dynamic>? viewer,
-}) {
-  final childPerson = visible[displayedChildSlot];
-  if (childPerson == null) return;
+  void _placePersonIntoExactOrFirstFreeSlots({
+    required Map<String, Map<String, dynamic>> target,
+    required Map<String, Map<String, dynamic>> global,
+    required Map<String, dynamic>? person,
+    required List<String> allowedSlots,
+    Map<String, dynamic>? viewer,
+    List<String>? preferredOrder,
+  }) {
+    if (person == null) return;
+    if (_samePerson(person, viewer)) return;
+    if (_containsPerson(target, person)) return;
+    if (allowedSlots.isEmpty) return;
 
-  final allowedSlots = _parentSlotsForDisplayedChildSlot(displayedChildSlot);
-  if (allowedSlots.isEmpty) return;
+    final exact = _preferredSlotWithinGroup(global, person, allowedSlots);
+    if (exact != null && !target.containsKey(exact)) {
+      target[exact] = person;
+      return;
+    }
 
-  final parents = _parentsIncludingSpouses(
-    parentsByChild,
-    spousesByPerson,
-    global,
-    childPerson,
-  );
+    // Insert role-preserving block for binary slots
+    if (allowedSlots.length == 2) {
+      final role = _binaryRoleFromExactSlot(global, person);
+      if (role == 'left' && !target.containsKey(allowedSlots.first)) {
+        target[allowedSlots.first] = person;
+        return;
+      }
+      if (role == 'right' && !target.containsKey(allowedSlots.last)) {
+        target[allowedSlots.last] = person;
+        return;
+      }
+    }
 
-  for (final parent in parents) {
-    _placePersonIntoExactOrFirstFreeSlots(
-      target: visible,
-      global: global,
-      person: parent,
-      allowedSlots: allowedSlots,
-      viewer: viewer,
+    final ordered = <String>[
+      ...(preferredOrder ?? const <String>[]),
+      ...allowedSlots.where(
+        (slot) => !(preferredOrder ?? const <String>[]).contains(slot),
+      ),
+    ];
+
+    for (final slot in ordered) {
+      if (!target.containsKey(slot)) {
+        target[slot] = person;
+        return;
+      }
+    }
+  }
+
+  void _placeAncestorsForDisplayedSlot({
+    required Map<String, Map<String, dynamic>> visible,
+    required Map<String, Map<String, dynamic>> global,
+    required Map<String, List<Map<String, dynamic>>> parentsByChild,
+    required Map<String, List<Map<String, dynamic>>> spousesByPerson,
+    required String displayedChildSlot,
+    Map<String, dynamic>? viewer,
+  }) {
+    final childPerson = visible[displayedChildSlot];
+    if (childPerson == null) return;
+
+    final allowedSlots = _parentSlotsForDisplayedChildSlot(displayedChildSlot);
+    if (allowedSlots.isEmpty) return;
+
+    final parents = _parentsIncludingSpouses(
+      parentsByChild,
+      spousesByPerson,
+      global,
+      childPerson,
     );
+
+    for (final parent in parents) {
+      _placePersonIntoExactOrFirstFreeSlots(
+        target: visible,
+        global: global,
+        person: parent,
+        allowedSlots: allowedSlots,
+        viewer: viewer,
+      );
+    }
   }
-}
 
   void _placeSingleDescendantForDisplayedSlot({
     required Map<String, Map<String, dynamic>> visible,
@@ -1988,7 +1991,9 @@ void _placeAncestorsForDisplayedSlot({
     final parentPerson = visible[displayedParentSlot];
     if (parentPerson == null) return;
 
-    final targetSlot = _nextDescendantSlotForDisplayedParent(displayedParentSlot);
+    final targetSlot = _nextDescendantSlotForDisplayedParent(
+      displayedParentSlot,
+    );
     if (targetSlot == null) return;
     if (visible.containsKey(targetSlot)) return;
 
@@ -2036,38 +2041,14 @@ void _placeAncestorsForDisplayedSlot({
         parentSlotKey: kPaternalGfFather,
         childSlotKey: kPaternalGf,
       ),
-      _SlotRelationshipPair(
-        parentSlotKey: kMaternalGm,
-        childSlotKey: kMother,
-      ),
-      _SlotRelationshipPair(
-        parentSlotKey: kMaternalGf,
-        childSlotKey: kMother,
-      ),
-      _SlotRelationshipPair(
-        parentSlotKey: kPaternalGm,
-        childSlotKey: kFather,
-      ),
-      _SlotRelationshipPair(
-        parentSlotKey: kPaternalGf,
-        childSlotKey: kFather,
-      ),
-      _SlotRelationshipPair(
-        parentSlotKey: kChild1,
-        childSlotKey: kGrandchild1,
-      ),
-      _SlotRelationshipPair(
-        parentSlotKey: kChild2,
-        childSlotKey: kGrandchild2,
-      ),
-      _SlotRelationshipPair(
-        parentSlotKey: kChild3,
-        childSlotKey: kGrandchild3,
-      ),
-      _SlotRelationshipPair(
-        parentSlotKey: kChild4,
-        childSlotKey: kGrandchild4,
-      ),
+      _SlotRelationshipPair(parentSlotKey: kMaternalGm, childSlotKey: kMother),
+      _SlotRelationshipPair(parentSlotKey: kMaternalGf, childSlotKey: kMother),
+      _SlotRelationshipPair(parentSlotKey: kPaternalGm, childSlotKey: kFather),
+      _SlotRelationshipPair(parentSlotKey: kPaternalGf, childSlotKey: kFather),
+      _SlotRelationshipPair(parentSlotKey: kChild1, childSlotKey: kGrandchild1),
+      _SlotRelationshipPair(parentSlotKey: kChild2, childSlotKey: kGrandchild2),
+      _SlotRelationshipPair(parentSlotKey: kChild3, childSlotKey: kGrandchild3),
+      _SlotRelationshipPair(parentSlotKey: kChild4, childSlotKey: kGrandchild4),
       _SlotRelationshipPair(
         parentSlotKey: kGrandchild1,
         childSlotKey: kGreatGrandchild1,
@@ -2086,7 +2067,6 @@ void _placeAncestorsForDisplayedSlot({
       ),
     ];
   }
-
 
   Map<String, Map<String, dynamic>> _slotToDisplayMap(_FamilyData data) {
     final global = _slotToGlobalPersonMap(data);
@@ -2214,7 +2194,7 @@ void _placeAncestorsForDisplayedSlot({
     );
 
     // 4) Viewer spouse: explicit spouse relation first, shared-child fallback second.
-        final spouse = _spouseForViewer(
+    final spouse = _spouseForViewer(
       parentsByChild,
       childrenByParent,
       spousesByPerson,
@@ -2330,7 +2310,6 @@ void _placeAncestorsForDisplayedSlot({
     return _normalizeVisibleSlots(visible, viewer: viewer);
   }
 
-
   Future<void> _openYourVaultFallback() async {
     try {
       final uid = _supabase.auth.currentUser?.id;
@@ -2344,10 +2323,11 @@ void _placeAncestorsForDisplayedSlot({
       if (v == null) return;
 
       final vaultId = (v['id'] ?? '').toString();
-      final vaultName = ((v['display_name'] ?? '').toString().trim().isNotEmpty
-              ? v['display_name']
-              : (v['name'] ?? 'Vault'))
-          .toString();
+      final vaultName =
+          ((v['display_name'] ?? '').toString().trim().isNotEmpty
+                  ? v['display_name']
+                  : (v['name'] ?? 'Vault'))
+              .toString();
       if (vaultId.isEmpty) return;
 
       if (!mounted) return;
@@ -2484,9 +2464,9 @@ void _placeAncestorsForDisplayedSlot({
             'Invite failed because this slot key is not allowed yet in the family_invites table. Run the slot-key migration for family_invites, then try again.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -2570,8 +2550,10 @@ void _placeAncestorsForDisplayedSlot({
                     childrenPadding: EdgeInsets.zero,
                     title: const Text(
                       'Optional extra details',
-                      style:
-                          TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     children: [
                       TextField(
@@ -2594,10 +2576,7 @@ void _placeAncestorsForDisplayedSlot({
                   ),
                   if (errorText != null) ...[
                     const SizedBox(height: 10),
-                    Text(
-                      errorText!,
-                      style: const TextStyle(color: Colors.red),
-                    ),
+                    Text(errorText!, style: const TextStyle(color: Colors.red)),
                   ],
                 ],
               ),
@@ -2625,15 +2604,19 @@ void _placeAncestorsForDisplayedSlot({
 
                       if (birthYearController.text.trim().isNotEmpty &&
                           birthYear == null) {
-                        setInner(() =>
-                            errorText = 'Birth year must be a valid number.');
+                        setInner(
+                          () =>
+                              errorText = 'Birth year must be a valid number.',
+                        );
                         return;
                       }
 
                       if (deathYearController.text.trim().isNotEmpty &&
                           deathYear == null) {
-                        setInner(() =>
-                            errorText = 'Death year must be a valid number.');
+                        setInner(
+                          () =>
+                              errorText = 'Death year must be a valid number.',
+                        );
                         return;
                       }
 
@@ -2644,7 +2627,9 @@ void _placeAncestorsForDisplayedSlot({
 
                       try {
                         final relation = _legacyRelationForSlot(slotKey);
-                        final anchorPerson = _legacyAnchorPersonForSlot(slotKey);
+                        final anchorPerson = _legacyAnchorPersonForSlot(
+                          slotKey,
+                        );
                         final anchorRef = _nodeRefFromPerson(anchorPerson);
 
                         if (relation == null) {
@@ -2667,10 +2652,13 @@ void _placeAncestorsForDisplayedSlot({
                               .from('legacy_family_members')
                               .insert({
                                 'family_id': widget.familyId,
-                                'slot_key': _canonicalSlotKeyForCurrentViewer(slotKey),
+                                'slot_key': _canonicalSlotKeyForCurrentViewer(
+                                  slotKey,
+                                ),
                                 'name': name,
-                                'display_name':
-                                    displayName.isEmpty ? null : displayName,
+                                'display_name': displayName.isEmpty
+                                    ? null
+                                    : displayName,
                                 'birth_year': birthYear,
                                 'death_year': deathYear,
                                 'created_by': uid,
@@ -2679,8 +2667,9 @@ void _placeAncestorsForDisplayedSlot({
                               .select('id')
                               .maybeSingle();
 
-                          createdLegacyId =
-                              (inserted?['id'] ?? '').toString().trim();
+                          createdLegacyId = (inserted?['id'] ?? '')
+                              .toString()
+                              .trim();
                         } else {
                           final legacyId = await _supabase.rpc(
                             'create_legacy_relative',
@@ -2690,8 +2679,9 @@ void _placeAncestorsForDisplayedSlot({
                               'p_anchor_id': anchorRef.nodeId,
                               'p_relation': relation,
                               'p_name': name,
-                              'p_display_name':
-                                  displayName.isEmpty ? null : displayName,
+                              'p_display_name': displayName.isEmpty
+                                  ? null
+                                  : displayName,
                               'p_birth_year': birthYear,
                               'p_death_year': deathYear,
                               'p_about_me_text': about.isEmpty ? null : about,
@@ -2705,7 +2695,9 @@ void _placeAncestorsForDisplayedSlot({
                             await _supabase
                                 .from('legacy_family_members')
                                 .update({
-                                  'slot_key': _canonicalSlotKeyForCurrentViewer(slotKey),
+                                  'slot_key': _canonicalSlotKeyForCurrentViewer(
+                                    slotKey,
+                                  ),
                                 })
                                 .eq('id', createdLegacyId);
                           }
@@ -2770,8 +2762,10 @@ void _placeAncestorsForDisplayedSlot({
             children: [
               Text(
                 'Add $title',
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
@@ -2802,10 +2796,7 @@ void _placeAncestorsForDisplayedSlot({
                 ),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _showLegacyPredecessorDialog(
-                    slotKey: slotKey,
-                    title: title,
-                  );
+                  _showLegacyPredecessorDialog(slotKey: slotKey, title: title);
                 },
               ),
             ],
@@ -2929,10 +2920,11 @@ void _placeAncestorsForDisplayedSlot({
     final uid = _supabase.auth.currentUser?.id;
     final ownerId = (v['owner_id'] ?? '').toString();
     final vaultId = (v['id'] ?? '').toString();
-    final vaultName = ((v['display_name'] ?? '').toString().trim().isNotEmpty
-            ? v['display_name']
-            : (v['name'] ?? 'Vault'))
-        .toString();
+    final vaultName =
+        ((v['display_name'] ?? '').toString().trim().isNotEmpty
+                ? v['display_name']
+                : (v['name'] ?? 'Vault'))
+            .toString();
 
     final isLegacy = v['__legacy'] == true;
     if (isLegacy) {
@@ -3018,16 +3010,13 @@ void _placeAncestorsForDisplayedSlot({
         slotKey: slotKey,
         title: 'Great-grandparent',
       ),
-      onOpen: () => _openVaultFromTree(
-        data,
-        slotVault[slotKey]!,
-      ),
+      onOpen: () => _openVaultFromTree(data, slotVault[slotKey]!),
       onBranchTap: slotVault[slotKey] == null
           ? null
           : () => _openDirectBranchForPerson(
-                slotKey: slotKey,
-                person: slotVault[slotKey]!,
-              ),
+              slotKey: slotKey,
+              person: slotVault[slotKey]!,
+            ),
       showAddLabel: 'Add great-grandparent',
     );
   }
@@ -3070,6 +3059,20 @@ void _placeAncestorsForDisplayedSlot({
         title: const Text('Your Family Tree'),
         actions: [
           IconButton(
+            tooltip: 'Try relationship tree preview',
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      RelationshipTreeScreen(familyId: widget.familyId),
+                ),
+              );
+              _refresh();
+            },
+            icon: const Icon(Icons.hub_outlined),
+          ),
+          IconButton(
             tooltip: 'Refresh',
             onPressed: _refresh,
             icon: const Icon(Icons.refresh),
@@ -3089,7 +3092,8 @@ void _placeAncestorsForDisplayedSlot({
       body: FutureBuilder<_FamilyData>(
         future: _future,
         builder: (context, snapshot) {
-          final data = snapshot.data ??
+          final data =
+              snapshot.data ??
               const _FamilyData(
                 vaults: [],
                 members: [],
@@ -3108,13 +3112,11 @@ void _placeAncestorsForDisplayedSlot({
           final yourVault = _yourVault(data);
           final viewer = _currentViewerPerson(data);
 
-          final yourName = ((viewer?['display_name'] ?? '')
-                      .toString()
-                      .trim()
-                      .isNotEmpty
-                  ? viewer!['display_name']
-                  : (viewer?['name'] ?? 'Your vault (you)'))
-              .toString();
+          final yourName =
+              ((viewer?['display_name'] ?? '').toString().trim().isNotEmpty
+                      ? viewer!['display_name']
+                      : (viewer?['name'] ?? 'Your vault (you)'))
+                  .toString();
 
           final yourVaultId = (viewer?['id'] ?? '').toString();
           final yourAvatarUrl = yourVaultId.isNotEmpty
@@ -3140,8 +3142,10 @@ void _placeAncestorsForDisplayedSlot({
                 ),
               ),
               ListView(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
                 children: [
                   const SizedBox(height: 8),
                   Center(
@@ -3155,8 +3159,10 @@ void _placeAncestorsForDisplayedSlot({
                   const Center(
                     child: Text(
                       'Your Family Tree',
-                      style:
-                          TextStyle(fontSize: 30, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w700,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -3169,8 +3175,9 @@ void _placeAncestorsForDisplayedSlot({
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(20),
-                          border:
-                              Border.all(color: Colors.black.withOpacity(0.08)),
+                          border: Border.all(
+                            color: Colors.black.withOpacity(0.08),
+                          ),
                           color: Colors.white.withOpacity(0.22),
                         ),
                         child: Stack(
@@ -3273,33 +3280,31 @@ void _placeAncestorsForDisplayedSlot({
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kMaternalGm),
-                                                  filled: slotVault[kMaternalGm],
-                                                  avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kMaternalGm]
-                                                                  ?['id'] ??
+                                                  filled:
+                                                      slotVault[kMaternalGm],
+                                                  avatarUrl:
+                                                      data.avatarUrlByVaultId[(slotVault[kMaternalGm]?['id'] ??
                                                               '')
                                                           .toString()],
                                                   onInvite: () =>
                                                       _openPredecessorAddOptions(
-                                                    slotKey: kMaternalGm,
-                                                    title: 'Grandparent',
-                                                  ),
+                                                        slotKey: kMaternalGm,
+                                                        title: 'Grandparent',
+                                                      ),
                                                   onOpen: () =>
                                                       _openVaultFromTree(
-                                                    data,
-                                                    slotVault[kMaternalGm]!,
-                                                  ),
-                                                  onBranchTap: slotVault[
-                                                              kMaternalGm] ==
+                                                        data,
+                                                        slotVault[kMaternalGm]!,
+                                                      ),
+                                                  onBranchTap:
+                                                      slotVault[kMaternalGm] ==
                                                           null
                                                       ? null
-                                                      : () =>
-                                                          _openDirectBranchForPerson(
-                                                            slotKey:
-                                                                kMaternalGm,
-                                                            person: slotVault[
-                                                                kMaternalGm]!,
-                                                          ),
+                                                      : () => _openDirectBranchForPerson(
+                                                          slotKey: kMaternalGm,
+                                                          person:
+                                                              slotVault[kMaternalGm]!,
+                                                        ),
                                                   showAddLabel:
                                                       'Add grandparent',
                                                 ),
@@ -3308,33 +3313,31 @@ void _placeAncestorsForDisplayedSlot({
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kMaternalGf),
-                                                  filled: slotVault[kMaternalGf],
-                                                  avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kMaternalGf]
-                                                                  ?['id'] ??
+                                                  filled:
+                                                      slotVault[kMaternalGf],
+                                                  avatarUrl:
+                                                      data.avatarUrlByVaultId[(slotVault[kMaternalGf]?['id'] ??
                                                               '')
                                                           .toString()],
                                                   onInvite: () =>
                                                       _openPredecessorAddOptions(
-                                                    slotKey: kMaternalGf,
-                                                    title: 'Grandparent',
-                                                  ),
+                                                        slotKey: kMaternalGf,
+                                                        title: 'Grandparent',
+                                                      ),
                                                   onOpen: () =>
                                                       _openVaultFromTree(
-                                                    data,
-                                                    slotVault[kMaternalGf]!,
-                                                  ),
-                                                  onBranchTap: slotVault[
-                                                              kMaternalGf] ==
+                                                        data,
+                                                        slotVault[kMaternalGf]!,
+                                                      ),
+                                                  onBranchTap:
+                                                      slotVault[kMaternalGf] ==
                                                           null
                                                       ? null
-                                                      : () =>
-                                                          _openDirectBranchForPerson(
-                                                            slotKey:
-                                                                kMaternalGf,
-                                                            person: slotVault[
-                                                                kMaternalGf]!,
-                                                          ),
+                                                      : () => _openDirectBranchForPerson(
+                                                          slotKey: kMaternalGf,
+                                                          person:
+                                                              slotVault[kMaternalGf]!,
+                                                        ),
                                                   showAddLabel:
                                                       'Add grandparent',
                                                 ),
@@ -3352,33 +3355,31 @@ void _placeAncestorsForDisplayedSlot({
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kPaternalGm),
-                                                  filled: slotVault[kPaternalGm],
-                                                  avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kPaternalGm]
-                                                                  ?['id'] ??
+                                                  filled:
+                                                      slotVault[kPaternalGm],
+                                                  avatarUrl:
+                                                      data.avatarUrlByVaultId[(slotVault[kPaternalGm]?['id'] ??
                                                               '')
                                                           .toString()],
                                                   onInvite: () =>
                                                       _openPredecessorAddOptions(
-                                                    slotKey: kPaternalGm,
-                                                    title: 'Grandparent',
-                                                  ),
+                                                        slotKey: kPaternalGm,
+                                                        title: 'Grandparent',
+                                                      ),
                                                   onOpen: () =>
                                                       _openVaultFromTree(
-                                                    data,
-                                                    slotVault[kPaternalGm]!,
-                                                  ),
-                                                  onBranchTap: slotVault[
-                                                              kPaternalGm] ==
+                                                        data,
+                                                        slotVault[kPaternalGm]!,
+                                                      ),
+                                                  onBranchTap:
+                                                      slotVault[kPaternalGm] ==
                                                           null
                                                       ? null
-                                                      : () =>
-                                                          _openDirectBranchForPerson(
-                                                            slotKey:
-                                                                kPaternalGm,
-                                                            person: slotVault[
-                                                                kPaternalGm]!,
-                                                          ),
+                                                      : () => _openDirectBranchForPerson(
+                                                          slotKey: kPaternalGm,
+                                                          person:
+                                                              slotVault[kPaternalGm]!,
+                                                        ),
                                                   showAddLabel:
                                                       'Add grandparent',
                                                 ),
@@ -3387,33 +3388,31 @@ void _placeAncestorsForDisplayedSlot({
                                               Expanded(
                                                 child: _PersonSlot(
                                                   key: _keyFor(kPaternalGf),
-                                                  filled: slotVault[kPaternalGf],
-                                                  avatarUrl: data.avatarUrlByVaultId[
-                                                      (slotVault[kPaternalGf]
-                                                                  ?['id'] ??
+                                                  filled:
+                                                      slotVault[kPaternalGf],
+                                                  avatarUrl:
+                                                      data.avatarUrlByVaultId[(slotVault[kPaternalGf]?['id'] ??
                                                               '')
                                                           .toString()],
                                                   onInvite: () =>
                                                       _openPredecessorAddOptions(
-                                                    slotKey: kPaternalGf,
-                                                    title: 'Grandparent',
-                                                  ),
+                                                        slotKey: kPaternalGf,
+                                                        title: 'Grandparent',
+                                                      ),
                                                   onOpen: () =>
                                                       _openVaultFromTree(
-                                                    data,
-                                                    slotVault[kPaternalGf]!,
-                                                  ),
-                                                  onBranchTap: slotVault[
-                                                              kPaternalGf] ==
+                                                        data,
+                                                        slotVault[kPaternalGf]!,
+                                                      ),
+                                                  onBranchTap:
+                                                      slotVault[kPaternalGf] ==
                                                           null
                                                       ? null
-                                                      : () =>
-                                                          _openDirectBranchForPerson(
-                                                            slotKey:
-                                                                kPaternalGf,
-                                                            person: slotVault[
-                                                                kPaternalGf]!,
-                                                          ),
+                                                      : () => _openDirectBranchForPerson(
+                                                          slotKey: kPaternalGf,
+                                                          person:
+                                                              slotVault[kPaternalGf]!,
+                                                        ),
                                                   showAddLabel:
                                                       'Add grandparent',
                                                 ),
@@ -3436,25 +3435,28 @@ void _placeAncestorsForDisplayedSlot({
                                         child: _PersonSlot(
                                           key: _keyFor(kMother),
                                           filled: slotVault[kMother],
-                                          avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kMother]?['id'] ?? '')
+                                          avatarUrl:
+                                              data.avatarUrlByVaultId[(slotVault[kMother]?['id'] ??
+                                                      '')
                                                   .toString()],
                                           onInvite: () =>
                                               _openPredecessorAddOptions(
-                                            slotKey: kMother,
-                                            title: 'Parent',
-                                          ),
+                                                slotKey: kMother,
+                                                title: 'Parent',
+                                              ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
                                             slotVault[kMother]!,
                                           ),
-                                          onBranchTap: slotVault[kMother] == null
+                                          onBranchTap:
+                                              slotVault[kMother] == null
                                               ? null
                                               : () =>
-                                                  _openDirectBranchForPerson(
-                                                    slotKey: kMother,
-                                                    person: slotVault[kMother]!,
-                                                  ),
+                                                    _openDirectBranchForPerson(
+                                                      slotKey: kMother,
+                                                      person:
+                                                          slotVault[kMother]!,
+                                                    ),
                                           showAddLabel: 'Add parent',
                                         ),
                                       ),
@@ -3464,25 +3466,28 @@ void _placeAncestorsForDisplayedSlot({
                                         child: _PersonSlot(
                                           key: _keyFor(kFather),
                                           filled: slotVault[kFather],
-                                          avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kFather]?['id'] ?? '')
+                                          avatarUrl:
+                                              data.avatarUrlByVaultId[(slotVault[kFather]?['id'] ??
+                                                      '')
                                                   .toString()],
                                           onInvite: () =>
                                               _openPredecessorAddOptions(
-                                            slotKey: kFather,
-                                            title: 'Parent',
-                                          ),
+                                                slotKey: kFather,
+                                                title: 'Parent',
+                                              ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
                                             slotVault[kFather]!,
                                           ),
-                                          onBranchTap: slotVault[kFather] == null
+                                          onBranchTap:
+                                              slotVault[kFather] == null
                                               ? null
                                               : () =>
-                                                  _openDirectBranchForPerson(
-                                                    slotKey: kFather,
-                                                    person: slotVault[kFather]!,
-                                                  ),
+                                                    _openDirectBranchForPerson(
+                                                      slotKey: kFather,
+                                                      person:
+                                                          slotVault[kFather]!,
+                                                    ),
                                           showAddLabel: 'Add parent',
                                         ),
                                       ),
@@ -3499,14 +3504,15 @@ void _placeAncestorsForDisplayedSlot({
                                         child: _PersonSlot(
                                           key: _keyFor(kSpouse1),
                                           filled: slotVault[kSpouse1],
-                                          avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kSpouse1]?['id'] ?? '')
+                                          avatarUrl:
+                                              data.avatarUrlByVaultId[(slotVault[kSpouse1]?['id'] ??
+                                                      '')
                                                   .toString()],
                                           onInvite: () =>
                                               _openPredecessorAddOptions(
-                                            slotKey: kSpouse1,
-                                            title: 'Spouse',
-                                          ),
+                                                slotKey: kSpouse1,
+                                                title: 'Spouse',
+                                              ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
                                             slotVault[kSpouse1]!,
@@ -3550,15 +3556,15 @@ void _placeAncestorsForDisplayedSlot({
                                             _PersonSlot(
                                               key: _keyFor(kSibling1),
                                               filled: slotVault[kSibling1],
-                                              avatarUrl: data.avatarUrlByVaultId[
-                                                  (slotVault[kSibling1]?['id'] ??
+                                              avatarUrl:
+                                                  data.avatarUrlByVaultId[(slotVault[kSibling1]?['id'] ??
                                                           '')
                                                       .toString()],
                                               onInvite: () =>
                                                   _openPredecessorAddOptions(
-                                                slotKey: kSibling1,
-                                                title: 'Sibling',
-                                              ),
+                                                    slotKey: kSibling1,
+                                                    title: 'Sibling',
+                                                  ),
                                               onOpen: () => _openVaultFromTree(
                                                 data,
                                                 slotVault[kSibling1]!,
@@ -3570,15 +3576,15 @@ void _placeAncestorsForDisplayedSlot({
                                             _PersonSlot(
                                               key: _keyFor(kSibling2),
                                               filled: slotVault[kSibling2],
-                                              avatarUrl: data.avatarUrlByVaultId[
-                                                  (slotVault[kSibling2]?['id'] ??
+                                              avatarUrl:
+                                                  data.avatarUrlByVaultId[(slotVault[kSibling2]?['id'] ??
                                                           '')
                                                       .toString()],
                                               onInvite: () =>
                                                   _openPredecessorAddOptions(
-                                                slotKey: kSibling2,
-                                                title: 'Sibling',
-                                              ),
+                                                    slotKey: kSibling2,
+                                                    title: 'Sibling',
+                                                  ),
                                               onOpen: () => _openVaultFromTree(
                                                 data,
                                                 slotVault[kSibling2]!,
@@ -3590,15 +3596,15 @@ void _placeAncestorsForDisplayedSlot({
                                             _PersonSlot(
                                               key: _keyFor(kSibling3),
                                               filled: slotVault[kSibling3],
-                                              avatarUrl: data.avatarUrlByVaultId[
-                                                  (slotVault[kSibling3]?['id'] ??
+                                              avatarUrl:
+                                                  data.avatarUrlByVaultId[(slotVault[kSibling3]?['id'] ??
                                                           '')
                                                       .toString()],
                                               onInvite: () =>
                                                   _openPredecessorAddOptions(
-                                                slotKey: kSibling3,
-                                                title: 'Sibling',
-                                              ),
+                                                    slotKey: kSibling3,
+                                                    title: 'Sibling',
+                                                  ),
                                               onOpen: () => _openVaultFromTree(
                                                 data,
                                                 slotVault[kSibling3]!,
@@ -3632,97 +3638,109 @@ void _placeAncestorsForDisplayedSlot({
                                           key: _keyFor(kChild1),
                                           text: 'Add child',
                                           filled: slotVault[kChild1],
-                                          avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kChild1]?['id'] ?? '')
+                                          avatarUrl:
+                                              data.avatarUrlByVaultId[(slotVault[kChild1]?['id'] ??
+                                                      '')
                                                   .toString()],
                                           onInvite: () =>
                                               _openPredecessorAddOptions(
-                                            slotKey: kChild1,
-                                            title: 'Child',
-                                          ),
+                                                slotKey: kChild1,
+                                                title: 'Child',
+                                              ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
                                             slotVault[kChild1]!,
                                           ),
-                                          onBranchTap: slotVault[kChild1] == null
+                                          onBranchTap:
+                                              slotVault[kChild1] == null
                                               ? null
                                               : () =>
-                                                  _openDirectBranchForPerson(
-                                                    slotKey: kChild1,
-                                                    person: slotVault[kChild1]!,
-                                                  ),
+                                                    _openDirectBranchForPerson(
+                                                      slotKey: kChild1,
+                                                      person:
+                                                          slotVault[kChild1]!,
+                                                    ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild2),
                                           text: 'Add child',
                                           filled: slotVault[kChild2],
-                                          avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kChild2]?['id'] ?? '')
+                                          avatarUrl:
+                                              data.avatarUrlByVaultId[(slotVault[kChild2]?['id'] ??
+                                                      '')
                                                   .toString()],
                                           onInvite: () =>
                                               _openPredecessorAddOptions(
-                                            slotKey: kChild2,
-                                            title: 'Child',
-                                          ),
+                                                slotKey: kChild2,
+                                                title: 'Child',
+                                              ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
                                             slotVault[kChild2]!,
                                           ),
-                                          onBranchTap: slotVault[kChild2] == null
+                                          onBranchTap:
+                                              slotVault[kChild2] == null
                                               ? null
                                               : () =>
-                                                  _openDirectBranchForPerson(
-                                                    slotKey: kChild2,
-                                                    person: slotVault[kChild2]!,
-                                                  ),
+                                                    _openDirectBranchForPerson(
+                                                      slotKey: kChild2,
+                                                      person:
+                                                          slotVault[kChild2]!,
+                                                    ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild3),
                                           text: 'Add child',
                                           filled: slotVault[kChild3],
-                                          avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kChild3]?['id'] ?? '')
+                                          avatarUrl:
+                                              data.avatarUrlByVaultId[(slotVault[kChild3]?['id'] ??
+                                                      '')
                                                   .toString()],
                                           onInvite: () =>
                                               _openPredecessorAddOptions(
-                                            slotKey: kChild3,
-                                            title: 'Child',
-                                          ),
+                                                slotKey: kChild3,
+                                                title: 'Child',
+                                              ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
                                             slotVault[kChild3]!,
                                           ),
-                                          onBranchTap: slotVault[kChild3] == null
+                                          onBranchTap:
+                                              slotVault[kChild3] == null
                                               ? null
                                               : () =>
-                                                  _openDirectBranchForPerson(
-                                                    slotKey: kChild3,
-                                                    person: slotVault[kChild3]!,
-                                                  ),
+                                                    _openDirectBranchForPerson(
+                                                      slotKey: kChild3,
+                                                      person:
+                                                          slotVault[kChild3]!,
+                                                    ),
                                         ),
                                         _SmallInviteSlot(
                                           key: _keyFor(kChild4),
                                           text: 'Add child',
                                           filled: slotVault[kChild4],
-                                          avatarUrl: data.avatarUrlByVaultId[
-                                              (slotVault[kChild4]?['id'] ?? '')
+                                          avatarUrl:
+                                              data.avatarUrlByVaultId[(slotVault[kChild4]?['id'] ??
+                                                      '')
                                                   .toString()],
                                           onInvite: () =>
                                               _openPredecessorAddOptions(
-                                            slotKey: kChild4,
-                                            title: 'Child',
-                                          ),
+                                                slotKey: kChild4,
+                                                title: 'Child',
+                                              ),
                                           onOpen: () => _openVaultFromTree(
                                             data,
                                             slotVault[kChild4]!,
                                           ),
-                                          onBranchTap: slotVault[kChild4] == null
+                                          onBranchTap:
+                                              slotVault[kChild4] == null
                                               ? null
                                               : () =>
-                                                  _openDirectBranchForPerson(
-                                                    slotKey: kChild4,
-                                                    person: slotVault[kChild4]!,
-                                                  ),
+                                                    _openDirectBranchForPerson(
+                                                      slotKey: kChild4,
+                                                      person:
+                                                          slotVault[kChild4]!,
+                                                    ),
                                         ),
                                       ],
                                     ),
@@ -3747,109 +3765,105 @@ void _placeAncestorsForDisplayedSlot({
                                             key: _keyFor(kGrandchild1),
                                             text: 'Add grandchild',
                                             filled: slotVault[kGrandchild1],
-                                            avatarUrl: data.avatarUrlByVaultId[
-                                                (slotVault[kGrandchild1]?['id'] ??
+                                            avatarUrl:
+                                                data.avatarUrlByVaultId[(slotVault[kGrandchild1]?['id'] ??
                                                         '')
                                                     .toString()],
                                             onInvite: () =>
                                                 _openPredecessorAddOptions(
-                                              slotKey: kGrandchild1,
-                                              title: 'Grandchild',
-                                            ),
+                                                  slotKey: kGrandchild1,
+                                                  title: 'Grandchild',
+                                                ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
                                               slotVault[kGrandchild1]!,
                                             ),
                                             onBranchTap:
                                                 slotVault[kGrandchild1] == null
-                                                    ? null
-                                                    : () =>
-                                                        _openDirectBranchForPerson(
-                                                          slotKey: kGrandchild1,
-                                                          person: slotVault[
-                                                              kGrandchild1]!,
-                                                        ),
+                                                ? null
+                                                : () => _openDirectBranchForPerson(
+                                                    slotKey: kGrandchild1,
+                                                    person:
+                                                        slotVault[kGrandchild1]!,
+                                                  ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild2),
                                             text: 'Add grandchild',
                                             filled: slotVault[kGrandchild2],
-                                            avatarUrl: data.avatarUrlByVaultId[
-                                                (slotVault[kGrandchild2]?['id'] ??
+                                            avatarUrl:
+                                                data.avatarUrlByVaultId[(slotVault[kGrandchild2]?['id'] ??
                                                         '')
                                                     .toString()],
                                             onInvite: () =>
                                                 _openPredecessorAddOptions(
-                                              slotKey: kGrandchild2,
-                                              title: 'Grandchild',
-                                            ),
+                                                  slotKey: kGrandchild2,
+                                                  title: 'Grandchild',
+                                                ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
                                               slotVault[kGrandchild2]!,
                                             ),
                                             onBranchTap:
                                                 slotVault[kGrandchild2] == null
-                                                    ? null
-                                                    : () =>
-                                                        _openDirectBranchForPerson(
-                                                          slotKey: kGrandchild2,
-                                                          person: slotVault[
-                                                              kGrandchild2]!,
-                                                        ),
+                                                ? null
+                                                : () => _openDirectBranchForPerson(
+                                                    slotKey: kGrandchild2,
+                                                    person:
+                                                        slotVault[kGrandchild2]!,
+                                                  ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild3),
                                             text: 'Add grandchild',
                                             filled: slotVault[kGrandchild3],
-                                            avatarUrl: data.avatarUrlByVaultId[
-                                                (slotVault[kGrandchild3]?['id'] ??
+                                            avatarUrl:
+                                                data.avatarUrlByVaultId[(slotVault[kGrandchild3]?['id'] ??
                                                         '')
                                                     .toString()],
                                             onInvite: () =>
                                                 _openPredecessorAddOptions(
-                                              slotKey: kGrandchild3,
-                                              title: 'Grandchild',
-                                            ),
+                                                  slotKey: kGrandchild3,
+                                                  title: 'Grandchild',
+                                                ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
                                               slotVault[kGrandchild3]!,
                                             ),
                                             onBranchTap:
                                                 slotVault[kGrandchild3] == null
-                                                    ? null
-                                                    : () =>
-                                                        _openDirectBranchForPerson(
-                                                          slotKey: kGrandchild3,
-                                                          person: slotVault[
-                                                              kGrandchild3]!,
-                                                        ),
+                                                ? null
+                                                : () => _openDirectBranchForPerson(
+                                                    slotKey: kGrandchild3,
+                                                    person:
+                                                        slotVault[kGrandchild3]!,
+                                                  ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGrandchild4),
                                             text: 'Add grandchild',
                                             filled: slotVault[kGrandchild4],
-                                            avatarUrl: data.avatarUrlByVaultId[
-                                                (slotVault[kGrandchild4]?['id'] ??
+                                            avatarUrl:
+                                                data.avatarUrlByVaultId[(slotVault[kGrandchild4]?['id'] ??
                                                         '')
                                                     .toString()],
                                             onInvite: () =>
                                                 _openPredecessorAddOptions(
-                                              slotKey: kGrandchild4,
-                                              title: 'Grandchild',
-                                            ),
+                                                  slotKey: kGrandchild4,
+                                                  title: 'Grandchild',
+                                                ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
                                               slotVault[kGrandchild4]!,
                                             ),
                                             onBranchTap:
                                                 slotVault[kGrandchild4] == null
-                                                    ? null
-                                                    : () =>
-                                                        _openDirectBranchForPerson(
-                                                          slotKey: kGrandchild4,
-                                                          person: slotVault[
-                                                              kGrandchild4]!,
-                                                        ),
+                                                ? null
+                                                : () => _openDirectBranchForPerson(
+                                                    slotKey: kGrandchild4,
+                                                    person:
+                                                        slotVault[kGrandchild4]!,
+                                                  ),
                                           ),
                                         ],
                                       ),
@@ -3875,122 +3889,114 @@ void _placeAncestorsForDisplayedSlot({
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild1),
                                             text: 'Add great-grandchild',
-                                            filled: slotVault[kGreatGrandchild1],
-                                            avatarUrl: data.avatarUrlByVaultId[
-                                                (slotVault[kGreatGrandchild1]
-                                                            ?['id'] ??
+                                            filled:
+                                                slotVault[kGreatGrandchild1],
+                                            avatarUrl:
+                                                data.avatarUrlByVaultId[(slotVault[kGreatGrandchild1]?['id'] ??
                                                         '')
                                                     .toString()],
                                             onInvite: () =>
                                                 _openPredecessorAddOptions(
-                                              slotKey: kGreatGrandchild1,
-                                              title: 'Great-grandchild',
-                                            ),
+                                                  slotKey: kGreatGrandchild1,
+                                                  title: 'Great-grandchild',
+                                                ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
                                               slotVault[kGreatGrandchild1]!,
                                             ),
-                                            onBranchTap: slotVault[
-                                                        kGreatGrandchild1] ==
+                                            onBranchTap:
+                                                slotVault[kGreatGrandchild1] ==
                                                     null
                                                 ? null
-                                                : () =>
-                                                    _openDirectBranchForPerson(
-                                                      slotKey:
-                                                          kGreatGrandchild1,
-                                                      person: slotVault[
-                                                          kGreatGrandchild1]!,
-                                                    ),
+                                                : () => _openDirectBranchForPerson(
+                                                    slotKey: kGreatGrandchild1,
+                                                    person:
+                                                        slotVault[kGreatGrandchild1]!,
+                                                  ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild2),
                                             text: 'Add great-grandchild',
-                                            filled: slotVault[kGreatGrandchild2],
-                                            avatarUrl: data.avatarUrlByVaultId[
-                                                (slotVault[kGreatGrandchild2]
-                                                            ?['id'] ??
+                                            filled:
+                                                slotVault[kGreatGrandchild2],
+                                            avatarUrl:
+                                                data.avatarUrlByVaultId[(slotVault[kGreatGrandchild2]?['id'] ??
                                                         '')
                                                     .toString()],
                                             onInvite: () =>
                                                 _openPredecessorAddOptions(
-                                              slotKey: kGreatGrandchild2,
-                                              title: 'Great-grandchild',
-                                            ),
+                                                  slotKey: kGreatGrandchild2,
+                                                  title: 'Great-grandchild',
+                                                ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
                                               slotVault[kGreatGrandchild2]!,
                                             ),
-                                            onBranchTap: slotVault[
-                                                        kGreatGrandchild2] ==
+                                            onBranchTap:
+                                                slotVault[kGreatGrandchild2] ==
                                                     null
                                                 ? null
-                                                : () =>
-                                                    _openDirectBranchForPerson(
-                                                      slotKey:
-                                                          kGreatGrandchild2,
-                                                      person: slotVault[
-                                                          kGreatGrandchild2]!,
-                                                    ),
+                                                : () => _openDirectBranchForPerson(
+                                                    slotKey: kGreatGrandchild2,
+                                                    person:
+                                                        slotVault[kGreatGrandchild2]!,
+                                                  ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild3),
                                             text: 'Add great-grandchild',
-                                            filled: slotVault[kGreatGrandchild3],
-                                            avatarUrl: data.avatarUrlByVaultId[
-                                                (slotVault[kGreatGrandchild3]
-                                                            ?['id'] ??
+                                            filled:
+                                                slotVault[kGreatGrandchild3],
+                                            avatarUrl:
+                                                data.avatarUrlByVaultId[(slotVault[kGreatGrandchild3]?['id'] ??
                                                         '')
                                                     .toString()],
                                             onInvite: () =>
                                                 _openPredecessorAddOptions(
-                                              slotKey: kGreatGrandchild3,
-                                              title: 'Great-grandchild',
-                                            ),
+                                                  slotKey: kGreatGrandchild3,
+                                                  title: 'Great-grandchild',
+                                                ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
                                               slotVault[kGreatGrandchild3]!,
                                             ),
-                                            onBranchTap: slotVault[
-                                                        kGreatGrandchild3] ==
+                                            onBranchTap:
+                                                slotVault[kGreatGrandchild3] ==
                                                     null
                                                 ? null
-                                                : () =>
-                                                    _openDirectBranchForPerson(
-                                                      slotKey:
-                                                          kGreatGrandchild3,
-                                                      person: slotVault[
-                                                          kGreatGrandchild3]!,
-                                                    ),
+                                                : () => _openDirectBranchForPerson(
+                                                    slotKey: kGreatGrandchild3,
+                                                    person:
+                                                        slotVault[kGreatGrandchild3]!,
+                                                  ),
                                           ),
                                           _SmallInviteSlot(
                                             key: _keyFor(kGreatGrandchild4),
                                             text: 'Add great-grandchild',
-                                            filled: slotVault[kGreatGrandchild4],
-                                            avatarUrl: data.avatarUrlByVaultId[
-                                                (slotVault[kGreatGrandchild4]
-                                                            ?['id'] ??
+                                            filled:
+                                                slotVault[kGreatGrandchild4],
+                                            avatarUrl:
+                                                data.avatarUrlByVaultId[(slotVault[kGreatGrandchild4]?['id'] ??
                                                         '')
                                                     .toString()],
                                             onInvite: () =>
                                                 _openPredecessorAddOptions(
-                                              slotKey: kGreatGrandchild4,
-                                              title: 'Great-grandchild',
-                                            ),
+                                                  slotKey: kGreatGrandchild4,
+                                                  title: 'Great-grandchild',
+                                                ),
                                             onOpen: () => _openVaultFromTree(
                                               data,
                                               slotVault[kGreatGrandchild4]!,
                                             ),
-                                            onBranchTap: slotVault[
-                                                        kGreatGrandchild4] ==
+                                            onBranchTap:
+                                                slotVault[kGreatGrandchild4] ==
                                                     null
                                                 ? null
-                                                : () =>
-                                                    _openDirectBranchForPerson(
-                                                      slotKey:
-                                                          kGreatGrandchild4,
-                                                      person: slotVault[
-                                                          kGreatGrandchild4]!,
-                                                    ),
+                                                : () => _openDirectBranchForPerson(
+                                                    slotKey: kGreatGrandchild4,
+                                                    person:
+                                                        slotVault[kGreatGrandchild4]!,
+                                                  ),
                                           ),
                                         ],
                                       ),
@@ -4085,7 +4091,10 @@ class _GroupCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
                 const Spacer(),
                 Icon(
                   Icons.keyboard_arrow_down,
@@ -4222,8 +4231,8 @@ class _PersonSlot extends StatelessWidget {
     final has = filled != null;
     final label = has
         ? (((filled!['display_name'] ?? '').toString().trim().isNotEmpty)
-            ? filled!['display_name'].toString()
-            : ((filled!['name'] ?? 'Vault').toString()))
+              ? filled!['display_name'].toString()
+              : ((filled!['name'] ?? 'Vault').toString()))
         : showAddLabel;
 
     return InkWell(
@@ -4296,8 +4305,8 @@ class _SmallInviteSlot extends StatelessWidget {
     final has = filled != null;
     final label = has
         ? (((filled!['display_name'] ?? '').toString().trim().isNotEmpty)
-            ? filled!['display_name'].toString()
-            : ((filled!['name'] ?? 'Child').toString()))
+              ? filled!['display_name'].toString()
+              : ((filled!['name'] ?? 'Child').toString()))
         : text;
 
     return InkWell(
@@ -4367,10 +4376,7 @@ class _DepthNode {
   final Map<String, dynamic> person;
   final int depth;
 
-  const _DepthNode({
-    required this.person,
-    required this.depth,
-  });
+  const _DepthNode({required this.person, required this.depth});
 }
 
 class _TreeLinesPainter extends CustomPainter {
@@ -4555,6 +4561,7 @@ class _BottomVinesPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+
 class _SlotRelationshipPair {
   final String parentSlotKey;
   final String childSlotKey;
@@ -4564,14 +4571,12 @@ class _SlotRelationshipPair {
     required this.childSlotKey,
   });
 }
+
 class _JoinContext {
   final String inviterVaultId;
   final String slotKey;
 
-  const _JoinContext({
-    required this.inviterVaultId,
-    required this.slotKey,
-  });
+  const _JoinContext({required this.inviterVaultId, required this.slotKey});
 }
 
 class _FamilyData {
@@ -4600,10 +4605,7 @@ class _RelationshipNodeRef {
   final String nodeType;
   final String nodeId;
 
-  const _RelationshipNodeRef({
-    required this.nodeType,
-    required this.nodeId,
-  });
+  const _RelationshipNodeRef({required this.nodeType, required this.nodeId});
 }
 
 class _RelationshipAnchorSpec {
