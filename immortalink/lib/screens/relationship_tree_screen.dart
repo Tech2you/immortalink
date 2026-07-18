@@ -35,6 +35,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   _TreePerson? _viewer;
   _TreePerson? _focus;
   final List<_TreePerson> _focusHistory = [];
+  String? _lastAutoCenteredFocusKey;
 
   @override
   void initState() {
@@ -286,6 +287,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   void _focusOn(_TreePerson person) {
     setState(() {
       _focus = person;
+      _lastAutoCenteredFocusKey = null;
       final existingIndex = _focusHistory.indexWhere(
         (entry) => entry.key == person.key,
       );
@@ -303,6 +305,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     final person = _focusHistory[index];
     setState(() {
       _focus = person;
+      _lastAutoCenteredFocusKey = null;
       _focusHistory.removeRange(index + 1, _focusHistory.length);
     });
     _transformController.value = Matrix4.identity();
@@ -313,6 +316,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     if (viewer == null) return;
     setState(() {
       _focus = viewer;
+      _lastAutoCenteredFocusKey = null;
       _focusHistory
         ..clear()
         ..add(viewer);
@@ -624,6 +628,8 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     _RelativeKind kind,
     _TreePerson focus, {
     bool grandchildWithMissingParent = false,
+    int lineagePlaceholderCount = 0,
+    String? lineageRelativeLabel,
   }) async {
     final nameController = TextEditingController();
     final displayNameController = TextEditingController();
@@ -638,7 +644,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
           title: Text(
-            grandchildWithMissingParent
+            lineageRelativeLabel != null
+                ? 'Add legacy $lineageRelativeLabel'
+                : grandchildWithMissingParent
                 ? 'Add legacy grandchild'
                 : 'Add legacy ${_kindLabel(kind)}',
           ),
@@ -752,6 +760,12 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                         var anchor = focus;
                         if (grandchildWithMissingParent) {
                           anchor = await _createMissingParentPlaceholder(focus);
+                        } else if (lineagePlaceholderCount > 0) {
+                          anchor = await _createLineagePlaceholderChain(
+                            focus,
+                            kind,
+                            lineagePlaceholderCount,
+                          );
                         }
                         await _supabase.rpc(
                           'create_legacy_relative',
@@ -886,17 +900,174 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     );
   }
 
+  Future<_TreePerson> _createLineagePlaceholderChain(
+    _TreePerson focus,
+    _RelativeKind direction,
+    int count,
+  ) async {
+    var anchor = focus;
+    for (int index = 0; index < count; index++) {
+      final generation = index + 1;
+      final name = direction == _RelativeKind.parent
+          ? switch (generation) {
+              1 => 'Parent not added yet',
+              2 => 'Grandparent not added yet',
+              _ => 'Predecessor not added yet',
+            }
+          : switch (generation) {
+              1 => 'Child not added yet',
+              2 => 'Grandchild not added yet',
+              _ => 'Descendant not added yet',
+            };
+      final id = await _supabase.rpc(
+        'create_legacy_relative',
+        params: {
+          'p_family_id': widget.familyId,
+          'p_anchor_type': anchor.type,
+          'p_anchor_id': anchor.id,
+          'p_relation': _kindLabel(direction),
+          'p_name': name,
+          'p_display_name': name,
+          'p_birth_year': null,
+          'p_death_year': null,
+          'p_about_me_text':
+              'Placeholder created to preserve a skipped family-tree generation.',
+        },
+      );
+      final placeholderId = (id ?? '').toString().trim();
+      if (placeholderId.isEmpty) {
+        throw Exception('Could not create the lineage placeholder.');
+      }
+      anchor = _TreePerson(
+        type: 'legacy',
+        id: placeholderId,
+        name: name,
+        ownerId: null,
+        slotKey: null,
+        avatarUrl: null,
+        isPlaceholder: true,
+      );
+    }
+    return anchor;
+  }
+
+  Future<void> _showLineageContinuationOptions(
+    _RelativeKind direction,
+    int generationDepth,
+    String relativeLabel,
+  ) async {
+    final focus = _focus;
+    if (focus == null || generationDepth < 2) return;
+    final placeholderCount = generationDepth - 1;
+    final placeholderText = placeholderCount == 1
+        ? 'one visible placeholder'
+        : '$placeholderCount visible placeholders';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Add $relativeLabel across a gap',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'This creates $placeholderText between ${focus.name} and the $relativeLabel so the lineage stays connected. You can replace the placeholders later.',
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const CircleAvatar(
+                  child: Icon(Icons.person_add_alt_1),
+                ),
+                title: Text('Invite $relativeLabel'),
+                subtitle: const Text('Create placeholders and an invite code'),
+                onTap: () async {
+                  Navigator.pop(sheetContext);
+                  try {
+                    final anchor = await _createLineagePlaceholderChain(
+                      focus,
+                      direction,
+                      placeholderCount,
+                    );
+                    await _createInvite(direction, anchor);
+                  } catch (e) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Could not create invite: $e')),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                leading: const CircleAvatar(
+                  child: Icon(Icons.history_edu_outlined),
+                ),
+                title: Text('Add legacy $relativeLabel'),
+                subtitle: const Text(
+                  'Create placeholders and a legacy profile',
+                ),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showLegacyDialog(
+                    direction,
+                    focus,
+                    lineagePlaceholderCount: placeholderCount,
+                    lineageRelativeLabel: relativeLabel,
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   _CanvasModel _canvasModel(_TreePerson focus) {
-    final parents = _parentsOf(focus);
+    final visibleKeys = <String>{focus.key};
+
+    List<_TreePerson> nextGeneration(
+      List<_TreePerson> people,
+      List<_TreePerson> Function(_TreePerson person) relativesOf,
+    ) {
+      final next = _sortedUnique([
+        for (final person in people) ...relativesOf(person),
+      ]).where((person) => !visibleKeys.contains(person.key)).toList();
+      visibleKeys.addAll(next.map((person) => person.key));
+      return next;
+    }
+
+    final parents = nextGeneration([focus], _parentsOf);
+    final grandparents = nextGeneration(parents, _parentsOf);
+    final greatGrandparents = nextGeneration(grandparents, _parentsOf);
     final spouses = _spousesOf(focus);
     final siblings = _siblingsOf(focus);
-    final children = _childrenOf(focus);
+    final children = nextGeneration([focus], _childrenOf);
+    final grandchildren = nextGeneration(children, _childrenOf);
+    final greatGrandchildren = nextGeneration(grandchildren, _childrenOf);
 
-    final widestRow = max(parents.length + 1, children.length + 1);
+    final widestRow = [
+      greatGrandparents.length + 1,
+      grandparents.length + 1,
+      parents.length + 1,
+      children.length + 1,
+      grandchildren.length + 1,
+      greatGrandchildren.length + 1,
+    ].reduce(max);
     final sideCount = siblings.length + spouses.length + 2;
     final width = max(1700.0, max(widestRow * 190.0, sideCount * 180.0 + 500));
-    const height = 1500.0;
-    final center = Offset(width / 2, 720);
+    const height = 2200.0;
+    final center = Offset(width / 2, 1100);
     final bubbles = <_BubbleSpec>[];
 
     void addCenteredRow(
@@ -917,22 +1088,75 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       );
     }
 
-    addCenteredRow(parents, _RelativeKind.parent, 300);
-    addCenteredRow(children, _RelativeKind.child, 1140);
+    void addDisplayRow(
+      List<_TreePerson> people,
+      _RelativeKind kind,
+      double y, {
+      required String addLabel,
+      required int generationDepth,
+    }) {
+      const gap = 185.0;
+      final count = people.length + 1;
+      final startX = center.dx - ((count - 1) * gap / 2);
+      for (int i = 0; i < people.length; i++) {
+        bubbles.add(
+          _BubbleSpec.person(people[i], kind, Offset(startX + i * gap, y)),
+        );
+      }
+      bubbles.add(
+        _BubbleSpec.add(
+          kind,
+          Offset(startX + people.length * gap, y),
+          label: addLabel,
+          generationDepth: generationDepth,
+        ),
+      );
+    }
+
+    addDisplayRow(
+      greatGrandparents,
+      _RelativeKind.parent,
+      160,
+      addLabel: 'great-grandparent',
+      generationDepth: 3,
+    );
+    addDisplayRow(
+      grandparents,
+      _RelativeKind.parent,
+      450,
+      addLabel: 'grandparent',
+      generationDepth: 2,
+    );
+    addCenteredRow(parents, _RelativeKind.parent, 740);
+    addCenteredRow(children, _RelativeKind.child, 1460);
+    addDisplayRow(
+      grandchildren,
+      _RelativeKind.child,
+      1750,
+      addLabel: 'grandchild',
+      generationDepth: 2,
+    );
+    addDisplayRow(
+      greatGrandchildren,
+      _RelativeKind.child,
+      2040,
+      addLabel: 'great-grandchild',
+      generationDepth: 3,
+    );
 
     for (int i = 0; i < siblings.length; i++) {
       bubbles.add(
         _BubbleSpec.person(
           siblings[i],
           _RelativeKind.sibling,
-          Offset(center.dx - 260 - i * 175, 720),
+          Offset(center.dx - 260 - i * 175, center.dy),
         ),
       );
     }
     bubbles.add(
       _BubbleSpec.add(
         _RelativeKind.sibling,
-        Offset(center.dx - 260 - siblings.length * 175, 720),
+        Offset(center.dx - 260 - siblings.length * 175, center.dy),
       ),
     );
 
@@ -941,21 +1165,52 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         _BubbleSpec.person(
           spouses[i],
           _RelativeKind.spouse,
-          Offset(center.dx + 260 + i * 175, 720),
+          Offset(center.dx + 260 + i * 175, center.dy),
         ),
       );
     }
     bubbles.add(
       _BubbleSpec.add(
         _RelativeKind.spouse,
-        Offset(center.dx + 260 + spouses.length * 175, 720),
+        Offset(center.dx + 260 + spouses.length * 175, center.dy),
       ),
     );
+
+    final positionByKey = <String, Offset>{focus.key: center};
+    for (final bubble in bubbles) {
+      final person = bubble.person;
+      if (person != null) positionByKey[person.key] = bubble.center;
+    }
+
+    final connections = <_CanvasConnection>[];
+    final connectedPairs = <String>{};
+
+    void connect(String firstKey, String secondKey) {
+      final first = positionByKey[firstKey];
+      final second = positionByKey[secondKey];
+      if (first == null || second == null) return;
+      final pair = [firstKey, secondKey]..sort();
+      if (!connectedPairs.add(pair.join('|'))) return;
+      connections.add(_CanvasConnection(first, second));
+    }
+
+    for (final relationship in _relationships) {
+      if (relationship.kind == 'parent_child') {
+        connect(relationship.firstKey, relationship.secondKey);
+      }
+    }
+    for (final person in siblings) {
+      connect(focus.key, person.key);
+    }
+    for (final person in spouses) {
+      connect(focus.key, person.key);
+    }
 
     return _CanvasModel(
       size: Size(width, height),
       focusCenter: center,
       bubbles: bubbles,
+      connections: connections,
     );
   }
 
@@ -1012,120 +1267,165 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   Widget _buildCanvas(_TreePerson focus) {
     final model = _canvasModel(focus);
     return LayoutBuilder(
-      builder: (context, constraints) => Stack(
-        children: [
-          Positioned.fill(child: Container(color: const Color(0xFFF9F4FB))),
-          InteractiveViewer(
-            transformationController: _transformController,
-            constrained: false,
-            boundaryMargin: const EdgeInsets.all(800),
-            minScale: 0.3,
-            maxScale: 2.4,
-            child: SizedBox(
-              width: model.size.width,
-              height: model.size.height,
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Opacity(
-                      opacity: 0.045,
-                      child: Image.asset(_logoPath, fit: BoxFit.contain),
-                    ),
-                  ),
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _RelationshipLinesPainter(model: model),
-                    ),
-                  ),
-                  _sectionLabel('Parents', model.focusCenter.dx, 145),
-                  _sectionLabel('Siblings', model.focusCenter.dx - 360, 540),
-                  _sectionLabel('Spouses', model.focusCenter.dx + 360, 540),
-                  _sectionLabel('Children', model.focusCenter.dx, 985),
-                  Positioned(
-                    left: model.focusCenter.dx - 95,
-                    top: model.focusCenter.dy - 75,
-                    child: _PersonBubble(
-                      person: focus,
-                      focused: true,
-                      onTap: () {},
-                      onOpen: () => _openPerson(focus),
-                    ),
-                  ),
-                  for (final bubble in model.bubbles)
-                    Positioned(
-                      left: bubble.center.dx - 80,
-                      top: bubble.center.dy - 58,
-                      child: bubble.person == null
-                          ? _AddBubble(
-                              label: 'Add ${_kindLabel(bubble.kind)}',
-                              onTap: () => _showAddOptions(bubble.kind),
-                            )
-                          : _PersonBubble(
-                              person: bubble.person!,
-                              focused: false,
-                              onTap: () => _focusOn(bubble.person!),
-                              onOpen: () => _openPerson(bubble.person!),
-                            ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          Positioned(
-            left: 12,
-            right: 12,
-            top: 10,
-            child: Center(child: _buildBreadcrumbs()),
-          ),
-          Positioned(
-            left: 14,
-            bottom: 14,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+      builder: (context, constraints) {
+        if (_lastAutoCenteredFocusKey != focus.key) {
+          _lastAutoCenteredFocusKey = focus.key;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || _focus?.key != focus.key) return;
+            final availableHeight = max(1.0, constraints.maxHeight - 80);
+            final scale = min(
+              0.72,
+              max(0.42, availableHeight / model.size.height),
+            );
+            final targetX =
+                constraints.maxWidth / 2 - model.focusCenter.dx * scale;
+            final targetY =
+                constraints.maxHeight / 2 - model.focusCenter.dy * scale;
+            _transformController.value = Matrix4.identity()
+              ..translateByDouble(targetX, targetY, 0, 1)
+              ..scaleByDouble(scale, scale, 1, 1);
+          });
+        }
+
+        return Stack(
+          children: [
+            Positioned.fill(child: Container(color: const Color(0xFFF9F4FB))),
+            InteractiveViewer(
+              transformationController: _transformController,
+              alignment: Alignment.topLeft,
+              constrained: false,
+              boundaryMargin: const EdgeInsets.all(800),
+              minScale: 0.3,
+              maxScale: 2.4,
+              child: SizedBox(
+                width: model.size.width,
+                height: model.size.height,
+                child: Stack(
                   children: [
-                    const Icon(Icons.pan_tool_alt_outlined, size: 18),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Drag to explore • Tap a person to follow their branch',
-                      style: Theme.of(context).textTheme.bodySmall,
+                    Positioned.fill(
+                      child: Opacity(
+                        opacity: 0.045,
+                        child: Image.asset(_logoPath, fit: BoxFit.contain),
+                      ),
                     ),
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _RelationshipLinesPainter(model: model),
+                      ),
+                    ),
+                    _sectionLabel(
+                      'Great-grandparents',
+                      model.focusCenter.dx,
+                      24,
+                    ),
+                    _sectionLabel('Grandparents', model.focusCenter.dx, 314),
+                    _sectionLabel('Parents', model.focusCenter.dx, 604),
+                    _sectionLabel('Siblings', model.focusCenter.dx - 360, 920),
+                    _sectionLabel('Spouses', model.focusCenter.dx + 360, 920),
+                    _sectionLabel('Children', model.focusCenter.dx, 1324),
+                    _sectionLabel('Grandchildren', model.focusCenter.dx, 1614),
+                    _sectionLabel(
+                      'Great-grandchildren',
+                      model.focusCenter.dx,
+                      1904,
+                    ),
+                    Positioned(
+                      left: model.focusCenter.dx - 95,
+                      top: model.focusCenter.dy - 75,
+                      child: _PersonBubble(
+                        person: focus,
+                        focused: true,
+                        onTap: () {},
+                        onOpen: () => _openPerson(focus),
+                      ),
+                    ),
+                    for (final bubble in model.bubbles)
+                      Positioned(
+                        left: bubble.center.dx - 80,
+                        top: bubble.center.dy - 58,
+                        child: bubble.person == null
+                            ? _AddBubble(
+                                label:
+                                    'Add ${bubble.label ?? _kindLabel(bubble.kind)}',
+                                onTap: bubble.generationDepth > 1
+                                    ? () => _showLineageContinuationOptions(
+                                        bubble.kind,
+                                        bubble.generationDepth,
+                                        bubble.label!,
+                                      )
+                                    : () => _showAddOptions(bubble.kind),
+                              )
+                            : _PersonBubble(
+                                person: bubble.person!,
+                                focused: false,
+                                onTap: () => _focusOn(bubble.person!),
+                                onOpen: () => _openPerson(bubble.person!),
+                              ),
+                      ),
                   ],
                 ),
               ),
             ),
-          ),
-          Positioned(
-            right: 14,
-            bottom: 14,
-            child: AnimatedBuilder(
-              animation: _transformController,
-              builder: (context, _) => _TreeMiniMap(
-                model: model,
-                transform: _transformController.value,
-                viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
-                onNavigate: (canvasPoint) {
-                  final scale = _transformController.value.getMaxScaleOnAxis();
-                  final safeScale = scale <= 0 ? 1.0 : scale;
-                  final targetX =
-                      constraints.maxWidth / 2 - canvasPoint.dx * safeScale;
-                  final targetY =
-                      constraints.maxHeight / 2 - canvasPoint.dy * safeScale;
-                  final next = Matrix4.identity()
-                    ..translateByDouble(targetX, targetY, 0, 1)
-                    ..scaleByDouble(safeScale, safeScale, 1, 1);
-                  _transformController.value = next;
-                },
+            Positioned(
+              left: 12,
+              right: 12,
+              top: 10,
+              child: Center(child: _buildBreadcrumbs()),
+            ),
+            Positioned(
+              left: 14,
+              bottom: 14,
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.pan_tool_alt_outlined, size: 18),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Drag to explore • Tap a person to follow their branch',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
-        ],
-      ),
+            Positioned(
+              right: 14,
+              bottom: 14,
+              child: AnimatedBuilder(
+                animation: _transformController,
+                builder: (context, _) => _TreeMiniMap(
+                  model: model,
+                  transform: _transformController.value,
+                  viewportSize: Size(
+                    constraints.maxWidth,
+                    constraints.maxHeight,
+                  ),
+                  onNavigate: (canvasPoint) {
+                    final scale = _transformController.value
+                        .getMaxScaleOnAxis();
+                    final safeScale = scale <= 0 ? 1.0 : scale;
+                    final targetX =
+                        constraints.maxWidth / 2 - canvasPoint.dx * safeScale;
+                    final targetY =
+                        constraints.maxHeight / 2 - canvasPoint.dy * safeScale;
+                    final next = Matrix4.identity()
+                      ..translateByDouble(targetX, targetY, 0, 1)
+                      ..scaleByDouble(safeScale, safeScale, 1, 1);
+                    _transformController.value = next;
+                  },
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1216,21 +1516,39 @@ class _BubbleSpec {
   final _TreePerson? person;
   final _RelativeKind kind;
   final Offset center;
+  final String? label;
+  final int generationDepth;
 
-  const _BubbleSpec.person(this.person, this.kind, this.center);
-  const _BubbleSpec.add(this.kind, this.center) : person = null;
+  const _BubbleSpec.person(this.person, this.kind, this.center)
+    : label = null,
+      generationDepth = 1;
+  const _BubbleSpec.add(
+    this.kind,
+    this.center, {
+    this.label,
+    this.generationDepth = 1,
+  }) : person = null;
 }
 
 class _CanvasModel {
   final Size size;
   final Offset focusCenter;
   final List<_BubbleSpec> bubbles;
+  final List<_CanvasConnection> connections;
 
   const _CanvasModel({
     required this.size,
     required this.focusCenter,
     required this.bubbles,
+    required this.connections,
   });
+}
+
+class _CanvasConnection {
+  final Offset first;
+  final Offset second;
+
+  const _CanvasConnection(this.first, this.second);
 }
 
 class _RelationshipLinesPainter extends CustomPainter {
@@ -1245,17 +1563,16 @@ class _RelationshipLinesPainter extends CustomPainter {
       ..strokeWidth = 2.2
       ..style = PaintingStyle.stroke;
 
-    for (final bubble in model.bubbles) {
-      if (bubble.person == null) continue;
-      final path = Path()..moveTo(model.focusCenter.dx, model.focusCenter.dy);
-      final midpointY = (model.focusCenter.dy + bubble.center.dy) / 2;
+    for (final connection in model.connections) {
+      final path = Path()..moveTo(connection.first.dx, connection.first.dy);
+      final midpointY = (connection.first.dy + connection.second.dy) / 2;
       path.cubicTo(
-        model.focusCenter.dx,
+        connection.first.dx,
         midpointY,
-        bubble.center.dx,
+        connection.second.dx,
         midpointY,
-        bubble.center.dx,
-        bubble.center.dy,
+        connection.second.dx,
+        connection.second.dy,
       );
       canvas.drawPath(path, paint);
     }
@@ -1459,10 +1776,17 @@ class _MiniMapPainter extends CustomPainter {
     final personPaint = Paint()..color = const Color(0xFF7B5B8E);
     final addPaint = Paint()..color = const Color(0xFFD8CBDD);
 
+    for (final connection in model.connections) {
+      canvas.drawLine(
+        mapPoint(connection.first),
+        mapPoint(connection.second),
+        linePaint,
+      );
+    }
+
     for (final bubble in model.bubbles) {
       final target = mapPoint(bubble.center);
       if (bubble.person != null) {
-        canvas.drawLine(mapPoint(model.focusCenter), target, linePaint);
         canvas.drawCircle(target, 3.1, personPaint);
       } else {
         canvas.drawCircle(target, 2.2, addPaint);
