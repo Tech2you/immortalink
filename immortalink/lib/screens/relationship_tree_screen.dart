@@ -36,6 +36,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   _TreePerson? _focus;
   final List<_TreePerson> _focusHistory = [];
   String? _lastAutoCenteredFocusKey;
+  Size? _treeViewportSize;
 
   @override
   void initState() {
@@ -297,7 +298,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         _focusHistory.add(person);
       }
     });
-    _transformController.value = Matrix4.identity();
   }
 
   void _focusFromBreadcrumb(int index) {
@@ -308,7 +308,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       _lastAutoCenteredFocusKey = null;
       _focusHistory.removeRange(index + 1, _focusHistory.length);
     });
-    _transformController.value = Matrix4.identity();
   }
 
   void _returnToViewer() {
@@ -321,7 +320,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         ..clear()
         ..add(viewer);
     });
-    _transformController.value = Matrix4.identity();
   }
 
   Future<void> _leaveFamily() async {
@@ -509,6 +507,254 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     );
   }
 
+  Future<void> _insertParentChildRelationship({
+    required String parentType,
+    required String parentId,
+    required String childType,
+    required String childId,
+  }) async {
+    await _supabase.from('family_relationships').insert({
+      'family_id': widget.familyId,
+      'parent_type': parentType,
+      'parent_id': parentId,
+      'child_type': childType,
+      'child_id': childId,
+      'relationship_kind': 'parent_child',
+    });
+  }
+
+  Future<void> _chooseChildrenForSpouse({
+    required _TreePerson focus,
+    required String spouseType,
+    required String spouseId,
+    required String spouseName,
+  }) async {
+    final children = _childrenOf(focus);
+    if (children.isEmpty || !mounted) return;
+    final selected = <String>{};
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text('Does $spouseName parent any of these children?'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$spouseName is now connected as ${focus.name}’s spouse. Select only the children they also parent.',
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1E8F6),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Text(
+                      'Unselected children keep their existing parentage. The app can still recognise this spouse as their stepparent or parent’s spouse.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    value:
+                        selected.isNotEmpty &&
+                            selected.length != children.length
+                        ? null
+                        : selected.length == children.length,
+                    tristate:
+                        selected.isNotEmpty &&
+                        selected.length != children.length,
+                    title: const Text('Select all current children'),
+                    onChanged: (value) {
+                      setDialogState(() {
+                        selected.clear();
+                        if (value == true) {
+                          selected.addAll(children.map((child) => child.key));
+                        }
+                      });
+                    },
+                  ),
+                  for (final child in children)
+                    CheckboxListTile(
+                      value: selected.contains(child.key),
+                      title: Text(child.name),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          if (value == true) {
+                            selected.add(child.key);
+                          } else {
+                            selected.remove(child.key);
+                          }
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, <String>{}),
+              child: const Text('Not their parent'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, {...selected}),
+              child: const Text('Save selected'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null || result.isEmpty) return;
+
+    try {
+      for (final child in children.where(
+        (child) => result.contains(child.key),
+      )) {
+        await _insertParentChildRelationship(
+          parentType: spouseType,
+          parentId: spouseId,
+          childType: child.type,
+          childId: child.id,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update the children’s parents: $e')),
+      );
+    }
+  }
+
+  Future<void> _chooseOtherParentForChild({
+    required _TreePerson focus,
+    required String childType,
+    required String childId,
+    required String childName,
+  }) async {
+    if (!mounted) return;
+    final spouses = _spousesOf(focus);
+    final spouseKeys = spouses.map((person) => person.key).toSet();
+    final otherPeople = _people
+        .where(
+          (person) =>
+              person.key != focus.key &&
+              person.key != '$childType:$childId' &&
+              !spouseKeys.contains(person.key),
+        )
+        .toList();
+    final candidates = [...spouses, ...otherPeople];
+    String selection = 'none';
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text('Choose $childName’s other parent'),
+          content: SizedBox(
+            width: 480,
+            height: min(560, 210 + candidates.length * 54).toDouble(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'A spouse is never automatically made a parent. Choose the correct person for this child.',
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'If the other parent is not listed, finish this step, tap the child’s bubble, and use Add parent to invite or create them.',
+                  style: TextStyle(color: Color(0xFF6B5875)),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: RadioGroup<String>(
+                    groupValue: selection,
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => selection = value);
+                      }
+                    },
+                    child: ListView(
+                      children: [
+                        const RadioListTile<String>(
+                          value: 'none',
+                          title: Text('No other parent selected'),
+                        ),
+                        const RadioListTile<String>(
+                          value: 'placeholder',
+                          title: Text('Parent not added yet'),
+                          subtitle: Text(
+                            'Create a visible placeholder that can be replaced later',
+                          ),
+                        ),
+                        for (final person in candidates)
+                          RadioListTile<String>(
+                            value: person.key,
+                            title: Text(person.name),
+                            subtitle: spouseKeys.contains(person.key)
+                                ? Text('${focus.name}’s spouse')
+                                : const Text('Existing family member'),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'none'),
+              child: const Text('Skip'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, selection),
+              child: const Text('Save parent'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null || result == 'none') return;
+
+    try {
+      if (result == 'placeholder') {
+        await _supabase.rpc(
+          'create_legacy_relative',
+          params: {
+            'p_family_id': widget.familyId,
+            'p_anchor_type': childType,
+            'p_anchor_id': childId,
+            'p_relation': 'parent',
+            'p_name': 'Parent not added yet',
+            'p_display_name': 'Parent not added yet',
+            'p_birth_year': null,
+            'p_death_year': null,
+            'p_about_me_text':
+                'Placeholder created because the child’s other parent has not been added yet.',
+          },
+        );
+      } else {
+        final parent = candidates.firstWhere((person) => person.key == result);
+        await _insertParentChildRelationship(
+          parentType: parent.type,
+          parentId: parent.id,
+          childType: childType,
+          childId: childId,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not set the other parent: $e')),
+      );
+    }
+  }
+
   Future<void> _createInvite(_RelativeKind kind, _TreePerson focus) async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
@@ -577,6 +823,22 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         'relationship_kind': relationshipKind,
       });
 
+      if (!mounted) return;
+      if (kind == _RelativeKind.spouse) {
+        await _chooseChildrenForSpouse(
+          focus: focus,
+          spouseType: 'invite',
+          spouseId: inviteId,
+          spouseName: 'The invited spouse',
+        );
+      } else if (kind == _RelativeKind.child) {
+        await _chooseOtherParentForChild(
+          focus: focus,
+          childType: 'invite',
+          childId: inviteId,
+          childName: 'the invited child',
+        );
+      }
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -767,7 +1029,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                             lineagePlaceholderCount,
                           );
                         }
-                        await _supabase.rpc(
+                        final created = await _supabase.rpc(
                           'create_legacy_relative',
                           params: {
                             'p_family_id': widget.familyId,
@@ -787,8 +1049,34 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                                 : aboutController.text.trim(),
                           },
                         );
+                        final createdId = (created ?? '').toString().trim();
+                        if (createdId.isEmpty) {
+                          throw Exception(
+                            'The legacy relative was created without an id.',
+                          );
+                        }
                         if (!dialogContext.mounted) return;
                         Navigator.pop(dialogContext);
+                        await Future<void>.delayed(Duration.zero);
+                        final createdName =
+                            displayNameController.text.trim().isEmpty
+                            ? name
+                            : displayNameController.text.trim();
+                        if (kind == _RelativeKind.spouse) {
+                          await _chooseChildrenForSpouse(
+                            focus: focus,
+                            spouseType: 'legacy',
+                            spouseId: createdId,
+                            spouseName: createdName,
+                          );
+                        } else if (kind == _RelativeKind.child) {
+                          await _chooseOtherParentForChild(
+                            focus: anchor,
+                            childType: 'legacy',
+                            childId: createdId,
+                            childName: createdName,
+                          );
+                        }
                         await _load(keepFocusKey: focus.key);
                       } catch (e) {
                         setDialogState(() {
@@ -985,6 +1273,26 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                 'This creates $placeholderText between ${focus.name} and the $relativeLabel so the lineage stays connected. You can replace the placeholders later.',
               ),
               const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1E8F6),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, size: 20),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'To continue a lineage that is already connected, close this panel, tap the relevant person’s bubble, and add their parent or child from that branch.',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
               ListTile(
                 leading: const CircleAvatar(
                   child: Icon(Icons.person_add_alt_1),
@@ -993,6 +1301,13 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                 subtitle: const Text('Create placeholders and an invite code'),
                 onTap: () async {
                   Navigator.pop(sheetContext);
+                  await Future<void>.delayed(Duration.zero);
+                  final confirmed = await _confirmGapInvite(
+                    focus: focus,
+                    relativeLabel: relativeLabel,
+                    placeholderText: placeholderText,
+                  );
+                  if (!confirmed) return;
                   try {
                     final anchor = await _createLineagePlaceholderChain(
                       focus,
@@ -1031,6 +1346,35 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         ),
       ),
     );
+  }
+
+  Future<bool> _confirmGapInvite({
+    required _TreePerson focus,
+    required String relativeLabel,
+    required String placeholderText,
+  }) async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            icon: const Icon(Icons.account_tree_outlined),
+            title: Text('Create a new gap lineage?'),
+            content: Text(
+              'Inviting this $relativeLabel will create $placeholderText from ${focus.name}.\n\nIf the $relativeLabel belongs beneath or above someone already shown, cancel and tap that person’s bubble first so the invitation joins the correct branch.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Create invite'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   _CanvasModel _canvasModel(_TreePerson focus) {
@@ -1268,22 +1612,25 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     final model = _canvasModel(focus);
     return LayoutBuilder(
       builder: (context, constraints) {
+        _treeViewportSize = Size(constraints.maxWidth, constraints.maxHeight);
         if (_lastAutoCenteredFocusKey != focus.key) {
           _lastAutoCenteredFocusKey = focus.key;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted || _focus?.key != focus.key) return;
-            final availableHeight = max(1.0, constraints.maxHeight - 80);
+            final viewport = _treeViewportSize;
+            if (viewport == null) return;
+            final availableHeight = max(1.0, viewport.height - 80);
             final scale = min(
               0.72,
               max(0.42, availableHeight / model.size.height),
             );
-            final targetX =
-                constraints.maxWidth / 2 - model.focusCenter.dx * scale;
-            final targetY =
-                constraints.maxHeight / 2 - model.focusCenter.dy * scale;
-            _transformController.value = Matrix4.identity()
-              ..translateByDouble(targetX, targetY, 0, 1)
-              ..scaleByDouble(scale, scale, 1, 1);
+            final targetX = viewport.width / 2 - model.focusCenter.dx * scale;
+            final targetY = viewport.height / 2 - model.focusCenter.dy * scale;
+            final transform = Matrix4.identity()
+              ..setEntry(0, 0, scale)
+              ..setEntry(1, 1, scale)
+              ..setTranslationRaw(targetX, targetY, 0);
+            _transformController.value = transform;
           });
         }
 
