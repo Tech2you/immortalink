@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'family_tree_screen.dart';
+import 'relationship_tree_screen.dart';
 
 class JoinFamilyScreen extends StatefulWidget {
   const JoinFamilyScreen({super.key});
@@ -30,7 +30,9 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
     // NOTE: this assumes vaults.about_me_memory_id is nullable (you already dropped NOT NULL).
     final meta = user.userMetadata;
     final fullName = meta == null ? null : meta['full_name'];
-    final fallbackName = (fullName ?? user.email ?? 'My Vault').toString().trim();
+    final fallbackName = (fullName ?? user.email ?? 'My Vault')
+        .toString()
+        .trim();
     final name = fallbackName.isEmpty ? 'My Vault' : fallbackName;
 
     await _supabase.from('vaults').insert({
@@ -107,16 +109,25 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
       dynamic res;
       try {
         res = await _supabase.rpc(
-          'join_family_by_invite',
+          'join_family_by_relationship_invite',
           params: {'p_invite_code': code},
         );
       } catch (e) {
-        // If a legacy join RPC still throws P0001 for "no vault", try once more after ensuring.
+        // Compatibility fallback while older deployments are still active.
         final msg = e.toString();
-        if (msg.contains('P0001') || msg.toLowerCase().contains('no vault')) {
-          await _ensureVaultExistsForUser(user);
+        final missingNewRpc =
+            msg.contains('PGRST202') ||
+            msg.toLowerCase().contains('could not find the function');
+        if (missingNewRpc) {
           res = await _supabase.rpc(
             'join_family_by_invite',
+            params: {'p_invite_code': code},
+          );
+        } else if (msg.contains('P0001') ||
+            msg.toLowerCase().contains('no vault')) {
+          await _ensureVaultExistsForUser(user);
+          res = await _supabase.rpc(
+            'join_family_by_relationship_invite',
             params: {'p_invite_code': code},
           );
         } else {
@@ -130,22 +141,21 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
       }
 
       // ✅ Critical: ensure THIS viewer gets the invite slot_key + correct role
-      await _finalizeMemberSlot(
-        familyId: familyId,
-        userId: user.id,
-      );
+      await _finalizeMemberSlot(familyId: familyId, userId: user.id);
 
       if (!mounted) return;
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: familyId)),
+        MaterialPageRoute(
+          builder: (_) => RelationshipTreeScreen(familyId: familyId),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Join failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Join failed: $e')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

@@ -1,11 +1,11 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'vault_home_screen.dart';
-import 'family_tree_screen.dart';
+import 'relationship_tree_screen.dart';
 import 'join_family_screen.dart';
 
 class VaultsScreen extends StatefulWidget {
@@ -112,8 +112,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Future<String?> _signedUrl(String bucket, String path) async {
     try {
-      final signed =
-          await _supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
+      final signed = await _supabase.storage
+          .from(bucket)
+          .createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (_) {
@@ -215,8 +216,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
       String? signedUrl;
       final path = (data?['avatar_path'] as String?)?.trim();
       if (path != null && path.isNotEmpty) {
-        signedUrl = await _signedAvatarUrl(path)
-            .timeout(const Duration(seconds: 12));
+        signedUrl = await _signedAvatarUrl(
+          path,
+        ).timeout(const Duration(seconds: 12));
       }
 
       if (!mounted) return;
@@ -319,7 +321,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
       final memoryRows = await _supabase
           .from('memories')
-          .select('id, vault_id, life_stage, prompt_text, prompt_key, body, created_at')
+          .select(
+            'id, vault_id, life_stage, prompt_text, prompt_key, body, created_at',
+          )
           .inFilter('vault_id', vaultIds)
           .neq('prompt_key', 'about_me')
           .order('created_at', ascending: false)
@@ -355,14 +359,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
           final url = await _signedUrl('memory_photos', path);
           if (url == null || url.trim().isEmpty) continue;
 
-          _feedPhotosByMemoryId.putIfAbsent(memoryId, () => []).add(
-                _MemPhoto(
-                  id: id,
-                  memoryId: memoryId,
-                  path: path,
-                  url: url,
-                ),
-              );
+          _feedPhotosByMemoryId
+              .putIfAbsent(memoryId, () => [])
+              .add(_MemPhoto(id: id, memoryId: memoryId, path: path, url: url));
         }
 
         final voiceRows = await _supabase
@@ -384,7 +383,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
           final url = await _signedUrl('memory_voice', path);
           if (url == null || url.trim().isEmpty) continue;
 
-          _feedVoiceByMemoryId.putIfAbsent(memoryId, () => []).add(
+          _feedVoiceByMemoryId
+              .putIfAbsent(memoryId, () => [])
+              .add(
                 _VoiceNote(
                   id: id,
                   path: path,
@@ -406,8 +407,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
         final displayName =
             ((vaultMeta['display_name'] ?? '').toString().trim().isNotEmpty)
-                ? (vaultMeta['display_name'] ?? '').toString().trim()
-                : (vaultMeta['name'] ?? 'Family member').toString();
+            ? (vaultMeta['display_name'] ?? '').toString().trim()
+            : (vaultMeta['name'] ?? 'Family member').toString();
 
         final photos = _feedPhotosByMemoryId[memoryId] ?? const <_MemPhoto>[];
         final voices = _feedVoiceByMemoryId[memoryId] ?? const <_VoiceNote>[];
@@ -598,7 +599,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
       if (!mounted) return;
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => FamilyTreeScreen(familyId: familyId)),
+        MaterialPageRoute(
+          builder: (_) => RelationshipTreeScreen(familyId: familyId),
+        ),
       );
       return;
     }
@@ -639,14 +642,16 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (ok != true) return;
     if (_vault == null) return;
 
-    final familyName =
-        controller.text.trim().isEmpty ? 'My Family' : controller.text.trim();
+    final familyName = controller.text.trim().isEmpty
+        ? 'My Family'
+        : controller.text.trim();
 
     try {
       final newFamilyId = await _supabase
-          .rpc('create_family_group_and_link_vault', params: {
-            'p_family_name': familyName,
-          })
+          .rpc(
+            'create_family_group_and_link_vault',
+            params: {'p_family_name': familyName},
+          )
           .timeout(const Duration(seconds: 12));
 
       final newFamilyIdStr = (newFamilyId ?? '').toString();
@@ -660,7 +665,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => FamilyTreeScreen(familyId: newFamilyIdStr),
+          builder: (_) => RelationshipTreeScreen(familyId: newFamilyIdStr),
         ),
       );
     } on TimeoutException {
@@ -740,8 +745,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
                           children: [
                             Text(
                               item.displayName,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w800),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
                             const SizedBox(height: 2),
                             Text(
@@ -1083,12 +1089,15 @@ class _VaultsScreenState extends State<VaultsScreen> {
             Column(
               children: List.generate(_familyFeed.length, (i) {
                 final item = _familyFeed[i];
-                final previewPhoto =
-                    item.photos.isNotEmpty ? item.photos.first : null;
+                final previewPhoto = item.photos.isNotEmpty
+                    ? item.photos.first
+                    : null;
                 final showBody = item.body.trim().isNotEmpty;
 
                 return Container(
-                  margin: EdgeInsets.only(bottom: i == _familyFeed.length - 1 ? 0 : 12),
+                  margin: EdgeInsets.only(
+                    bottom: i == _familyFeed.length - 1 ? 0 : 12,
+                  ),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
                     onTap: () => _openFeedMemory(item),
@@ -1096,7 +1105,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: Colors.black.withOpacity(0.08)),
+                        border: Border.all(
+                          color: Colors.black.withOpacity(0.08),
+                        ),
                         color: Colors.white.withOpacity(0.42),
                       ),
                       child: Column(
@@ -1184,8 +1195,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
-                                            color:
-                                                Colors.black.withOpacity(0.72),
+                                            color: Colors.black.withOpacity(
+                                              0.72,
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -1210,14 +1222,16 @@ class _VaultsScreenState extends State<VaultsScreen> {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
-                              if (item.photoCount > 0) _metaBadge(
-                                Icons.photo_library_outlined,
-                                '${item.photoCount} photo${item.photoCount == 1 ? '' : 's'}',
-                              ),
-                              if (item.voiceCount > 0) _metaBadge(
-                                Icons.mic_none,
-                                '${item.voiceCount} voice',
-                              ),
+                              if (item.photoCount > 0)
+                                _metaBadge(
+                                  Icons.photo_library_outlined,
+                                  '${item.photoCount} photo${item.photoCount == 1 ? '' : 's'}',
+                                ),
+                              if (item.voiceCount > 0)
+                                _metaBadge(
+                                  Icons.mic_none,
+                                  '${item.voiceCount} voice',
+                                ),
                               _metaBadge(Icons.chevron_right, 'Tap to open'),
                             ],
                           ),
@@ -1235,9 +1249,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Widget _typeChip(_FeedItem item) {
     String label = 'Memory';
-    if (item.photoCount > 0 && item.voiceCount == 0 && item.body.trim().isEmpty) {
+    if (item.photoCount > 0 &&
+        item.voiceCount == 0 &&
+        item.body.trim().isEmpty) {
       label = 'Photos';
-    } else if (item.voiceCount > 0 && item.photoCount == 0 && item.body.trim().isEmpty) {
+    } else if (item.voiceCount > 0 &&
+        item.photoCount == 0 &&
+        item.body.trim().isEmpty) {
       label = 'Voice';
     }
 
@@ -1270,10 +1288,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         children: [
           Icon(icon, size: 15, color: Colors.black.withOpacity(0.62)),
           const SizedBox(width: 6),
-          Text(
-            text,
-            style: TextStyle(color: Colors.black.withOpacity(0.68)),
-          ),
+          Text(text, style: TextStyle(color: Colors.black.withOpacity(0.68))),
         ],
       ),
     );
@@ -1333,117 +1348,114 @@ class _VaultsScreenState extends State<VaultsScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : (_error != null)
-                    ? Center(child: Text('Load failed: $_error'))
-                    : (_vault == null
-                        ? Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Text(
-                                  'No vault yet',
-                                  style: TextStyle(fontSize: 18),
-                                ),
-                                const SizedBox(height: 12),
-                                ElevatedButton.icon(
-                                  onPressed: _createVault,
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('Create your vault'),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListView(
+                ? Center(child: Text('Load failed: $_error'))
+                : (_vault == null
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
+                              const Text(
+                                'No vault yet',
+                                style: TextStyle(fontSize: 18),
+                              ),
+                              const SizedBox(height: 12),
+                              ElevatedButton.icon(
+                                onPressed: _createVault,
+                                icon: const Icon(Icons.add),
+                                label: const Text('Create your vault'),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView(
+                          children: [
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: _ensureFamilyAndOpenTree,
+                                icon: Icon(
+                                  inFamily
+                                      ? Icons.account_tree
+                                      : Icons.group_add,
+                                ),
+                                label: Text(
+                                  inFamily
+                                      ? 'View your family tree'
+                                      : 'Invite your family',
+                                ),
+                              ),
+                            ),
+                            if (!inFamily) ...[
+                              const SizedBox(height: 10),
                               SizedBox(
                                 width: double.infinity,
                                 child: OutlinedButton.icon(
-                                  onPressed: _ensureFamilyAndOpenTree,
-                                  icon: Icon(
-                                    inFamily
-                                        ? Icons.account_tree
-                                        : Icons.group_add,
-                                  ),
-                                  label: Text(
-                                    inFamily
-                                        ? 'View your family tree'
-                                        : 'Invite your family',
-                                  ),
+                                  onPressed: _openJoinFamilyScreen,
+                                  icon: const Icon(Icons.vpn_key),
+                                  label: const Text('Join with invite code'),
                                 ),
                               ),
-                              if (!inFamily) ...[
-                                const SizedBox(height: 10),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: OutlinedButton.icon(
-                                    onPressed: _openJoinFamilyScreen,
-                                    icon: const Icon(Icons.vpn_key),
-                                    label: const Text('Join with invite code'),
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 12),
-                              Card(
-                                color: Colors.white.withOpacity(0.36),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  side: BorderSide(
-                                    color: Colors.black.withOpacity(0.08),
-                                  ),
-                                ),
-                                elevation: 0,
-                                child: ListTile(
-                                  onTap: _openVaultHome,
-                                  leading: CircleAvatar(
-                                    radius: 18,
-                                    backgroundColor:
-                                        Colors.black.withOpacity(0.08),
-                                    backgroundImage: hasAvatar
-                                        ? NetworkImage(_vaultAvatarUrl!)
-                                        : null,
-                                    child: !hasAvatar
-                                        ? Icon(
-                                            Icons.person,
-                                            size: 18,
-                                            color:
-                                                Colors.black.withOpacity(0.6),
-                                          )
-                                        : null,
-                                  ),
-                                  title:
-                                      Text((_vault!['name'] ?? '').toString()),
-                                  subtitle: Text(createdLabel),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        tooltip: 'Rename',
-                                        onPressed: () => _renameVault(
-                                          (_vault!['id'] ?? '').toString(),
-                                          (_vault!['name'] ?? '').toString(),
-                                        ),
-                                        icon: const Icon(Icons.edit),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Delete',
-                                        onPressed: () => _deleteVault(
-                                          (_vault!['id'] ?? '').toString(),
-                                        ),
-                                        icon:
-                                            const Icon(Icons.delete_outline),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Open',
-                                        onPressed: _openVaultHome,
-                                        icon:
-                                            const Icon(Icons.chevron_right),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              _buildFeedSection(inFamily),
                             ],
-                          )),
+                            const SizedBox(height: 12),
+                            Card(
+                              color: Colors.white.withOpacity(0.36),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                  color: Colors.black.withOpacity(0.08),
+                                ),
+                              ),
+                              elevation: 0,
+                              child: ListTile(
+                                onTap: _openVaultHome,
+                                leading: CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: Colors.black.withOpacity(
+                                    0.08,
+                                  ),
+                                  backgroundImage: hasAvatar
+                                      ? NetworkImage(_vaultAvatarUrl!)
+                                      : null,
+                                  child: !hasAvatar
+                                      ? Icon(
+                                          Icons.person,
+                                          size: 18,
+                                          color: Colors.black.withOpacity(0.6),
+                                        )
+                                      : null,
+                                ),
+                                title: Text((_vault!['name'] ?? '').toString()),
+                                subtitle: Text(createdLabel),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Rename',
+                                      onPressed: () => _renameVault(
+                                        (_vault!['id'] ?? '').toString(),
+                                        (_vault!['name'] ?? '').toString(),
+                                      ),
+                                      icon: const Icon(Icons.edit),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Delete',
+                                      onPressed: () => _deleteVault(
+                                        (_vault!['id'] ?? '').toString(),
+                                      ),
+                                      icon: const Icon(Icons.delete_outline),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Open',
+                                      onPressed: _openVaultHome,
+                                      icon: const Icon(Icons.chevron_right),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            _buildFeedSection(inFamily),
+                          ],
+                        )),
           ),
         ],
       ),
