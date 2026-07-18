@@ -62,6 +62,14 @@ function isRelationshipQuestion(qRaw: string): boolean {
     q.includes("father") ||
     q.includes("mom") ||
     q.includes("mother") ||
+    q.includes("sibling") ||
+    q.includes("brother") ||
+    q.includes("sister") ||
+    q.includes("uncle") ||
+    q.includes("aunt") ||
+    q.includes("niece") ||
+    q.includes("nephew") ||
+    q.includes("cousin") ||
     q.includes("grand") ||
     q.includes("grandson") ||
     q.includes("grandchild") ||
@@ -212,6 +220,7 @@ function resolveRelationshipFromGraph(
   }
 
   const parentsByChild = new Map<string, string[]>();
+  const siblingLinks = new Map<string, Set<string>>();
   let directSpouse = false;
   let directSibling = false;
 
@@ -225,12 +234,48 @@ function resolveRelationshipFromGraph(
       (first === viewerKey && second === ownerKey) ||
       (first === ownerKey && second === viewerKey);
     if (kind === "spouse" && isDirectPair) directSpouse = true;
-    if (kind === "sibling" && isDirectPair) directSibling = true;
+    if (kind === "sibling") {
+      if (isDirectPair) directSibling = true;
+      const firstLinks = siblingLinks.get(first) ?? new Set<string>();
+      const secondLinks = siblingLinks.get(second) ?? new Set<string>();
+      firstLinks.add(second);
+      secondLinks.add(first);
+      siblingLinks.set(first, firstLinks);
+      siblingLinks.set(second, secondLinks);
+    }
 
     if (kind === "parent_child") {
       const parents = parentsByChild.get(second) ?? [];
       if (!parents.includes(first)) parents.push(first);
       parentsByChild.set(second, parents);
+    }
+  }
+
+  // A direct sibling edge may exist when their shared parent is unknown.
+  // Model each connected sibling group with an internal synthetic parent so
+  // extended relationships (parent's sibling, cousins, removals) still work.
+  const visitedSiblings = new Set<string>();
+  let siblingGroupIndex = 0;
+  for (const member of siblingLinks.keys()) {
+    if (visitedSiblings.has(member)) continue;
+    const component: string[] = [];
+    const queue = [member];
+    visitedSiblings.add(member);
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      component.push(current);
+      for (const sibling of siblingLinks.get(current) ?? []) {
+        if (visitedSiblings.has(sibling)) continue;
+        visitedSiblings.add(sibling);
+        queue.push(sibling);
+      }
+    }
+    if (component.length < 2) continue;
+    const syntheticParent = `sibling-group:${siblingGroupIndex++}`;
+    for (const sibling of component) {
+      const parents = parentsByChild.get(sibling) ?? [];
+      if (!parents.includes(syntheticParent)) parents.push(syntheticParent);
+      parentsByChild.set(sibling, parents);
     }
   }
 
@@ -276,10 +321,16 @@ function resolveRelationshipFromGraph(
     return { viewerToOwner: "sibling", ownerToViewer: "sibling" };
   }
   if (viewerDepth === 1 && ownerDepth >= 2) {
-    return { viewerToOwner: "aunt/uncle", ownerToViewer: "niece/nephew" };
+    return {
+      viewerToOwner: "parent's sibling",
+      ownerToViewer: "sibling's child",
+    };
   }
   if (ownerDepth === 1 && viewerDepth >= 2) {
-    return { viewerToOwner: "niece/nephew", ownerToViewer: "aunt/uncle" };
+    return {
+      viewerToOwner: "sibling's child",
+      ownerToViewer: "parent's sibling",
+    };
   }
   if (viewerDepth >= 2 && ownerDepth >= 2) {
     const label = cousinLabel(viewerDepth, ownerDepth);
