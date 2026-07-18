@@ -252,7 +252,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         if (spouse != null) result.add(spouse);
       }
     }
-    return _sortedUnique(result);
+    return _uniqueInRelationshipOrder(result);
   }
 
   List<_TreePerson> _siblingsOf(_TreePerson person) {
@@ -283,6 +283,14 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     final result = byKey.values.toList();
     result.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return result;
+  }
+
+  List<_TreePerson> _uniqueInRelationshipOrder(List<_TreePerson> input) {
+    final seen = <String>{};
+    return [
+      for (final person in input)
+        if (seen.add(person.key)) person,
+    ];
   }
 
   void _focusOn(_TreePerson person) {
@@ -638,16 +646,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   }) async {
     if (!mounted) return;
     final spouses = _spousesOf(focus);
-    final spouseKeys = spouses.map((person) => person.key).toSet();
-    final otherPeople = _people
-        .where(
-          (person) =>
-              person.key != focus.key &&
-              person.key != '$childType:$childId' &&
-              !spouseKeys.contains(person.key),
-        )
-        .toList();
-    final candidates = [...spouses, ...otherPeople];
     String selection = 'none';
 
     final result = await showDialog<String>(
@@ -657,7 +655,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           title: Text('Choose $childName’s other parent'),
           content: SizedBox(
             width: 480,
-            height: min(560, 210 + candidates.length * 54).toDouble(),
+            height: min(520, 230 + spouses.length * 54).toDouble(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -666,7 +664,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'If the other parent is not listed, finish this step, tap the child’s bubble, and use Add parent to invite or create them.',
+                  'Only spouses are listed here. If the other parent is missing, add them as a spouse first or use the placeholder option.',
                   style: TextStyle(color: Color(0xFF6B5875)),
                 ),
                 const SizedBox(height: 8),
@@ -691,13 +689,11 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                             'Create a visible placeholder that can be replaced later',
                           ),
                         ),
-                        for (final person in candidates)
+                        for (final person in spouses)
                           RadioListTile<String>(
                             value: person.key,
                             title: Text(person.name),
-                            subtitle: spouseKeys.contains(person.key)
-                                ? Text('${focus.name}’s spouse')
-                                : const Text('Existing family member'),
+                            subtitle: Text('${focus.name}’s spouse'),
                           ),
                       ],
                     ),
@@ -739,7 +735,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           },
         );
       } else {
-        final parent = candidates.firstWhere((person) => person.key == result);
+        final parent = spouses.firstWhere((person) => person.key == result);
         await _insertParentChildRelationship(
           parentType: parent.type,
           parentId: parent.id,
@@ -1400,6 +1396,64 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     final grandchildren = nextGeneration(children, _childrenOf);
     final greatGrandchildren = nextGeneration(grandchildren, _childrenOf);
 
+    int nameOrder(_TreePerson first, _TreePerson second) =>
+        first.name.toLowerCase().compareTo(second.name.toLowerCase());
+
+    void orderParentsAbove(
+      List<_TreePerson> generation,
+      List<_TreePerson> childrenBelow,
+    ) {
+      int branchIndex(_TreePerson person) {
+        final childKeys = _childrenOf(person).map((child) => child.key).toSet();
+        for (int index = 0; index < childrenBelow.length; index++) {
+          if (childKeys.contains(childrenBelow[index].key)) return index;
+        }
+        return childrenBelow.length;
+      }
+
+      generation.sort((first, second) {
+        final byBranch = branchIndex(first).compareTo(branchIndex(second));
+        return byBranch != 0 ? byBranch : nameOrder(first, second);
+      });
+    }
+
+    void orderChildrenBelow(
+      List<_TreePerson> generation,
+      List<_TreePerson> parentsAbove,
+    ) {
+      int branchIndex(_TreePerson person) {
+        final parentKeys = _parentsOf(
+          person,
+        ).map((parent) => parent.key).toSet();
+        for (int index = 0; index < parentsAbove.length; index++) {
+          if (parentKeys.contains(parentsAbove[index].key)) return index;
+        }
+        return parentsAbove.length;
+      }
+
+      generation.sort((first, second) {
+        final byBranch = branchIndex(first).compareTo(branchIndex(second));
+        return byBranch != 0 ? byBranch : nameOrder(first, second);
+      });
+    }
+
+    int coParentIndex(_TreePerson child) {
+      final parentKeys = _parentsOf(child).map((parent) => parent.key).toSet();
+      for (int index = 0; index < spouses.length; index++) {
+        if (parentKeys.contains(spouses[index].key)) return index;
+      }
+      return spouses.length;
+    }
+
+    children.sort((first, second) {
+      final byCoParent = coParentIndex(first).compareTo(coParentIndex(second));
+      return byCoParent != 0 ? byCoParent : nameOrder(first, second);
+    });
+    orderParentsAbove(grandparents, parents);
+    orderParentsAbove(greatGrandparents, grandparents);
+    orderChildrenBelow(grandchildren, children);
+    orderChildrenBelow(greatGrandchildren, grandchildren);
+
     final widestRow = [
       greatGrandparents.length + 1,
       grandparents.length + 1,
@@ -1527,6 +1581,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     }
 
     final connections = <_CanvasConnection>[];
+    final familyBranches = <_FamilyBranch>[];
     final connectedPairs = <String>{};
 
     void connect(String firstKey, String secondKey) {
@@ -1538,16 +1593,84 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       connections.add(_CanvasConnection(first, second));
     }
 
+    final parentKeysByChild = <String, Set<String>>{};
     for (final relationship in _relationships) {
-      if (relationship.kind == 'parent_child') {
-        connect(relationship.firstKey, relationship.secondKey);
+      if (relationship.kind != 'parent_child' ||
+          !positionByKey.containsKey(relationship.firstKey) ||
+          !positionByKey.containsKey(relationship.secondKey)) {
+        continue;
+      }
+      parentKeysByChild
+          .putIfAbsent(relationship.secondKey, () => <String>{})
+          .add(relationship.firstKey);
+    }
+
+    final childKeysByParentSet = <String, List<String>>{};
+    final parentKeysBySet = <String, List<String>>{};
+    for (final entry in parentKeysByChild.entries) {
+      final parentKeys = entry.value.toList()..sort();
+      final setKey = parentKeys.join('|');
+      parentKeysBySet[setKey] = parentKeys;
+      childKeysByParentSet.putIfAbsent(setKey, () => []).add(entry.key);
+    }
+
+    final branchGroupsByRow = <int, List<_FamilyBranch>>{};
+    for (final entry in childKeysByParentSet.entries) {
+      final parentKeys = parentKeysBySet[entry.key]!;
+      final parentPoints = parentKeys
+          .map((key) => positionByKey[key]!)
+          .toList();
+      final childPoints = entry.value
+          .map((key) => positionByKey[key]!)
+          .toList();
+      parentPoints.sort((a, b) => a.dx.compareTo(b.dx));
+      childPoints.sort((a, b) => a.dx.compareTo(b.dx));
+      final rowKey = childPoints.first.dy.round();
+      Offset? spouseBranchOrigin;
+      if (parentKeys.contains(focus.key)) {
+        for (final spouse in spouses) {
+          if (parentKeys.contains(spouse.key)) {
+            spouseBranchOrigin = positionByKey[spouse.key];
+            break;
+          }
+        }
+      }
+      branchGroupsByRow
+          .putIfAbsent(rowKey, () => <_FamilyBranch>[])
+          .add(
+            _FamilyBranch(
+              parents: parentPoints,
+              children: childPoints,
+              branchOriginX: spouseBranchOrigin?.dx,
+            ),
+          );
+    }
+
+    for (final branches in branchGroupsByRow.values) {
+      branches.sort((a, b) {
+        final aCenter =
+            a.parents.map((point) => point.dx).reduce((x, y) => x + y) /
+            a.parents.length;
+        final bCenter =
+            b.parents.map((point) => point.dx).reduce((x, y) => x + y) /
+            b.parents.length;
+        return aCenter.compareTo(bCenter);
+      });
+      for (int index = 0; index < branches.length; index++) {
+        final laneOffset = (index - (branches.length - 1) / 2) * 28;
+        familyBranches.add(branches[index].withLaneOffset(laneOffset));
       }
     }
+
     for (final person in siblings) {
       connect(focus.key, person.key);
     }
     for (final person in spouses) {
-      connect(focus.key, person.key);
+      final alreadyJoinedAsParents = parentKeysByChild.values.any(
+        (parents) =>
+            parents.contains(focus.key) && parents.contains(person.key),
+      );
+      if (!alreadyJoinedAsParents) connect(focus.key, person.key);
     }
 
     return _CanvasModel(
@@ -1555,6 +1678,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       focusCenter: center,
       bubbles: bubbles,
       connections: connections,
+      familyBranches: familyBranches,
     );
   }
 
@@ -1882,12 +2006,14 @@ class _CanvasModel {
   final Offset focusCenter;
   final List<_BubbleSpec> bubbles;
   final List<_CanvasConnection> connections;
+  final List<_FamilyBranch> familyBranches;
 
   const _CanvasModel({
     required this.size,
     required this.focusCenter,
     required this.bubbles,
     required this.connections,
+    required this.familyBranches,
   });
 }
 
@@ -1896,6 +2022,27 @@ class _CanvasConnection {
   final Offset second;
 
   const _CanvasConnection(this.first, this.second);
+}
+
+class _FamilyBranch {
+  final List<Offset> parents;
+  final List<Offset> children;
+  final double laneOffset;
+  final double? branchOriginX;
+
+  const _FamilyBranch({
+    required this.parents,
+    required this.children,
+    this.laneOffset = 0,
+    this.branchOriginX,
+  });
+
+  _FamilyBranch withLaneOffset(double value) => _FamilyBranch(
+    parents: parents,
+    children: children,
+    laneOffset: value,
+    branchOriginX: branchOriginX,
+  );
 }
 
 class _RelationshipLinesPainter extends CustomPainter {
@@ -1910,6 +2057,10 @@ class _RelationshipLinesPainter extends CustomPainter {
       ..strokeWidth = 2.2
       ..style = PaintingStyle.stroke;
 
+    for (final branch in model.familyBranches) {
+      _paintFamilyBranch(canvas, paint, branch);
+    }
+
     for (final connection in model.connections) {
       final path = Path()..moveTo(connection.first.dx, connection.first.dy);
       final midpointY = (connection.first.dy + connection.second.dy) / 2;
@@ -1922,6 +2073,46 @@ class _RelationshipLinesPainter extends CustomPainter {
         connection.second.dy,
       );
       canvas.drawPath(path, paint);
+    }
+  }
+
+  void _paintFamilyBranch(Canvas canvas, Paint paint, _FamilyBranch branch) {
+    final parentY =
+        branch.parents.map((point) => point.dy).reduce((a, b) => a + b) /
+        branch.parents.length;
+    final averageParentX =
+        branch.parents.map((point) => point.dx).reduce((a, b) => a + b) /
+        branch.parents.length;
+    final branchOriginX = branch.branchOriginX ?? averageParentX;
+    final childY = branch.children.map((point) => point.dy).reduce(min);
+    final branchY = (parentY + childY) / 2 + branch.laneOffset;
+    final childXs = branch.children.map((point) => point.dx).toList();
+    final barLeft = min(branchOriginX, childXs.reduce(min));
+    final barRight = max(branchOriginX, childXs.reduce(max));
+
+    if (branch.parents.length > 1) {
+      final parentXs = branch.parents.map((point) => point.dx).toList();
+      canvas.drawLine(
+        Offset(parentXs.reduce(min), parentY),
+        Offset(parentXs.reduce(max), parentY),
+        paint,
+      );
+    }
+
+    canvas.drawLine(
+      Offset(branchOriginX, parentY),
+      Offset(branchOriginX, branchY),
+      paint,
+    );
+    if ((barRight - barLeft).abs() > 0.5) {
+      canvas.drawLine(
+        Offset(barLeft, branchY),
+        Offset(barRight, branchY),
+        paint,
+      );
+    }
+    for (final child in branch.children) {
+      canvas.drawLine(Offset(child.dx, branchY), child, paint);
     }
   }
 
@@ -2122,6 +2313,49 @@ class _MiniMapPainter extends CustomPainter {
       ..strokeWidth = 1;
     final personPaint = Paint()..color = const Color(0xFF7B5B8E);
     final addPaint = Paint()..color = const Color(0xFFD8CBDD);
+
+    for (final branch in model.familyBranches) {
+      final parentY =
+          branch.parents.map((point) => point.dy).reduce((a, b) => a + b) /
+          branch.parents.length;
+      final averageParentX =
+          branch.parents.map((point) => point.dx).reduce((a, b) => a + b) /
+          branch.parents.length;
+      final branchOriginX = branch.branchOriginX ?? averageParentX;
+      final childY = branch.children
+          .map((point) => point.dy)
+          .reduce((a, b) => a < b ? a : b);
+      final branchY = (parentY + childY) / 2 + branch.laneOffset;
+      final childXs = branch.children.map((point) => point.dx).toList();
+      final barLeft = min(branchOriginX, childXs.reduce(min));
+      final barRight = max(branchOriginX, childXs.reduce(max));
+
+      if (branch.parents.length > 1) {
+        final parentXs = branch.parents.map((point) => point.dx).toList();
+        canvas.drawLine(
+          mapPoint(Offset(parentXs.reduce(min), parentY)),
+          mapPoint(Offset(parentXs.reduce(max), parentY)),
+          linePaint,
+        );
+      }
+      canvas.drawLine(
+        mapPoint(Offset(branchOriginX, parentY)),
+        mapPoint(Offset(branchOriginX, branchY)),
+        linePaint,
+      );
+      canvas.drawLine(
+        mapPoint(Offset(barLeft, branchY)),
+        mapPoint(Offset(barRight, branchY)),
+        linePaint,
+      );
+      for (final child in branch.children) {
+        canvas.drawLine(
+          mapPoint(Offset(child.dx, branchY)),
+          mapPoint(child),
+          linePaint,
+        );
+      }
+    }
 
     for (final connection in model.connections) {
       canvas.drawLine(
