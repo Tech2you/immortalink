@@ -31,6 +31,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Map<String, dynamic>? _vault;
   String? _vaultAvatarUrl;
+  List<Map<String, dynamic>> _familyMemberships = [];
+  String? _activeFamilyId;
 
   bool _loadingFeed = false;
   String? _feedError;
@@ -104,6 +106,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
         _error = null;
         _familyFeed = [];
         _feedError = null;
+        _familyMemberships = [];
+        _activeFamilyId = null;
       });
     } catch (e) {
       _toast('Sign out failed: $e');
@@ -201,6 +205,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
           _vault = null;
           _vaultAvatarUrl = null;
           _familyFeed = [];
+          _familyMemberships = [];
+          _activeFamilyId = null;
         });
         return;
       }
@@ -227,6 +233,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         _vaultAvatarUrl = signedUrl;
       });
 
+      await _loadFamilyMemberships(user.id);
       await _loadFamilyFeed();
     } on TimeoutException {
       if (!mounted) return;
@@ -250,8 +257,70 @@ class _VaultsScreenState extends State<VaultsScreen> {
     }
   }
 
+  Future<void> _loadFamilyMemberships(String userId) async {
+    final rawRows = await _supabase
+        .from('family_members')
+        .select('family_id, role, joined_at, is_primary')
+        .eq('user_id', userId)
+        .order('joined_at', ascending: true)
+        .timeout(const Duration(seconds: 12));
+    final memberships = List<Map<String, dynamic>>.from(rawRows);
+    final familyIds = memberships
+        .map((row) => (row['family_id'] ?? '').toString().trim())
+        .where((id) => id.isNotEmpty)
+        .toList();
+
+    final namesById = <String, String>{};
+    if (familyIds.isNotEmpty) {
+      try {
+        final rawFamilies = await _supabase
+            .from('family_groups')
+            .select('id, name')
+            .inFilter('id', familyIds)
+            .timeout(const Duration(seconds: 12));
+        for (final family in List<Map<String, dynamic>>.from(rawFamilies)) {
+          final id = (family['id'] ?? '').toString().trim();
+          if (id.isNotEmpty) {
+            namesById[id] = (family['name'] ?? 'Family').toString().trim();
+          }
+        }
+      } catch (_) {}
+    }
+
+    for (final membership in memberships) {
+      final id = (membership['family_id'] ?? '').toString().trim();
+      membership['family_name'] = namesById[id]?.isNotEmpty == true
+          ? namesById[id]
+          : 'Family tree';
+    }
+
+    String? primaryId;
+    for (final row in memberships) {
+      final id = (row['family_id'] ?? '').toString().trim();
+      if (row['is_primary'] == true && id.isNotEmpty) {
+        primaryId = id;
+        break;
+      }
+    }
+    final storedPrimary = (_vault?['family_id'] as String?)?.trim();
+    final nextActive =
+        memberships.any(
+          (row) => (row['family_id'] ?? '').toString() == _activeFamilyId,
+        )
+        ? _activeFamilyId
+        : (primaryId ??
+              (storedPrimary?.isNotEmpty == true ? storedPrimary : null) ??
+              (familyIds.isEmpty ? null : familyIds.first));
+
+    if (!mounted) return;
+    setState(() {
+      _familyMemberships = memberships;
+      _activeFamilyId = nextActive;
+    });
+  }
+
   Future<void> _loadFamilyFeed() async {
-    final familyId = (_vault?['family_id'] as String?)?.trim();
+    final familyId = _activeFamilyId?.trim();
 
     if (familyId == null || familyId.isEmpty) {
       if (!mounted) return;
@@ -274,11 +343,22 @@ class _VaultsScreenState extends State<VaultsScreen> {
     });
 
     try {
-      final vaultRows = await _supabase
-          .from('vaults')
-          .select('id, name, display_name, avatar_path')
+      final rawMembers = await _supabase
+          .from('family_members')
+          .select('user_id')
           .eq('family_id', familyId)
           .timeout(const Duration(seconds: 12));
+      final memberUserIds = List<Map<String, dynamic>>.from(rawMembers)
+          .map((row) => (row['user_id'] ?? '').toString().trim())
+          .where((id) => id.isNotEmpty)
+          .toList();
+      final vaultRows = memberUserIds.isEmpty
+          ? <Map<String, dynamic>>[]
+          : await _supabase
+                .from('vaults')
+                .select('id, name, display_name, avatar_path, owner_id')
+                .inFilter('owner_id', memberUserIds)
+                .timeout(const Duration(seconds: 12));
       final currentVaultId = (_vault?['id'] ?? '').toString();
       final now = DateTime.now();
       final cutoff = now.subtract(const Duration(days: 30));
@@ -454,6 +534,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         builder: (_) => VaultHomeScreen(
           vaultId: (_vault!['id'] ?? '').toString(),
           vaultName: (_vault!['name'] ?? '').toString(),
+          familyId: _activeFamilyId,
         ),
       ),
     ).then((_) => _loadVault());
@@ -594,7 +675,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   Future<void> _ensureFamilyAndOpenTree() async {
-    final familyId = (_vault?['family_id'] as String?)?.trim();
+    final familyId = _activeFamilyId?.trim();
     if (familyId != null && familyId.isNotEmpty) {
       if (!mounted) return;
       Navigator.push(
@@ -659,6 +740,11 @@ class _VaultsScreenState extends State<VaultsScreen> {
         throw Exception('Failed to create family id');
       }
 
+      await _supabase.rpc(
+        'set_primary_family',
+        params: {'p_family_id': newFamilyIdStr},
+      );
+
       await _loadVault();
 
       if (!mounted) return;
@@ -675,6 +761,119 @@ class _VaultsScreenState extends State<VaultsScreen> {
     } catch (e) {
       _toast('Family setup failed: $e');
     }
+  }
+
+  void _openFamilyTree(String familyId) {
+    setState(() => _activeFamilyId = familyId);
+    _loadFamilyFeed();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RelationshipTreeScreen(familyId: familyId),
+      ),
+    ).then((_) => _loadVault());
+  }
+
+  Future<void> _makePrimaryFamily(String familyId) async {
+    try {
+      await _supabase.rpc(
+        'set_primary_family',
+        params: {'p_family_id': familyId},
+      );
+      await _loadVault();
+      _toast('Home family updated.');
+    } on PostgrestException catch (e) {
+      _toast('Could not update home family: ${e.message}');
+    } catch (e) {
+      _toast('Could not update home family: $e');
+    }
+  }
+
+  Widget _familyTreesCard() {
+    if (_familyMemberships.isEmpty) {
+      return Column(
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _ensureFamilyAndOpenTree,
+              icon: const Icon(Icons.group_add),
+              label: const Text('Create your family tree'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _openJoinFamilyScreen,
+              icon: const Icon(Icons.vpn_key),
+              label: const Text('Join with invite code'),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Card(
+      color: Colors.white.withOpacity(0.36),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.black.withOpacity(0.08)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Your family trees',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'You can join more than one. Your home family opens by default.',
+              style: TextStyle(color: Colors.black.withOpacity(0.62)),
+            ),
+            const SizedBox(height: 8),
+            ..._familyMemberships.map((membership) {
+              final id = (membership['family_id'] ?? '').toString();
+              final name = (membership['family_name'] ?? 'Family tree')
+                  .toString();
+              final isPrimary = membership['is_primary'] == true;
+              final isActive = id == _activeFamilyId;
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: isActive
+                      ? const Color(0xFFE6D7EF)
+                      : Colors.black.withOpacity(0.06),
+                  child: const Icon(Icons.account_tree),
+                ),
+                title: Text(name),
+                subtitle: Text(isPrimary ? 'Home family' : 'Family member'),
+                onTap: () => _openFamilyTree(id),
+                trailing: isPrimary
+                    ? const Icon(Icons.home, color: Color(0xFF6E5A93))
+                    : TextButton(
+                        onPressed: () => _makePrimaryFamily(id),
+                        child: const Text('Make home'),
+                      ),
+              );
+            }),
+            const Divider(),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton.icon(
+                onPressed: _openJoinFamilyScreen,
+                icon: const Icon(Icons.group_add),
+                label: const Text('Join another family'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _togglePlay(_VoiceNote v, {required String playKey}) async {
@@ -1296,9 +1495,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final familyId = (_vault?['family_id'] as String?)?.trim();
-    final inFamily = familyId != null && familyId.isNotEmpty;
-
     final hasAvatar =
         _vaultAvatarUrl != null && _vaultAvatarUrl!.trim().isNotEmpty;
     final createdLabel = _formatCreatedAt(_vault?['created_at']);
@@ -1369,33 +1565,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                         )
                       : ListView(
                           children: [
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: _ensureFamilyAndOpenTree,
-                                icon: Icon(
-                                  inFamily
-                                      ? Icons.account_tree
-                                      : Icons.group_add,
-                                ),
-                                label: Text(
-                                  inFamily
-                                      ? 'View your family tree'
-                                      : 'Invite your family',
-                                ),
-                              ),
-                            ),
-                            if (!inFamily) ...[
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton.icon(
-                                  onPressed: _openJoinFamilyScreen,
-                                  icon: const Icon(Icons.vpn_key),
-                                  label: const Text('Join with invite code'),
-                                ),
-                              ),
-                            ],
+                            _familyTreesCard(),
                             const SizedBox(height: 12),
                             Card(
                               color: Colors.white.withOpacity(0.36),
@@ -1453,7 +1623,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                 ),
                               ),
                             ),
-                            _buildFeedSection(inFamily),
+                            _buildFeedSection(_familyMemberships.isNotEmpty),
                           ],
                         )),
           ),

@@ -177,6 +177,11 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Paste the invite code you received.'),
+            const SizedBox(height: 6),
+            Text(
+              'Joining another family will not remove you from your current family. You can switch between trees from Your Vault.',
+              style: TextStyle(color: Colors.black.withValues(alpha: 0.62)),
+            ),
             const SizedBox(height: 12),
             TextField(
               controller: _controller,

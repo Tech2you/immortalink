@@ -467,6 +467,7 @@ serve(async (req) => {
     const vaultId = textClean(payload?.vaultId || payload?.vault_id || "");
     const question = textClean(payload?.question || payload?.prompt || payload?.message || "");
     const displayNameFromClient = textClean(payload?.displayName || payload?.display_name || "");
+    const requestedFamilyId = textClean(payload?.familyId || payload?.family_id || "");
 
     const viewerDisplayName = textClean(payload?.viewerDisplayName || payload?.viewer_display_name || "");
 
@@ -487,7 +488,32 @@ serve(async (req) => {
     if (!vaultRow) return json({ error: "Vault not found or not allowed" }, 403);
 
     const vaultOwnerUserId = textClean((vaultRow as any).owner_id || "");
-    const familyId = textClean((vaultRow as any).family_id || "");
+    let familyId = requestedFamilyId || textClean((vaultRow as any).family_id || "");
+
+    if (requestedFamilyId) {
+      const { data: sharedRows, error: sharedErr } = await withTimeout(
+        supabase
+          .from("family_members")
+          .select("user_id")
+          .eq("family_id", requestedFamilyId)
+          .in("user_id", [viewerUserId, vaultOwnerUserId]),
+        3_000,
+        "DB(active family membership)",
+      );
+      const sharedIds = new Set(
+        Array.isArray(sharedRows)
+          ? sharedRows.map((row) => textClean((row as any).user_id || ""))
+          : [],
+      );
+      if (
+        sharedErr ||
+        !sharedIds.has(viewerUserId) ||
+        !sharedIds.has(vaultOwnerUserId)
+      ) {
+        return json({ error: "Vault is not part of the selected family" }, 403);
+      }
+      familyId = requestedFamilyId;
+    }
 
     const ownerDisplayName =
       textClean((vaultRow as any).display_name || "") ||
@@ -515,7 +541,6 @@ serve(async (req) => {
           supabase
             .from("vaults")
             .select("id")
-            .eq("family_id", familyId)
             .eq("owner_id", viewerUserId)
             .maybeSingle(),
           3_000,

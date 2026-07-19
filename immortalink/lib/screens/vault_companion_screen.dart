@@ -58,13 +58,13 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
 
     final intro = widget.isLegacy
         ? 'This chat is an AI voice inspired by ${widget.displayName}\'s saved family memories, notes, and legacy profile.\n\n'
-            'It may be inaccurate or incomplete, and it is not the real person.\n\n'
-            'Only family members with access can use it.\n\n'
-            'By continuing, you agree to use it respectfully.'
+              'It may be inaccurate or incomplete, and it is not the real person.\n\n'
+              'Only family members with access can use it.\n\n'
+              'By continuing, you agree to use it respectfully.'
         : 'This chat is an AI voice inspired by ${widget.displayName}\'s vault content.\n\n'
-            'It may be inaccurate or incomplete, and it is not the real person.\n\n'
-            'Only people with vault access can use it.\n\n'
-            'By continuing, you agree to use it respectfully.';
+              'It may be inaccurate or incomplete, and it is not the real person.\n\n'
+              'Only people with vault access can use it.\n\n'
+              'By continuing, you agree to use it respectfully.';
 
     await showDialog<void>(
       context: context,
@@ -117,10 +117,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     final session = _client.auth.currentSession;
     final token = session?.accessToken?.trim();
     if (token == null || token.isEmpty) return {};
-    return {
-      'Authorization': 'Bearer $token',
-      'authorization': 'Bearer $token',
-    };
+    return {'Authorization': 'Bearer $token', 'authorization': 'Bearer $token'};
   }
 
   String _safeExtract(dynamic v) => (v ?? '').toString().trim();
@@ -142,10 +139,13 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     final session = _client.auth.currentSession;
     if (session == null) {
       setState(() {
-        _msgs.add(_ChatMsg(
-          role: _Role.assistant,
-          text: 'You are not signed in (session missing). Please sign in again.',
-        ));
+        _msgs.add(
+          _ChatMsg(
+            role: _Role.assistant,
+            text:
+                'You are not signed in (session missing). Please sign in again.',
+          ),
+        );
       });
       return;
     }
@@ -178,6 +178,8 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
           : {
               'vaultId': widget.vaultId,
               'vault_id': widget.vaultId,
+              'familyId': widget.familyId,
+              'family_id': widget.familyId,
               'question': text,
               'prompt': text,
               'message': text,
@@ -186,11 +188,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
             };
 
       final res = await _client.functions
-          .invoke(
-            'vault_ai_chat',
-            headers: headers,
-            body: body,
-          )
+          .invoke('vault_ai_chat', headers: headers, body: body)
           .timeout(const Duration(seconds: 60));
 
       if (res.status != 200) {
@@ -198,7 +196,9 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         final err = (d is Map)
             ? _safeExtract(d['error'] ?? d['message'] ?? d['details'])
             : _safeExtract(d);
-        throw Exception('Function HTTP ${res.status}${err.isEmpty ? '' : ': $err'}');
+        throw Exception(
+          'Function HTTP ${res.status}${err.isEmpty ? '' : ': $err'}',
+        );
       }
 
       final data = res.data;
@@ -210,7 +210,9 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         answer = _safeExtract(data['answer'] ?? data['reply']);
         debug = _safeExtract(data['debug']);
         if (answer.isEmpty) {
-          final err = _safeExtract(data['error'] ?? data['message'] ?? data['details']);
+          final err = _safeExtract(
+            data['error'] ?? data['message'] ?? data['details'],
+          );
           if (err.isNotEmpty) answer = 'Error: $err';
         }
       } else if (data is String) {
@@ -218,7 +220,9 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
       }
 
       if (answer.isEmpty) {
-        answer = debug.isNotEmpty ? 'No answer returned. Debug: $debug' : '(No answer returned)';
+        answer = debug.isNotEmpty
+            ? 'No answer returned. Debug: $debug'
+            : '(No answer returned)';
       }
 
       if (!mounted) return;
@@ -252,7 +256,8 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         final idx = _msgs.lastIndexWhere(
           (m) => m.role == _Role.assistant && m.isTyping,
         );
-        final text = 'Sorry — the AI took too long to respond. Please try again.';
+        final text =
+            'Sorry — the AI took too long to respond. Please try again.';
         if (idx != -1) {
           _msgs[idx] = _ChatMsg(role: _Role.assistant, text: text);
         } else {
@@ -356,11 +361,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
       return ListView(
         controller: _scroll,
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        children: [
-          _QuickPrompts(
-            onTap: _sending ? null : _sendQuick,
-          ),
-        ],
+        children: [_QuickPrompts(onTap: _sending ? null : _sendQuick)],
       );
     }
 
@@ -371,9 +372,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
       itemCount: _msgs.length + (showQuickPrompts ? 1 : 0),
       itemBuilder: (_, i) {
         if (showQuickPrompts && i == 1) {
-          return _QuickPrompts(
-            onTap: _sending ? null : _sendQuick,
-          );
+          return _QuickPrompts(onTap: _sending ? null : _sendQuick);
         }
 
         final msgIndex = showQuickPrompts ? (i == 0 ? 0 : i - 1) : i;
@@ -402,10 +401,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
             ),
             child: m.isTyping
                 ? const _TypingDots()
-                : SelectableText(
-                    m.text,
-                    style: const TextStyle(height: 1.25),
-                  ),
+                : SelectableText(m.text, style: const TextStyle(height: 1.25)),
           ),
         );
       },
@@ -433,8 +429,9 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
                       hintText: _accepted ? 'Ask a question…' : 'Loading…',
                       border: const OutlineInputBorder(),
                       filled: true,
-                      fillColor:
-                          Theme.of(context).colorScheme.surface.withOpacity(0.85),
+                      fillColor: Theme.of(
+                        context,
+                      ).colorScheme.surface.withOpacity(0.85),
                     ),
                   ),
                 ),
@@ -469,11 +466,7 @@ class _ChatMsg {
   final String text;
   final bool isTyping;
 
-  _ChatMsg({
-    required this.role,
-    required this.text,
-    this.isTyping = false,
-  });
+  _ChatMsg({required this.role, required this.text, this.isTyping = false});
 }
 
 class _TypingDots extends StatefulWidget {

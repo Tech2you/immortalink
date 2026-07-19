@@ -70,15 +70,25 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     }
 
     try {
+      final rawMemberRows = await _supabase
+          .from('family_members')
+          .select('user_id, slot_key, role, is_primary')
+          .eq('family_id', widget.familyId);
+      final memberRows = (rawMemberRows as List).cast<Map<String, dynamic>>();
+      final memberUserIds = memberRows
+          .map((row) => (row['user_id'] ?? '').toString().trim())
+          .where((id) => id.isNotEmpty)
+          .toList();
+
       final results = await Future.wait([
-        _supabase
-            .from('vaults')
-            .select('id, name, display_name, owner_id, family_id, avatar_path')
-            .eq('family_id', widget.familyId),
-        _supabase
-            .from('family_members')
-            .select('user_id, slot_key, role')
-            .eq('family_id', widget.familyId),
+        memberUserIds.isEmpty
+            ? Future<List<Map<String, dynamic>>>.value([])
+            : _supabase
+                  .from('vaults')
+                  .select(
+                    'id, name, display_name, owner_id, family_id, avatar_path',
+                  )
+                  .inFilter('owner_id', memberUserIds),
         _supabase
             .from('legacy_family_members')
             .select(
@@ -95,9 +105,8 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       ]);
 
       final vaultRows = (results[0] as List).cast<Map<String, dynamic>>();
-      final memberRows = (results[1] as List).cast<Map<String, dynamic>>();
-      final legacyRows = (results[2] as List).cast<Map<String, dynamic>>();
-      final relationshipRows = (results[3] as List)
+      final legacyRows = (results[1] as List).cast<Map<String, dynamic>>();
+      final relationshipRows = (results[2] as List)
           .cast<Map<String, dynamic>>();
 
       final slotByUser = <String, String?>{};
@@ -391,8 +400,16 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => isOwner
-              ? VaultHomeScreen(vaultId: person.id, vaultName: person.name)
-              : VaultReadOnlyScreen(vaultId: person.id, vaultName: person.name),
+              ? VaultHomeScreen(
+                  vaultId: person.id,
+                  vaultName: person.name,
+                  familyId: widget.familyId,
+                )
+              : VaultReadOnlyScreen(
+                  vaultId: person.id,
+                  vaultName: person.name,
+                  familyId: widget.familyId,
+                ),
         ),
       );
     }

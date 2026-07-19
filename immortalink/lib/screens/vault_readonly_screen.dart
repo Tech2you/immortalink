@@ -12,11 +12,13 @@ import 'vault_companion_screen.dart';
 class VaultReadOnlyScreen extends StatefulWidget {
   final String vaultId;
   final String vaultName;
+  final String? familyId;
 
   const VaultReadOnlyScreen({
     super.key,
     required this.vaultId,
     required this.vaultName,
+    this.familyId,
   });
 
   @override
@@ -118,8 +120,9 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
   Future<String?> _signedUrl(String bucket, String path) async {
     try {
-      final signed =
-          await _client.storage.from(bucket).createSignedUrl(path, 60 * 60);
+      final signed = await _client.storage
+          .from(bucket)
+          .createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
@@ -252,9 +255,11 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           .maybeSingle();
 
       final ownerId = (meta?['owner_id'] as String?)?.trim();
-      final familyId = (meta?['family_id'] as String?)?.trim();
+      final familyId = (widget.familyId ?? meta?['family_id'] as String?)
+          ?.trim();
       final path = (meta?['avatar_path'] as String?)?.trim();
-      final dn = (meta?['display_name'] as String?) ??
+      final dn =
+          (meta?['display_name'] as String?) ??
           (meta?['name'] as String?) ??
           _vaultName;
 
@@ -640,7 +645,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     );
   }
 
-  String _featuredPrefix(String ownerId) => '$ownerId/${widget.vaultId}/featured';
+  String _featuredPrefix(String ownerId) =>
+      '$ownerId/${widget.vaultId}/featured';
 
   int get _highlightsCount =>
       _featuredPhotos.length >= 3 ? 3 : _featuredPhotos.length;
@@ -685,10 +691,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
       final prefix = _featuredPrefix(ownerId);
 
-      final list = await _client.storage.from(_featuredPhotosBucket).list(
-        path: prefix,
-        searchOptions: const SearchOptions(limit: 200, offset: 0),
-      );
+      final list = await _client.storage
+          .from(_featuredPhotosBucket)
+          .list(
+            path: prefix,
+            searchOptions: const SearchOptions(limit: 200, offset: 0),
+          );
 
       final items = <Map<String, String>>[];
       for (final obj in list) {
@@ -1115,15 +1123,17 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           continue;
         }
 
-        _memoryVoiceById.putIfAbsent(memoryId, () => []).add(
-          _VoiceNote(
-            id: id,
-            path: path,
-            title: title.isEmpty ? 'Voice note' : title,
-            url: url,
-            createdAt: createdAt,
-          ),
-        );
+        _memoryVoiceById
+            .putIfAbsent(memoryId, () => [])
+            .add(
+              _VoiceNote(
+                id: id,
+                path: path,
+                title: title.isEmpty ? 'Voice note' : title,
+                url: url,
+                createdAt: createdAt,
+              ),
+            );
       }
 
       if (!mounted) return;
@@ -1169,6 +1179,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         builder: (_) => VaultCompanionScreen(
           vaultId: widget.vaultId,
           displayName: name,
+          familyId: _familyId,
         ),
       ),
     );
@@ -1255,8 +1266,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                         height: 40,
                         child: OutlinedButton.icon(
                           onPressed: _openBranch,
-                          icon:
-                              const Icon(Icons.account_tree_outlined, size: 18),
+                          icon: const Icon(
+                            Icons.account_tree_outlined,
+                            size: 18,
+                          ),
                           label: const Text('Open branch'),
                         ),
                       ),
@@ -1657,96 +1670,100 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-                  ? Center(child: Text('Load failed: $_error'))
-                  : ListView.separated(
-                      itemCount: () {
-                        final hasHint = _storageErrorHint != null;
-                        final base = 4 + (hasHint ? 1 : 0);
-                        final mem = _memories.isEmpty ? 1 : _memories.length;
-                        return base + mem;
-                      }(),
-                      separatorBuilder: (_, __) => const Divider(),
-                      itemBuilder: (context, i) {
-                        final hasHint = _storageErrorHint != null;
+              ? Center(child: Text('Load failed: $_error'))
+              : ListView.separated(
+                  itemCount: () {
+                    final hasHint = _storageErrorHint != null;
+                    final base = 4 + (hasHint ? 1 : 0);
+                    final mem = _memories.isEmpty ? 1 : _memories.length;
+                    return base + mem;
+                  }(),
+                  separatorBuilder: (_, __) => const Divider(),
+                  itemBuilder: (context, i) {
+                    final hasHint = _storageErrorHint != null;
 
-                        if (i == 0) return _headerCard();
-                        if (i == 1) return _highlightsSection();
-                        if (i == 2) return _aboutMeTextPhotosSection();
-                        if (i == 3) return _aboutMeSection();
+                    if (i == 0) return _headerCard();
+                    if (i == 1) return _highlightsSection();
+                    if (i == 2) return _aboutMeTextPhotosSection();
+                    if (i == 3) return _aboutMeSection();
 
-                        if (hasHint && i == 4) {
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                  color: Colors.black.withOpacity(0.08)),
-                              color: Colors.white.withOpacity(0.35),
-                            ),
-                            child: Text(
-                              _storageErrorHint!,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.black.withOpacity(0.65),
-                              ),
-                            ),
-                          );
-                        }
-
-                        final memStart = 4 + (hasHint ? 1 : 0);
-
-                        if (_memories.isEmpty) {
-                          if (i == memStart) {
-                            return const Padding(
-                              padding: EdgeInsets.only(top: 10),
-                              child: Center(child: Text('No memories yet.')),
-                            );
-                          }
-                          return const SizedBox.shrink();
-                        }
-
-                        final idx = i - memStart;
-                        if (idx < 0 || idx >= _memories.length) {
-                          return const SizedBox.shrink();
-                        }
-
-                        final m = _memories[idx];
-                        final stage = (m['life_stage'] ?? '').toString();
-                        final prompt = (m['prompt_text'] ?? '').toString();
-                        final body = (m['body'] ?? '').toString();
-
-                        return ListTile(
-                          tileColor: tileBg,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                    if (hasHint && i == 4) {
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.black.withOpacity(0.08),
                           ),
-                          leading: Chip(label: Text(_prettyStage(stage))),
-                          title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(body,
-                                  maxLines: 3, overflow: TextOverflow.ellipsis),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Tap to open • photos + voice',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.black.withOpacity(0.55),
-                                ),
-                              ),
-                            ],
+                          color: Colors.white.withOpacity(0.35),
+                        ),
+                        child: Text(
+                          _storageErrorHint!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black.withOpacity(0.65),
                           ),
-                          trailing: IconButton(
-                            tooltip: 'Open memory',
-                            icon: const Icon(Icons.chevron_right),
-                            onPressed: () => _openMemoryDetail(m),
-                          ),
-                          onTap: () => _openMemoryDetail(m),
+                        ),
+                      );
+                    }
+
+                    final memStart = 4 + (hasHint ? 1 : 0);
+
+                    if (_memories.isEmpty) {
+                      if (i == memStart) {
+                        return const Padding(
+                          padding: EdgeInsets.only(top: 10),
+                          child: Center(child: Text('No memories yet.')),
                         );
-                      },
-                    ),
+                      }
+                      return const SizedBox.shrink();
+                    }
+
+                    final idx = i - memStart;
+                    if (idx < 0 || idx >= _memories.length) {
+                      return const SizedBox.shrink();
+                    }
+
+                    final m = _memories[idx];
+                    final stage = (m['life_stage'] ?? '').toString();
+                    final prompt = (m['prompt_text'] ?? '').toString();
+                    final body = (m['body'] ?? '').toString();
+
+                    return ListTile(
+                      tileColor: tileBg,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      leading: Chip(label: Text(_prettyStage(stage))),
+                      title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            body,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Tap to open • photos + voice',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.black.withOpacity(0.55),
+                            ),
+                          ),
+                        ],
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Open memory',
+                        icon: const Icon(Icons.chevron_right),
+                        onPressed: () => _openMemoryDetail(m),
+                      ),
+                      onTap: () => _openMemoryDetail(m),
+                    );
+                  },
+                ),
         ),
       ),
     );

@@ -17,11 +17,13 @@ import 'vault_companion_screen.dart';
 class VaultHomeScreen extends StatefulWidget {
   final String vaultId;
   final String vaultName;
+  final String? familyId;
 
   const VaultHomeScreen({
     super.key,
     required this.vaultId,
     required this.vaultName,
+    this.familyId,
   });
 
   @override
@@ -215,8 +217,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   Future<String?> _signedUrl(String bucket, String path) async {
     try {
-      final signed =
-          await _client.storage.from(bucket).createSignedUrl(path, 60 * 60);
+      final signed = await _client.storage
+          .from(bucket)
+          .createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (_) {
@@ -332,10 +335,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         'Authorization': 'Bearer $token',
         'authorization': 'Bearer $token',
       },
-      body: {
-        'vault_id': widget.vaultId,
-        'core_voice': true,
-      },
+      body: {'vault_id': widget.vaultId, 'core_voice': true},
     );
 
     if (res.status != 200) {
@@ -402,7 +402,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               }
             }
 
-            WidgetsBinding.instance.addPostFrameCallback((_) => startIfNeeded());
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => startIfNeeded(),
+            );
 
             String mmss(int s) {
               final m = (s ~/ 60).toString().padLeft(2, '0');
@@ -475,8 +477,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             saving
                                 ? 'Saving…'
                                 : (_recorder.isRecording
-                                    ? 'Recording…'
-                                    : 'Starting…'),
+                                      ? 'Recording…'
+                                      : 'Starting…'),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           const Spacer(),
@@ -534,8 +536,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final path = (res?['avatar_path'] as String?)?.trim();
       final dn =
-          (res?['display_name'] as String?) ?? (res?['name'] as String?) ?? _vaultName;
-      final familyId = (res?['family_id'] as String?)?.trim();
+          (res?['display_name'] as String?) ??
+          (res?['name'] as String?) ??
+          _vaultName;
+      final familyId = (widget.familyId ?? res?['family_id'] as String?)
+          ?.trim();
 
       String? slotKey;
       if (familyId != null && familyId.isNotEmpty) {
@@ -593,14 +598,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final ext = _extFromName(file.name);
       final path = '$userId/${widget.vaultId}/avatar.$ext';
 
-      await _client.storage.from(_avatarBucket).uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(
-          upsert: true,
-          contentType: _contentTypeFromExt(ext),
-        ),
-      );
+      await _client.storage
+          .from(_avatarBucket)
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: true,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
 
       await _client
           .from('vaults')
@@ -632,8 +639,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            VaultCompanionScreen(vaultId: widget.vaultId, displayName: name),
+        builder: (_) => VaultCompanionScreen(
+          vaultId: widget.vaultId,
+          displayName: name,
+          familyId: _familyId,
+        ),
       ),
     );
   }
@@ -698,7 +708,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         height: 40,
                         child: OutlinedButton.icon(
                           onPressed: _openBranch,
-                          icon: const Icon(Icons.account_tree_outlined, size: 18),
+                          icon: const Icon(
+                            Icons.account_tree_outlined,
+                            size: 18,
+                          ),
                           label: const Text('Open branch'),
                         ),
                       ),
@@ -760,10 +773,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final prefix = _featuredPrefix(userId);
 
-      final list = await _client.storage.from(_featuredPhotosBucket).list(
-        path: prefix,
-        searchOptions: const SearchOptions(limit: 200, offset: 0),
-      );
+      final list = await _client.storage
+          .from(_featuredPhotosBucket)
+          .list(
+            path: prefix,
+            searchOptions: const SearchOptions(limit: 200, offset: 0),
+          );
 
       final items = <Map<String, String>>[];
       for (final obj in list) {
@@ -821,14 +836,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_featuredPrefix(userId)}/$ts.$ext';
 
-      await _client.storage.from(_featuredPhotosBucket).uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(
-          upsert: false,
-          contentType: _contentTypeFromExt(ext),
-        ),
-      );
+      await _client.storage
+          .from(_featuredPhotosBucket)
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
 
       await _loadFeaturedPhotos();
       _toast('Added to highlights.');
@@ -944,8 +961,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                         },
                                         child: CircleAvatar(
                                           radius: 16,
-                                          backgroundColor:
-                                              Colors.black.withOpacity(0.55),
+                                          backgroundColor: Colors.black
+                                              .withOpacity(0.55),
                                           child: const Icon(
                                             Icons.delete_outline,
                                             size: 18,
@@ -974,10 +991,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                           SizedBox(
                             height: 40,
                             child: OutlinedButton.icon(
-                              onPressed:
-                                  _uploadingPhoto ? null : _uploadFeaturedPhoto,
-                              icon:
-                                  const Icon(Icons.add_photo_alternate_outlined),
+                              onPressed: _uploadingPhoto
+                                  ? null
+                                  : _uploadFeaturedPhoto,
+                              icon: const Icon(
+                                Icons.add_photo_alternate_outlined,
+                              ),
                               label: Text(
                                 _uploadingPhoto ? 'Uploading…' : 'Add',
                               ),
@@ -1113,8 +1132,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                     onTap: () => _deleteFeaturedPhoto(path),
                                     child: CircleAvatar(
                                       radius: 16,
-                                      backgroundColor:
-                                          Colors.black.withOpacity(0.55),
+                                      backgroundColor: Colors.black.withOpacity(
+                                        0.55,
+                                      ),
                                       child: const Icon(
                                         Icons.delete_outline,
                                         size: 18,
@@ -1314,14 +1334,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_aboutPrefix(userId)}/$ts.$ext';
 
-      await _client.storage.from(_aboutPhotosBucket).uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(
-          upsert: false,
-          contentType: _contentTypeFromExt(ext),
-        ),
-      );
+      await _client.storage
+          .from(_aboutPhotosBucket)
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
 
       await _client.from('vault_about_photos').insert({
         'vault_id': widget.vaultId,
@@ -1447,8 +1469,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                         },
                                         child: CircleAvatar(
                                           radius: 16,
-                                          backgroundColor:
-                                              Colors.black.withOpacity(0.55),
+                                          backgroundColor: Colors.black
+                                              .withOpacity(0.55),
                                           child: const Icon(
                                             Icons.delete_outline,
                                             size: 18,
@@ -1480,8 +1502,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                               onPressed: _uploadingAboutPhoto
                                   ? null
                                   : _uploadAboutPhoto,
-                              icon:
-                                  const Icon(Icons.add_photo_alternate_outlined),
+                              icon: const Icon(
+                                Icons.add_photo_alternate_outlined,
+                              ),
                               label: Text(
                                 _uploadingAboutPhoto ? 'Uploading…' : 'Add',
                               ),
@@ -1575,8 +1598,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               SizedBox(
                 height: 40,
                 child: OutlinedButton.icon(
-                  onPressed:
-                      _uploadingAboutPhoto ? null : _uploadAboutPhoto,
+                  onPressed: _uploadingAboutPhoto ? null : _uploadAboutPhoto,
                   icon: const Icon(Icons.add_photo_alternate_outlined),
                   label: Text(
                     _uploadingAboutPhoto ? 'Uploading…' : 'Add photo',
@@ -1648,8 +1670,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                     onTap: () => _deleteAboutPhoto(path),
                                     child: CircleAvatar(
                                       radius: 16,
-                                      backgroundColor:
-                                          Colors.black.withOpacity(0.55),
+                                      backgroundColor: Colors.black.withOpacity(
+                                        0.55,
+                                      ),
                                       child: const Icon(
                                         Icons.delete_outline,
                                         size: 18,
@@ -1771,23 +1794,22 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_voicePrefix(userId)}/core_$ts.$ext';
 
-      await _client.storage.from(_voiceBucket).uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(
-          upsert: false,
-          contentType: _contentTypeFromExt(ext),
-        ),
-      );
+      await _client.storage
+          .from(_voiceBucket)
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
 
-      await _client.from('vault_core_voice_note').upsert(
-        {
-          'vault_id': widget.vaultId,
-          'path': path,
-          'title': 'About me voice note',
-        },
-        onConflict: 'vault_id',
-      );
+      await _client.from('vault_core_voice_note').upsert({
+        'vault_id': widget.vaultId,
+        'path': path,
+        'title': 'About me voice note',
+      }, onConflict: 'vault_id');
 
       await _indexCoreVoiceNote();
 
@@ -1814,23 +1836,22 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         final ts = DateTime.now().millisecondsSinceEpoch;
         final path = '${_voicePrefix(userId)}/core_$ts.${rec.extension}';
 
-        await _client.storage.from(_voiceBucket).uploadBinary(
-          path,
-          Uint8List.fromList(rec.bytes),
-          fileOptions: FileOptions(
-            upsert: false,
-            contentType: rec.mimeType,
-          ),
-        );
+        await _client.storage
+            .from(_voiceBucket)
+            .uploadBinary(
+              path,
+              Uint8List.fromList(rec.bytes),
+              fileOptions: FileOptions(
+                upsert: false,
+                contentType: rec.mimeType,
+              ),
+            );
 
-        await _client.from('vault_core_voice_note').upsert(
-          {
-            'vault_id': widget.vaultId,
-            'path': path,
-            'title': 'About me voice note',
-          },
-          onConflict: 'vault_id',
-        );
+        await _client.from('vault_core_voice_note').upsert({
+          'vault_id': widget.vaultId,
+          'path': path,
+          'title': 'About me voice note',
+        }, onConflict: 'vault_id');
 
         await _indexCoreVoiceNote();
 
@@ -2120,14 +2141,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '$userId/${widget.vaultId}/memories/$memoryId/$ts.$ext';
 
-      await _client.storage.from(_memoryPhotosBucket).uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(
-          upsert: false,
-          contentType: _contentTypeFromExt(ext),
-        ),
-      );
+      await _client.storage
+          .from(_memoryPhotosBucket)
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
 
       await _client.from('memory_photos').insert({
         'vault_id': widget.vaultId,
@@ -2247,8 +2270,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                         },
                                         child: CircleAvatar(
                                           radius: 16,
-                                          backgroundColor:
-                                              Colors.black.withOpacity(0.55),
+                                          backgroundColor: Colors.black
+                                              .withOpacity(0.55),
                                           child: const Icon(
                                             Icons.delete_outline,
                                             size: 18,
@@ -2278,8 +2301,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             height: 40,
                             child: OutlinedButton.icon(
                               onPressed: () => _uploadMemoryPhoto(memoryId),
-                              icon:
-                                  const Icon(Icons.add_photo_alternate_outlined),
+                              icon: const Icon(
+                                Icons.add_photo_alternate_outlined,
+                              ),
                               label: const Text('Add'),
                             ),
                           ),
@@ -2437,15 +2461,17 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         final url = await _signedUrl(_memoryVoiceBucket, path);
         if (url == null || url.trim().isEmpty) continue;
 
-        _memoryVoiceById.putIfAbsent(memoryId, () => []).add(
-          _VoiceNote(
-            id: id,
-            path: path,
-            title: title.isEmpty ? 'Voice note' : title,
-            url: url,
-            createdAt: createdAt,
-          ),
-        );
+        _memoryVoiceById
+            .putIfAbsent(memoryId, () => [])
+            .add(
+              _VoiceNote(
+                id: id,
+                path: path,
+                title: title.isEmpty ? 'Voice note' : title,
+                url: url,
+                createdAt: createdAt,
+              ),
+            );
       }
 
       if (!mounted) return;
@@ -2479,14 +2505,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.$ext';
 
-      await _client.storage.from(_memoryVoiceBucket).uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(
-          upsert: false,
-          contentType: _contentTypeFromExt(ext),
-        ),
-      );
+      await _client.storage
+          .from(_memoryVoiceBucket)
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(ext),
+            ),
+          );
 
       final inserted = await _client
           .from('memory_voice_notes')
@@ -2546,14 +2574,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           final path =
               '${_memoryVoicePrefix(userId, memoryId)}/$ts.${rec.extension}';
 
-          await _client.storage.from(_memoryVoiceBucket).uploadBinary(
-            path,
-            Uint8List.fromList(rec.bytes),
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: rec.mimeType,
-            ),
-          );
+          await _client.storage
+              .from(_memoryVoiceBucket)
+              .uploadBinary(
+                path,
+                Uint8List.fromList(rec.bytes),
+                fileOptions: FileOptions(
+                  upsert: false,
+                  contentType: rec.mimeType,
+                ),
+              );
 
           final inserted = await _client
               .from('memory_voice_notes')
@@ -3190,67 +3220,70 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-                  ? Center(child: Text('Load failed: $_error'))
-                  : ListView.separated(
-                      itemCount: _memories.isEmpty ? 6 : _memories.length + 4,
-                      separatorBuilder: (_, __) => const Divider(),
-                      itemBuilder: (context, i) {
-                        if (i == 0) return _vaultAvatarHeader();
-                        if (i == 1) return _featuredPhotosSection();
-                        if (i == 2) return _aboutMeSection();
-                        if (i == 3) return _coreVoiceSection();
+              ? Center(child: Text('Load failed: $_error'))
+              : ListView.separated(
+                  itemCount: _memories.isEmpty ? 6 : _memories.length + 4,
+                  separatorBuilder: (_, __) => const Divider(),
+                  itemBuilder: (context, i) {
+                    if (i == 0) return _vaultAvatarHeader();
+                    if (i == 1) return _featuredPhotosSection();
+                    if (i == 2) return _aboutMeSection();
+                    if (i == 3) return _coreVoiceSection();
 
-                        if (_memories.isEmpty && i == 4) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Text('No memories yet.'),
-                                  const SizedBox(height: 12),
-                                  ElevatedButton(
-                                    onPressed: () => _openAddMemory(
-                                        initialLifeStage: 'early'),
-                                    child: const Text('Add your first memory'),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-
-                        final m = _memories[i - 4];
-                        final memoryId = (m['id'] ?? '').toString();
-                        final stage = (m['life_stage'] ?? '').toString();
-                        final prompt = (m['prompt_text'] ?? '').toString();
-                        final body = (m['body'] ?? '').toString();
-
-                        return ListTile(
-                          tileColor: tileBg,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          leading: Chip(label: Text(_prettyStage(stage))),
-                          title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    if (_memories.isEmpty && i == 4) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(body,
-                                  maxLines: 3, overflow: TextOverflow.ellipsis),
-                              _memoryPhotoStrip(memoryId),
-                              _memoryVoiceStrip(memoryId, prompt),
+                              const Text('No memories yet.'),
+                              const SizedBox(height: 12),
+                              ElevatedButton(
+                                onPressed: () =>
+                                    _openAddMemory(initialLifeStage: 'early'),
+                                child: const Text('Add your first memory'),
+                              ),
                             ],
                           ),
-                          onTap: () => _editMemory(m),
-                          trailing: IconButton(
-                            tooltip: 'Delete memory',
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: () => _deleteMemory(m),
+                        ),
+                      );
+                    }
+
+                    final m = _memories[i - 4];
+                    final memoryId = (m['id'] ?? '').toString();
+                    final stage = (m['life_stage'] ?? '').toString();
+                    final prompt = (m['prompt_text'] ?? '').toString();
+                    final body = (m['body'] ?? '').toString();
+
+                    return ListTile(
+                      tileColor: tileBg,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      leading: Chip(label: Text(_prettyStage(stage))),
+                      title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            body,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        );
-                      },
-                    ),
+                          _memoryPhotoStrip(memoryId),
+                          _memoryVoiceStrip(memoryId, prompt),
+                        ],
+                      ),
+                      onTap: () => _editMemory(m),
+                      trailing: IconButton(
+                        tooltip: 'Delete memory',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () => _deleteMemory(m),
+                      ),
+                    );
+                  },
+                ),
         ),
       ),
     );
