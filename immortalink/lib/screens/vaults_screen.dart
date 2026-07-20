@@ -402,9 +402,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
       final memoryRows = await _supabase
           .from('memories')
           .select(
-            'id, vault_id, life_stage, prompt_text, prompt_key, body, created_at',
+            'id, vault_id, life_stage, prompt_text, prompt_key, body, created_at, share_to_family_feed',
           )
           .inFilter('vault_id', vaultIds)
+          .eq('share_to_family_feed', true)
           .neq('prompt_key', 'about_me')
           .order('created_at', ascending: false)
           .limit(12)

@@ -24,6 +24,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   late String _stage;
   String? _selectedPromptId;
   bool _saving = false;
+  bool _shareToFamilyFeed = true;
 
   final _promptController = TextEditingController();
   final _bodyController = TextEditingController();
@@ -102,18 +103,24 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
             'prompt_key': promptKey, // ✅ FIX
             'prompt_text': promptText,
             'body': body,
+            'share_to_family_feed': _shareToFamilyFeed,
           })
           .select('id')
           .single();
 
       final memoryId = (inserted['id'] ?? '').toString();
-      if (memoryId.isEmpty) throw Exception('Insert succeeded but no id returned');
+      if (memoryId.isEmpty) {
+        throw Exception('Insert succeeded but no id returned');
+      }
 
       // ✅ indexing should NOT block saving
-      IndexingService.indexMemory(vaultId: widget.vaultId, memoryId: memoryId)
-          .catchError((e) {
+      IndexingService.indexMemory(
+        vaultId: widget.vaultId,
+        memoryId: memoryId,
+      ).catchError((e) {
         debugPrint('Indexing failed: $e');
         _toast('Saved, but indexing failed (AI may miss it).');
+        return 0;
       });
 
       if (!mounted) return;
@@ -176,8 +183,10 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                     },
             ),
             const SizedBox(height: 14),
-            const Text('Choose a prompt',
-                style: TextStyle(fontWeight: FontWeight.w700)),
+            const Text(
+              'Choose a prompt',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 10),
             Wrap(
               spacing: 10,
@@ -221,6 +230,20 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
               decoration: const InputDecoration(
                 labelText: 'Your answer',
                 border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            SwitchListTile.adaptive(
+              value: _shareToFamilyFeed,
+              onChanged: _saving
+                  ? null
+                  : (value) => setState(() => _shareToFamilyFeed = value),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Share to family feed'),
+              subtitle: Text(
+                _shareToFamilyFeed
+                    ? 'Your family can discover this memory in their feed.'
+                    : 'The memory stays in your vault without creating a feed post.',
               ),
             ),
           ],
