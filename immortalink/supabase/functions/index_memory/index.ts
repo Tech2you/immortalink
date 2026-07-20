@@ -57,7 +57,7 @@ serve(async (req) => {
     // ✅ Check the user can actually see this memory (RLS will enforce)
     const { data: mem, error: memErr } = await userClient
       .from("memories")
-      .select("id, vault_id, prompt_text, body")
+      .select("id, vault_id, prompt_text, body, memory_date_label, people, location, mood")
       .eq("id", memory_id)
       .eq("vault_id", vault_id)
       .maybeSingle();
@@ -65,9 +65,14 @@ serve(async (req) => {
     if (memErr) return json(500, { error: memErr.message });
     if (!mem) return json(403, { error: "Not allowed or not found" });
 
-    const fullText =
-      `Prompt: ${mem.prompt_text ?? ""}\n` +
-      `Answer: ${mem.body ?? ""}`;
+    const fullText = [
+      mem.prompt_text ? `Title: ${mem.prompt_text}` : "",
+      mem.body ? `Memory: ${mem.body}` : "",
+      mem.memory_date_label ? `When: ${mem.memory_date_label}` : "",
+      mem.people ? `People: ${mem.people}` : "",
+      mem.location ? `Location: ${mem.location}` : "",
+      mem.mood ? `Mood: ${mem.mood}` : "",
+    ].filter(Boolean).join("\n");
 
     const chunks = chunkText(fullText, 900);
 

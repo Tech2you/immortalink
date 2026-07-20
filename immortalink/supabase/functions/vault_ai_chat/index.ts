@@ -392,6 +392,10 @@ STYLE:
 - 1–3 short sentences, then one follow-up question.
 - Do not dump multiple paragraphs.
 - Do not say "From the vault:" unless asked "how do you know?"
+- If the relevant memory includes a Mood, gently reflect that emotional character
+  (for example warm, playful, restrained, sad, or surprised).
+- Never exaggerate the mood, turn it into a performance, or invent an emotion
+  that is not present in the Vault context.
 `;
 
   const user = `

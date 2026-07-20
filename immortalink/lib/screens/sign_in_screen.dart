@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/ai_chat_reminder_service.dart';
+
 enum _AuthMode { signIn, signUp }
 
 class SignInScreen extends StatefulWidget {
@@ -79,7 +81,18 @@ class _SignInScreenState extends State<SignInScreen> {
       final client = Supabase.instance.client;
 
       if (_mode == _AuthMode.signIn) {
-        await client.auth.signInWithPassword(email: email, password: password);
+        final response = await client.auth.signInWithPassword(
+          email: email,
+          password: password,
+        );
+        final userId = response.user?.id;
+        if (userId != null) {
+          try {
+            await AiChatReminderService.recordSuccessfulLogin(userId);
+          } catch (_) {
+            // A local reminder preference must never block a successful login.
+          }
+        }
         // Your app should route away via auth listener / main.dart.
       } else {
         await client.auth.signUp(email: email, password: password);
@@ -87,7 +100,9 @@ class _SignInScreenState extends State<SignInScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Account created. If email confirmation is enabled, check your inbox.'),
+            content: Text(
+              'Account created. If email confirmation is enabled, check your inbox.',
+            ),
           ),
         );
 
@@ -110,7 +125,9 @@ class _SignInScreenState extends State<SignInScreen> {
     FocusScope.of(context).unfocus();
     final email = _email.text.trim();
     if (email.isEmpty || !email.contains('@')) {
-      setState(() => _error = 'Enter your email first, then tap “Forgot password?”');
+      setState(
+        () => _error = 'Enter your email first, then tap “Forgot password?”',
+      );
       return;
     }
 
@@ -127,7 +144,9 @@ class _SignInScreenState extends State<SignInScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset email sent (if the account exists).')),
+        const SnackBar(
+          content: Text('Password reset email sent (if the account exists).'),
+        ),
       );
     } on AuthException catch (e) {
       setState(() => _error = e.message);
@@ -162,7 +181,9 @@ class _SignInScreenState extends State<SignInScreen> {
           builder: (context, constraints) {
             return SingleChildScrollView(
               // This padding is what prevents keyboard overlap.
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: IntrinsicHeight(
@@ -228,7 +249,8 @@ class _SignInScreenState extends State<SignInScreen> {
                                     labelText: 'Email',
                                     border: OutlineInputBorder(),
                                   ),
-                                  onSubmitted: (_) => _passwordFocus.requestFocus(),
+                                  onSubmitted: (_) =>
+                                      _passwordFocus.requestFocus(),
                                 ),
                                 const SizedBox(height: 12),
 
@@ -236,7 +258,9 @@ class _SignInScreenState extends State<SignInScreen> {
                                   controller: _password,
                                   focusNode: _passwordFocus,
                                   obscureText: _hidePassword,
-                                  textInputAction: isSignIn ? TextInputAction.done : TextInputAction.next,
+                                  textInputAction: isSignIn
+                                      ? TextInputAction.done
+                                      : TextInputAction.next,
                                   autofillHints: isSignIn
                                       ? const [AutofillHints.password]
                                       : const [AutofillHints.newPassword],
@@ -244,9 +268,17 @@ class _SignInScreenState extends State<SignInScreen> {
                                     labelText: 'Password',
                                     border: const OutlineInputBorder(),
                                     suffixIcon: IconButton(
-                                      tooltip: _hidePassword ? 'Show password' : 'Hide password',
-                                      onPressed: () => setState(() => _hidePassword = !_hidePassword),
-                                      icon: Icon(_hidePassword ? Icons.visibility : Icons.visibility_off),
+                                      tooltip: _hidePassword
+                                          ? 'Show password'
+                                          : 'Hide password',
+                                      onPressed: () => setState(
+                                        () => _hidePassword = !_hidePassword,
+                                      ),
+                                      icon: Icon(
+                                        _hidePassword
+                                            ? Icons.visibility
+                                            : Icons.visibility_off,
+                                      ),
                                     ),
                                   ),
                                   onSubmitted: (_) {
@@ -265,14 +297,24 @@ class _SignInScreenState extends State<SignInScreen> {
                                     focusNode: _confirmFocus,
                                     obscureText: _hideConfirm,
                                     textInputAction: TextInputAction.done,
-                                    autofillHints: const [AutofillHints.newPassword],
+                                    autofillHints: const [
+                                      AutofillHints.newPassword,
+                                    ],
                                     decoration: InputDecoration(
                                       labelText: 'Confirm password',
                                       border: const OutlineInputBorder(),
                                       suffixIcon: IconButton(
-                                        tooltip: _hideConfirm ? 'Show password' : 'Hide password',
-                                        onPressed: () => setState(() => _hideConfirm = !_hideConfirm),
-                                        icon: Icon(_hideConfirm ? Icons.visibility : Icons.visibility_off),
+                                        tooltip: _hideConfirm
+                                            ? 'Show password'
+                                            : 'Hide password',
+                                        onPressed: () => setState(
+                                          () => _hideConfirm = !_hideConfirm,
+                                        ),
+                                        icon: Icon(
+                                          _hideConfirm
+                                              ? Icons.visibility
+                                              : Icons.visibility_off,
+                                        ),
                                       ),
                                     ),
                                     onSubmitted: (_) => _submit(),
@@ -285,7 +327,9 @@ class _SignInScreenState extends State<SignInScreen> {
                                   Align(
                                     alignment: Alignment.centerRight,
                                     child: TextButton(
-                                      onPressed: _loading ? null : _forgotPassword,
+                                      onPressed: _loading
+                                          ? null
+                                          : _forgotPassword,
                                       child: const Text('Forgot password?'),
                                     ),
                                   ),
@@ -309,7 +353,9 @@ class _SignInScreenState extends State<SignInScreen> {
                                     child: Text(
                                       _loading
                                           ? 'Please wait...'
-                                          : (isSignIn ? 'Sign in' : 'Create account'),
+                                          : (isSignIn
+                                                ? 'Sign in'
+                                                : 'Create account'),
                                     ),
                                   ),
                                 ),
@@ -321,9 +367,19 @@ class _SignInScreenState extends State<SignInScreen> {
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Text('No account? ', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                                      Text(
+                                        'No account? ',
+                                        style: TextStyle(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.65,
+                                          ),
+                                        ),
+                                      ),
                                       TextButton(
-                                        onPressed: _loading ? null : () => _switchMode(_AuthMode.signUp),
+                                        onPressed: _loading
+                                            ? null
+                                            : () =>
+                                                  _switchMode(_AuthMode.signUp),
                                         child: const Text('Create one'),
                                       ),
                                     ],
@@ -332,9 +388,19 @@ class _SignInScreenState extends State<SignInScreen> {
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Text('Account created? ', style: TextStyle(color: Colors.black.withOpacity(0.65))),
+                                      Text(
+                                        'Account created? ',
+                                        style: TextStyle(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.65,
+                                          ),
+                                        ),
+                                      ),
                                       TextButton(
-                                        onPressed: _loading ? null : () => _switchMode(_AuthMode.signIn),
+                                        onPressed: _loading
+                                            ? null
+                                            : () =>
+                                                  _switchMode(_AuthMode.signIn),
                                         child: const Text('Sign in now'),
                                       ),
                                     ],

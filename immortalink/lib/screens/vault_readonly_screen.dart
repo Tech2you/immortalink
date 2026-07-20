@@ -1179,6 +1179,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         builder: (_) => VaultCompanionScreen(
           vaultId: widget.vaultId,
           displayName: name,
+          avatarUrl: _avatarUrl,
           familyId: _familyId,
         ),
       ),

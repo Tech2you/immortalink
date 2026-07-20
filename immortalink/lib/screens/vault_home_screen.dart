@@ -12,6 +12,7 @@ import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
 import 'create_memory_screen.dart';
 import 'family_branch_screen.dart';
+import 'relationship_tree_screen.dart';
 import 'vault_companion_screen.dart';
 
 class VaultHomeScreen extends StatefulWidget {
@@ -540,8 +541,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           (res?['display_name'] as String?) ??
           (res?['name'] as String?) ??
           _vaultName;
-      final familyId = (widget.familyId ?? res?['family_id'] as String?)
-          ?.trim();
+      // vaults.family_id is the account owner's selected home family.
+      // Prefer it over the family the vault happened to be opened from.
+      final homeFamilyId = (res?['family_id'] as String?)?.trim();
+      final openedFromFamilyId = widget.familyId?.trim();
+      final familyId = homeFamilyId != null && homeFamilyId.isNotEmpty
+          ? homeFamilyId
+          : openedFromFamilyId;
 
       String? slotKey;
       if (familyId != null && familyId.isNotEmpty) {
@@ -643,8 +649,23 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         builder: (_) => VaultCompanionScreen(
           vaultId: widget.vaultId,
           displayName: name,
+          avatarUrl: _avatarUrl,
           familyId: _familyId,
         ),
+      ),
+    );
+  }
+
+  void _openHomeFamilyTree() {
+    final familyId = (_familyId ?? widget.familyId ?? '').trim();
+    if (familyId.isEmpty) {
+      _toast('Join or create a family tree first.');
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RelationshipTreeScreen(familyId: familyId),
       ),
     );
   }
@@ -654,8 +675,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         ? (_displayName ?? _vaultName).trim()
         : 'Your vault';
     final hasAvatar = _avatarUrl != null && _avatarUrl!.trim().isNotEmpty;
-    final slotKey = (_slotKey ?? '').trim();
-    final canOpenBranch = _branchDirectionForSlot(slotKey) != null;
+    final canOpenFamilyTree = (_familyId ?? widget.familyId ?? '')
+        .trim()
+        .isNotEmpty;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -732,9 +754,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 icon: const Icon(Icons.auto_awesome_outlined, size: 18),
                 label: const Text('Ask my AI'),
               ),
-              if (canOpenBranch)
+              if (canOpenFamilyTree)
                 OutlinedButton.icon(
-                  onPressed: _openBranch,
+                  onPressed: _openHomeFamilyTree,
                   icon: const Icon(Icons.account_tree_outlined, size: 18),
                   label: const Text('Family tree'),
                 ),
@@ -2448,6 +2470,18 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   String _memoryVoicePrefix(String userId, String memoryId) =>
       '$userId/${widget.vaultId}/memories/$memoryId/voice';
 
+  String _friendlyVoiceTitle(String storedTitle) {
+    final title = storedTitle.trim();
+    if (title.isEmpty ||
+        RegExp(
+          r'^Recorded \d+\.(webm|m4a|mp3|wav|aac|ogg)$',
+          caseSensitive: false,
+        ).hasMatch(title)) {
+      return 'Voice note';
+    }
+    return title;
+  }
+
   Future<void> _loadMemoryVoiceForVault() async {
     setState(() {
       _loadingMemoryVoice = true;
@@ -2487,7 +2521,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               _VoiceNote(
                 id: id,
                 path: path,
-                title: title.isEmpty ? 'Voice note' : title,
+                title: _friendlyVoiceTitle(title),
                 url: url,
                 createdAt: createdAt,
               ),
@@ -2611,7 +2645,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 'vault_id': widget.vaultId,
                 'memory_id': memoryId,
                 'path': path,
-                'title': 'Recorded $ts.${rec.extension}',
+                'title': 'Voice note',
               })
               .select('id')
               .maybeSingle();
@@ -2952,7 +2986,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final data = await _client
           .from('memories')
           .select(
-            'id, vault_id, life_stage, prompt_text, body, created_at, share_to_family_feed',
+            'id, vault_id, life_stage, prompt_key, prompt_text, body, created_at, share_to_family_feed, memory_date_label, people, location',
           )
           .eq('vault_id', widget.vaultId)
           .order('created_at', ascending: false)
@@ -2984,13 +3018,19 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  Future<void> _openAddMemory({String? initialLifeStage}) async {
+  Future<void> _openAddMemory({
+    String? initialLifeStage,
+    String initialMode = 'text',
+  }) async {
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => CreateMemoryScreen(
           vaultId: widget.vaultId,
           initialLifeStage: initialLifeStage,
+          initialMode: initialMode,
+          displayName: _displayName ?? _vaultName,
+          avatarUrl: _avatarUrl,
         ),
       ),
     );
@@ -3022,7 +3062,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(16),
-            onTap: () => _openAddMemory(initialLifeStage: 'early'),
+            onTap: () => _openAddMemory(),
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
@@ -3036,7 +3076,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'What memory would you like to preserve?',
+                      'What memory would you like to preserve next?',
                       style: TextStyle(color: Colors.black.withOpacity(0.68)),
                     ),
                   ),
@@ -3050,10 +3090,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _composerAction(Icons.edit_note, 'Write a story'),
-              _composerAction(Icons.photo_camera_outlined, 'Photo memory'),
-              _composerAction(Icons.mic_none, 'Voice memory'),
-              _composerAction(Icons.lightbulb_outline, 'Use a prompt'),
+              _composerAction(Icons.edit_note, 'Write a memory', 'text'),
+              _composerAction(
+                Icons.photo_camera_outlined,
+                'Add photos',
+                'photo',
+              ),
+              _composerAction(Icons.mic_none, 'Record voice', 'voice'),
             ],
           ),
         ],
@@ -3061,11 +3104,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     );
   }
 
-  Widget _composerAction(IconData icon, String label) {
+  Widget _composerAction(IconData icon, String label, String mode) {
     return ActionChip(
       avatar: Icon(icon, size: 18, color: const Color(0xFF76558F)),
       label: Text(label),
-      onPressed: () => _openAddMemory(initialLifeStage: 'early'),
+      onPressed: () => _openAddMemory(initialMode: mode),
     );
   }
 
@@ -3208,6 +3251,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final prompt = (memory['prompt_text'] ?? '').toString();
     final body = (memory['body'] ?? '').toString();
     final stage = (memory['life_stage'] ?? '').toString();
+    final promptKey = (memory['prompt_key'] ?? '').toString();
+    final isSocialMemory = promptKey.startsWith('social_memory_');
+    final when = (memory['memory_date_label'] ?? '').toString().trim();
+    final people = (memory['people'] ?? '').toString().trim();
+    final location = (memory['location'] ?? '').toString().trim();
     final shared = memory['share_to_family_feed'] != false;
     final photos = _memoryPhotosById[memoryId] ?? const <_MemPhoto>[];
     final notes = _memoryVoiceById[memoryId] ?? const <_VoiceNote>[];
@@ -3244,7 +3292,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       Text(
-                        '${_prettyStage(stage)} · ${shared ? 'Shared with family' : 'Not in family feed'}',
+                        '${isSocialMemory ? 'Memory' : _prettyStage(stage)} · ${shared ? 'Shared with family' : 'Not in family feed'}',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.black.withOpacity(0.55),
@@ -3263,7 +3311,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       _uploadMemoryPhoto(memoryId);
                     }
                     if (value == 'voice') {
-                      _uploadMemoryVoice(memoryId);
+                      _recordMemoryVoice(memoryId);
                     }
                     if (value == 'share') {
                       _setMemoryFeedVisibility(memory, !shared);
@@ -3283,7 +3331,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     ),
                     const PopupMenuItem(
                       value: 'voice',
-                      child: Text('Add voice'),
+                      child: Text('Record voice'),
                     ),
                     PopupMenuItem(
                       value: 'share',
@@ -3314,6 +3362,35 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             if (prompt.isNotEmpty && body.isNotEmpty) const SizedBox(height: 7),
             if (body.isNotEmpty)
               Text(body, style: const TextStyle(fontSize: 15, height: 1.42)),
+            if (when.isNotEmpty ||
+                people.isNotEmpty ||
+                location.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (when.isNotEmpty)
+                    Chip(
+                      avatar: const Icon(
+                        Icons.calendar_today_outlined,
+                        size: 16,
+                      ),
+                      label: Text(when),
+                    ),
+                  if (people.isNotEmpty)
+                    Chip(
+                      avatar: const Icon(Icons.people_outline, size: 16),
+                      label: Text(people),
+                    ),
+                  if (location.isNotEmpty)
+                    Chip(
+                      avatar: const Icon(Icons.location_on_outlined, size: 16),
+                      label: Text(location),
+                    ),
+                ],
+              ),
+            ],
             if (photos.isNotEmpty) ...[
               const SizedBox(height: 14),
               SizedBox(
@@ -3367,9 +3444,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   label: const Text('Photo'),
                 ),
                 TextButton.icon(
-                  onPressed: () => _uploadMemoryVoice(memoryId),
+                  onPressed: _recorder.isSupported
+                      ? () => _recordMemoryVoice(memoryId)
+                      : null,
                   icon: const Icon(Icons.mic_none),
-                  label: const Text('Voice'),
+                  label: const Text('Record'),
                 ),
                 const Spacer(),
                 Icon(
@@ -3673,7 +3752,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openAddMemory(initialLifeStage: 'early'),
+        onPressed: () => _openAddMemory(),
         icon: const Icon(Icons.add),
         label: const Text('Memory'),
       ),
@@ -3722,8 +3801,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                 ),
                                 const SizedBox(height: 14),
                                 FilledButton.icon(
-                                  onPressed: () =>
-                                      _openAddMemory(initialLifeStage: 'early'),
+                                  onPressed: () => _openAddMemory(),
                                   icon: const Icon(Icons.add),
                                   label: const Text('Share your first memory'),
                                 ),
