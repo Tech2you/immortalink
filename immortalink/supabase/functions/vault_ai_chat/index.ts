@@ -37,6 +37,68 @@ function textClean(s: string) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
 
+function cosineSimilarity(a: number[], b: number[]) {
+  let dot = 0;
+  let aLength = 0;
+  let bLength = 0;
+  const length = Math.min(a.length, b.length);
+  for (let i = 0; i < length; i++) {
+    dot += a[i] * b[i];
+    aLength += a[i] * a[i];
+    bLength += b[i] * b[i];
+  }
+  if (!aLength || !bLength) return 0;
+  return dot / (Math.sqrt(aLength) * Math.sqrt(bLength));
+}
+
+async function rankContextByMeaning(
+  question: string,
+  parts: string[],
+  maximum = 14,
+) {
+  if (!OPENAI_API_KEY || parts.length <= maximum) return parts.slice(0, maximum);
+
+  const candidates = parts.slice(0, 60);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const response = await fetch("https://api.openai.com/v1/embeddings", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "text-embedding-3-small",
+        input: [question, ...candidates],
+      }),
+    });
+    if (!response.ok) return candidates.slice(0, maximum);
+
+    const payload = await response.json();
+    const vectors = Array.isArray(payload?.data)
+      ? payload.data.map((row: any) => row?.embedding as number[])
+      : [];
+    const queryVector = vectors[0];
+    if (!Array.isArray(queryVector)) return candidates.slice(0, maximum);
+
+    return candidates
+      .map((text, index) => ({
+        text,
+        score: cosineSimilarity(queryVector, vectors[index + 1] || []),
+        recency: index,
+      }))
+      .sort((a, b) => b.score - a.score || a.recency - b.recency)
+      .slice(0, maximum)
+      .map((item) => item.text);
+  } catch (_) {
+    return candidates.slice(0, maximum);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   const res = await Promise.race([
     p,
@@ -377,6 +439,10 @@ RELATIONSHIP RULE:
 
 GROUNDING:
 - Only answer personal facts that are present in Vault context.
+- Connect concrete facts to their natural broader topics when the link is clear.
+  For example, exams, grades and studying are academic experiences; jobs and
+  qualifications are career experiences. Do not say a broad topic is missing
+  when the context contains a directly related concrete fact.
 - If the vault context doesn't contain the answer:
   1) Say: "I'm not sure yet from what's saved here."
   2) Offer 2–4 example topics ABOUT ME you could talk about next (choose only generic ones unless context supports specific ones):
@@ -688,7 +754,7 @@ serve(async (req) => {
           .eq("vault_id", vaultId)
           .order("created_at", { ascending: false })
           .order("chunk_index", { ascending: true })
-          .limit(14),
+          .limit(60),
         4_000,
         "DB(memory_chunks)"
       );
@@ -723,6 +789,7 @@ serve(async (req) => {
       }
     }
 
+    contextParts = await rankContextByMeaning(question, contextParts, 14);
     const context = contextParts.join("\n\n").slice(0, 6500);
 
     const ai = await openaiChat({

@@ -197,11 +197,50 @@ serve(async (req) => {
       });
     }
 
-    // 3) Write chunks into memory_chunks (Vault AI already reads this)
-    const fullText = `Voice note title: ${title}\nTranscript:\n${transcript}`;
+    await admin
+      .from("memory_voice_notes")
+      .update({ transcript })
+      .eq("id", memoryVoiceNoteId);
+
+    // 3) Rebuild the complete memory context so a new voice note never
+    // replaces the written memory or an earlier voice note.
+    const { data: memory, error: memoryErr } = await admin
+      .from("memories")
+      .select("prompt_text, body, memory_date_label, people, location, mood")
+      .eq("id", memoryId)
+      .eq("vault_id", vaultId)
+      .maybeSingle();
+    if (memoryErr) return json(500, { error: memoryErr.message });
+
+    const { data: allVoiceNotes, error: notesErr } = await admin
+      .from("memory_voice_notes")
+      .select("title, transcript, created_at")
+      .eq("vault_id", vaultId)
+      .eq("memory_id", memoryId)
+      .order("created_at", { ascending: true });
+    if (notesErr) return json(500, { error: notesErr.message });
+
+    const voiceContext = (allVoiceNotes || [])
+      .map((note: any, index: number) => {
+        const noteTranscript = (note?.transcript || "").toString().trim();
+        if (!noteTranscript) return "";
+        const noteTitle = (note?.title || "Voice note").toString().trim();
+        return `Voice note ${index + 1} (${noteTitle}):\n${noteTranscript}`;
+      })
+      .filter(Boolean);
+
+    const fullText = [
+      memory?.prompt_text ? `Title: ${memory.prompt_text}` : "",
+      memory?.body ? `Memory: ${memory.body}` : "",
+      memory?.memory_date_label ? `When: ${memory.memory_date_label}` : "",
+      memory?.people ? `People: ${memory.people}` : "",
+      memory?.location ? `Location: ${memory.location}` : "",
+      memory?.mood ? `Mood: ${memory.mood}` : "",
+      ...voiceContext,
+    ].filter(Boolean).join("\n");
     const chunks = chunkText(fullText, 900);
 
-    // Clean old chunks for THIS memory (keeps it deterministic for MVP)
+    // Clean old chunks for this memory before inserting the complete rebuild.
     await admin
       .from("memory_chunks")
       .delete()

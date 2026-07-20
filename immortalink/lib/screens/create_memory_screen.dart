@@ -31,6 +31,7 @@ class CreateMemoryScreen extends StatefulWidget {
 
 class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   final _client = Supabase.instance.client;
+  final _titleController = TextEditingController();
   final _bodyController = TextEditingController();
   final _whenController = TextEditingController();
   final _peopleController = TextEditingController();
@@ -67,6 +68,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
     if (_recorder.isRecording) unawaited(_recorder.cancel());
     _recorder.dispose();
     _previewPlayer.dispose();
+    _titleController.dispose();
     _bodyController.dispose();
     _whenController.dispose();
     _peopleController.dispose();
@@ -383,6 +385,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
 
   Future<void> _save() async {
     if (_saving) return;
+    final title = _titleController.text.trim();
     final body = _bodyController.text.trim();
     if (body.isEmpty && _photos.isEmpty && _voices.isEmpty) {
       _toast('Write something, add a photo, or record your voice first.');
@@ -398,7 +401,9 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
     setState(() => _saving = true);
     String? memoryId;
     try {
-      final fallbackTitle = body.isNotEmpty
+      final fallbackTitle = title.isNotEmpty
+          ? title
+          : body.isNotEmpty
           ? ''
           : (_voices.isNotEmpty ? 'Voice memory' : 'Photo memory');
       final stamp = DateTime.now().millisecondsSinceEpoch;
@@ -546,6 +551,24 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
               children: [
                 _profileRow(),
                 const SizedBox(height: 22),
+                TextField(
+                  controller: _titleController,
+                  enabled: !_saving,
+                  textCapitalization: TextCapitalization.sentences,
+                  maxLength: 100,
+                  decoration: InputDecoration(
+                    hintText: 'Title this memory (optional)',
+                    counterText: '',
+                    prefixIcon: const Icon(Icons.title),
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.42),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: _bodyController,
                   minLines: 7,

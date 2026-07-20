@@ -2716,6 +2716,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _client.storage.from(_memoryVoiceBucket).remove([v.path]);
       await _client.from('memory_voice_notes').delete().eq('id', v.id);
       await _loadMemoryVoiceForVault();
+      await IndexingService.indexMemory(
+        vaultId: widget.vaultId,
+        memoryId: memoryId,
+      );
       _toast('Voice note deleted.');
     } catch (e) {
       _toast('Delete failed: $e');
@@ -2986,7 +2990,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final data = await _client
           .from('memories')
           .select(
-            'id, vault_id, life_stage, prompt_key, prompt_text, body, created_at, share_to_family_feed, memory_date_label, people, location',
+            'id, vault_id, life_stage, prompt_key, prompt_text, body, created_at, share_to_family_feed, memory_date_label, people, location, mood',
           )
           .eq('vault_id', widget.vaultId)
           .order('created_at', ascending: false)
@@ -3256,6 +3260,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final when = (memory['memory_date_label'] ?? '').toString().trim();
     final people = (memory['people'] ?? '').toString().trim();
     final location = (memory['location'] ?? '').toString().trim();
+    final mood = (memory['mood'] ?? '').toString().trim();
     final shared = memory['share_to_family_feed'] != false;
     final photos = _memoryPhotosById[memoryId] ?? const <_MemPhoto>[];
     final notes = _memoryVoiceById[memoryId] ?? const <_VoiceNote>[];
@@ -3307,12 +3312,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     if (value == 'edit') {
                       _editMemory(memory);
                     }
-                    if (value == 'photo') {
-                      _uploadMemoryPhoto(memoryId);
-                    }
-                    if (value == 'voice') {
-                      _recordMemoryVoice(memoryId);
-                    }
                     if (value == 'share') {
                       _setMemoryFeedVisibility(memory, !shared);
                     }
@@ -3324,14 +3323,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     const PopupMenuItem(
                       value: 'edit',
                       child: Text('Edit memory'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'photo',
-                      child: Text('Add photos'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'voice',
-                      child: Text('Record voice'),
                     ),
                     PopupMenuItem(
                       value: 'share',
@@ -3362,7 +3353,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             if (prompt.isNotEmpty && body.isNotEmpty) const SizedBox(height: 7),
             if (body.isNotEmpty)
               Text(body, style: const TextStyle(fontSize: 15, height: 1.42)),
-            if (when.isNotEmpty ||
+            if (mood.isNotEmpty ||
+                when.isNotEmpty ||
                 people.isNotEmpty ||
                 location.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -3370,6 +3362,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
+                  if (mood.isNotEmpty)
+                    Chip(
+                      avatar: const Icon(Icons.mood_outlined, size: 16),
+                      label: Text(mood),
+                    ),
                   if (when.isNotEmpty)
                     Chip(
                       avatar: const Icon(
@@ -3559,6 +3556,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   Future<void> _editMemory(Map<String, dynamic> m) async {
     final memoryId = (m['id'] ?? '').toString();
+    final isSocialMemory = (m['prompt_key'] ?? '').toString().startsWith(
+      'social_memory_',
+    );
 
     final promptController = TextEditingController(
       text: (m['prompt_text'] ?? '').toString(),
@@ -3566,46 +3566,315 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final bodyController = TextEditingController(
       text: (m['body'] ?? '').toString(),
     );
+    final whenController = TextEditingController(
+      text: (m['memory_date_label'] ?? '').toString(),
+    );
+    final peopleController = TextEditingController(
+      text: (m['people'] ?? '').toString(),
+    );
+    final locationController = TextEditingController(
+      text: (m['location'] ?? '').toString(),
+    );
+    String? selectedMood = (m['mood'] ?? '').toString().trim();
+    if (selectedMood.isEmpty) selectedMood = null;
+    var showDetails =
+        selectedMood != null ||
+        whenController.text.trim().isNotEmpty ||
+        peopleController.text.trim().isNotEmpty ||
+        locationController.text.trim().isNotEmpty;
 
     final result = await showDialog<Map<String, String>>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Edit memory'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: promptController,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: 'Prompt (question)',
-                border: OutlineInputBorder(),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final photos = _memoryPhotosById[memoryId] ?? const <_MemPhoto>[];
+          final notes = _memoryVoiceById[memoryId] ?? const <_VoiceNote>[];
+
+          return AlertDialog(
+            title: const Text('Edit memory'),
+            content: SizedBox(
+              width: 580,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: promptController,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        labelText: isSocialMemory
+                            ? 'Title (optional)'
+                            : 'Prompt (question)',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: bodyController,
+                      minLines: 3,
+                      maxLines: 8,
+                      decoration: const InputDecoration(
+                        labelText: 'Memory',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Card(
+                      elevation: 0,
+                      color: Colors.white.withValues(alpha: 0.38),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.tune),
+                            title: const Text('Add details'),
+                            subtitle: const Text(
+                              'Mood, when, where, or who was there',
+                            ),
+                            trailing: Icon(
+                              showDetails
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                            ),
+                            onTap: () => setDialogState(
+                              () => showDetails = !showDetails,
+                            ),
+                          ),
+                          if (showDetails)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              child: Column(
+                                children: [
+                                  const Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(
+                                      'How did this memory feel?',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children:
+                                          const [
+                                            'Happy',
+                                            'Playful',
+                                            'Proud',
+                                            'Grateful',
+                                            'Nostalgic',
+                                            'Calm',
+                                            'Surprised',
+                                            'Sad',
+                                            'Difficult',
+                                            'Mixed feelings',
+                                          ].map((mood) {
+                                            return ChoiceChip(
+                                              label: Text(mood),
+                                              selected: selectedMood == mood,
+                                              onSelected: (selected) {
+                                                setDialogState(() {
+                                                  selectedMood = selected
+                                                      ? mood
+                                                      : null;
+                                                });
+                                              },
+                                            );
+                                          }).toList(),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  TextField(
+                                    controller: whenController,
+                                    decoration: const InputDecoration(
+                                      prefixIcon: Icon(
+                                        Icons.calendar_today_outlined,
+                                      ),
+                                      labelText: 'When was this?',
+                                      hintText:
+                                          'For example: Summer 2019 or when I was 10',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  TextField(
+                                    controller: peopleController,
+                                    decoration: const InputDecoration(
+                                      prefixIcon: Icon(Icons.people_outline),
+                                      labelText: 'Who was there?',
+                                      hintText: 'Names or a short description',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  TextField(
+                                    controller: locationController,
+                                    decoration: const InputDecoration(
+                                      prefixIcon: Icon(
+                                        Icons.location_on_outlined,
+                                      ),
+                                      labelText: 'Where did it happen?',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Photos',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            await _uploadMemoryPhoto(memoryId);
+                            if (dialogContext.mounted) setDialogState(() {});
+                          },
+                          icon: const Icon(Icons.add_photo_alternate_outlined),
+                          label: const Text('Add'),
+                        ),
+                      ],
+                    ),
+                    if (photos.isEmpty)
+                      const Text(
+                        'No photos on this memory.',
+                        style: TextStyle(color: Colors.black54),
+                      )
+                    else
+                      SizedBox(
+                        height: 126,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: photos.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (_, index) {
+                            final photo = photos[index];
+                            return Stack(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(14),
+                                  child: Image.network(
+                                    photo.url,
+                                    width: 126,
+                                    height: 126,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 5,
+                                  right: 5,
+                                  child: IconButton.filledTonal(
+                                    tooltip: 'Remove photo',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () async {
+                                      await _deleteMemoryPhoto(photo);
+                                      if (dialogContext.mounted) {
+                                        setDialogState(() {});
+                                      }
+                                    },
+                                    icon: const Icon(Icons.close, size: 18),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Voice notes',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _recorder.isSupported
+                              ? () async {
+                                  await _recordMemoryVoice(memoryId);
+                                  if (dialogContext.mounted) {
+                                    setDialogState(() {});
+                                  }
+                                }
+                              : null,
+                          icon: const Icon(Icons.mic_none),
+                          label: const Text('Record'),
+                        ),
+                      ],
+                    ),
+                    if (notes.isEmpty)
+                      const Text(
+                        'No voice notes on this memory.',
+                        style: TextStyle(color: Colors.black54),
+                      )
+                    else
+                      ...notes.map(
+                        (note) => Card(
+                          elevation: 0,
+                          child: ListTile(
+                            leading: IconButton(
+                              tooltip: 'Play voice note',
+                              onPressed: () =>
+                                  _togglePlay(note, playKey: 'mem:${note.id}'),
+                              icon: Icon(
+                                _playingKey == 'mem:${note.id}' && _isPlaying
+                                    ? Icons.pause_circle_filled
+                                    : Icons.play_circle_fill,
+                              ),
+                            ),
+                            title: Text(note.title),
+                            subtitle: const Text('Voice note'),
+                            trailing: IconButton(
+                              tooltip: 'Remove voice note',
+                              onPressed: () async {
+                                await _deleteMemoryVoice(memoryId, note);
+                                if (dialogContext.mounted) {
+                                  setDialogState(() {});
+                                }
+                              },
+                              icon: const Icon(Icons.close),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: bodyController,
-              maxLines: 6,
-              decoration: const InputDecoration(
-                labelText: 'Your answer',
-                border: OutlineInputBorder(),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
               ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, {
-              'prompt_text': promptController.text.trim(),
-              'body': bodyController.text.trim(),
-            }),
-            child: const Text('Save'),
-          ),
-        ],
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, {
+                  'prompt_text': promptController.text.trim(),
+                  'body': bodyController.text.trim(),
+                  'memory_date_label': whenController.text.trim(),
+                  'people': peopleController.text.trim(),
+                  'location': locationController.text.trim(),
+                  'mood': selectedMood ?? '',
+                }),
+                child: const Text('Save changes'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -3613,20 +3882,34 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
     final newPromptText = (result['prompt_text'] ?? '').trim();
     final newBody = (result['body'] ?? '').trim();
+    final newWhen = (result['memory_date_label'] ?? '').trim();
+    final newPeople = (result['people'] ?? '').trim();
+    final newLocation = (result['location'] ?? '').trim();
+    final newMood = (result['mood'] ?? '').trim();
 
-    if (newPromptText.isEmpty) {
+    if (!isSocialMemory && newPromptText.isEmpty) {
       _toast('Prompt cannot be empty.');
       return;
     }
-    if (newBody.isEmpty) {
-      _toast('Answer cannot be empty.');
+    final hasMedia =
+        (_memoryPhotosById[memoryId]?.isNotEmpty ?? false) ||
+        (_memoryVoiceById[memoryId]?.isNotEmpty ?? false);
+    if (newBody.isEmpty && !hasMedia) {
+      _toast('Add some text, a photo, or a voice note first.');
       return;
     }
 
     try {
       await _client
           .from('memories')
-          .update({'prompt_text': newPromptText, 'body': newBody})
+          .update({
+            'prompt_text': newPromptText,
+            'body': newBody,
+            'memory_date_label': newWhen,
+            'people': newPeople,
+            'location': newLocation,
+            'mood': newMood.isEmpty ? null : newMood,
+          })
           .eq('id', memoryId);
 
       await IndexingService.indexMemory(

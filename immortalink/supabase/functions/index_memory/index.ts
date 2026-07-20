@@ -65,6 +65,23 @@ serve(async (req) => {
     if (memErr) return json(500, { error: memErr.message });
     if (!mem) return json(403, { error: "Not allowed or not found" });
 
+    const { data: voiceNotes, error: voiceErr } = await userClient
+      .from("memory_voice_notes")
+      .select("title, transcript, created_at")
+      .eq("vault_id", vault_id)
+      .eq("memory_id", memory_id)
+      .order("created_at", { ascending: true });
+    if (voiceErr) return json(500, { error: voiceErr.message });
+
+    const voiceContext = (voiceNotes || [])
+      .map((note: any, index: number) => {
+        const transcript = (note?.transcript || "").toString().trim();
+        if (!transcript) return "";
+        const title = (note?.title || "Voice note").toString().trim();
+        return `Voice note ${index + 1} (${title}):\n${transcript}`;
+      })
+      .filter(Boolean);
+
     const fullText = [
       mem.prompt_text ? `Title: ${mem.prompt_text}` : "",
       mem.body ? `Memory: ${mem.body}` : "",
@@ -72,6 +89,7 @@ serve(async (req) => {
       mem.people ? `People: ${mem.people}` : "",
       mem.location ? `Location: ${mem.location}` : "",
       mem.mood ? `Mood: ${mem.mood}` : "",
+      ...voiceContext,
     ].filter(Boolean).join("\n");
 
     const chunks = chunkText(fullText, 900);
