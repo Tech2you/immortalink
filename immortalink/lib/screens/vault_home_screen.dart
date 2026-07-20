@@ -813,21 +813,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         return;
       }
 
-      final prefix = _featuredPrefix(userId);
-
-      final list = await _client.storage
-          .from(_featuredPhotosBucket)
-          .list(
-            path: prefix,
-            searchOptions: const SearchOptions(limit: 200, offset: 0),
-          );
+      final rows = await _client
+          .from('vault_highlight_photos')
+          .select('path')
+          .eq('vault_id', widget.vaultId)
+          .order('created_at');
 
       final items = <Map<String, String>>[];
-      for (final obj in list) {
-        final name = obj.name.toString();
-        if (name.trim().isEmpty) continue;
-
-        final fullPath = '$prefix/$name';
+      for (final row in (rows as List).cast<Map<String, dynamic>>()) {
+        final fullPath = (row['path'] ?? '').toString().trim();
+        if (fullPath.isEmpty) continue;
         final url = await _signedUrl(_featuredPhotosBucket, fullPath);
         if (url == null || url.trim().isEmpty) continue;
 
@@ -889,6 +884,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             ),
           );
 
+      await _client.from('vault_highlight_photos').insert({
+        'vault_id': widget.vaultId,
+        'path': path,
+      });
+
       await _loadFeaturedPhotos();
       _toast('Added to highlights.');
     } catch (e) {
@@ -920,6 +920,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
     try {
       await _client.storage.from(_featuredPhotosBucket).remove([fullPath]);
+      await _client
+          .from('vault_highlight_photos')
+          .delete()
+          .eq('vault_id', widget.vaultId)
+          .eq('path', fullPath);
       await _loadFeaturedPhotos();
       _toast('Photo deleted.');
     } catch (e) {
@@ -3260,7 +3265,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final when = (memory['memory_date_label'] ?? '').toString().trim();
     final people = (memory['people'] ?? '').toString().trim();
     final location = (memory['location'] ?? '').toString().trim();
-    final mood = (memory['mood'] ?? '').toString().trim();
     final shared = memory['share_to_family_feed'] != false;
     final photos = _memoryPhotosById[memoryId] ?? const <_MemPhoto>[];
     final notes = _memoryVoiceById[memoryId] ?? const <_VoiceNote>[];
@@ -3353,8 +3357,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             if (prompt.isNotEmpty && body.isNotEmpty) const SizedBox(height: 7),
             if (body.isNotEmpty)
               Text(body, style: const TextStyle(fontSize: 15, height: 1.42)),
-            if (mood.isNotEmpty ||
-                when.isNotEmpty ||
+            if (when.isNotEmpty ||
                 people.isNotEmpty ||
                 location.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -3362,11 +3365,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  if (mood.isNotEmpty)
-                    Chip(
-                      avatar: const Icon(Icons.mood_outlined, size: 16),
-                      label: Text(mood),
-                    ),
                   if (when.isNotEmpty)
                     Chip(
                       avatar: const Icon(

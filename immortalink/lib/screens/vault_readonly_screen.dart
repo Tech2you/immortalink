@@ -81,6 +81,11 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   String? _memoryVoiceError;
   final Map<String, List<_VoiceNote>> _memoryVoiceById = {};
 
+  Map<String, dynamic>? _sharedMediaPayload;
+  Future<Map<String, dynamic>>? _sharedMediaRequest;
+
+  int _selectedVaultSection = 0;
+
   // Debug: surfaces Storage/RLS failures
   String? _storageErrorHint;
 
@@ -118,7 +123,18 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     super.dispose();
   }
 
-  Future<String?> _signedUrl(String bucket, String path) async {
+  bool _isMissingStorageObject(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('object not found') ||
+        message.contains('statuscode: 404') ||
+        message.contains('statuscode=404');
+  }
+
+  Future<String?> _signedUrl(
+    String bucket,
+    String path, {
+    void Function(Object error)? onAccessError,
+  }) async {
     try {
       final signed = await _client.storage
           .from(bucket)
@@ -126,10 +142,44 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
+      // An old database row can outlive a removed storage object. It should be
+      // skipped in a read-only vault, not presented as a technical error.
+      if (_isMissingStorageObject(e)) return null;
       _storageErrorHint =
           'Signed URL failed for bucket="$bucket" path="$path" → $e';
+      onAccessError?.call(e);
       return null;
     }
+  }
+
+  Future<Map<String, dynamic>> _loadSharedMediaPayload() {
+    final cached = _sharedMediaPayload;
+    if (cached != null) return Future.value(cached);
+
+    final pending = _sharedMediaRequest;
+    if (pending != null) return pending;
+
+    final request = () async {
+      final result = await _client.rpc(
+        'read_shared_vault_media',
+        params: {'p_vault_id': widget.vaultId},
+      );
+      final payload = Map<String, dynamic>.from(result as Map);
+      _sharedMediaPayload = payload;
+      return payload;
+    }();
+    _sharedMediaRequest = request;
+    return request;
+  }
+
+  Future<List<Map<String, dynamic>>> _sharedMediaRows(String key) async {
+    final payload = await _loadSharedMediaPayload();
+    final raw = payload[key];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
   }
 
   Future<String?> _signedAvatarUrl(String path) async {
@@ -287,7 +337,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
       final data = await _client
           .from('memories')
-          .select('id, life_stage, prompt_text, body, created_at')
+          .select(
+            'id, life_stage, prompt_key, prompt_text, body, created_at, '
+            'memory_date_label, people, location, mood',
+          )
           .eq('vault_id', widget.vaultId)
           .order('created_at', ascending: false);
 
@@ -302,6 +355,9 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         _memories = List<Map<String, dynamic>>.from(data);
         _loading = false;
       });
+
+      _sharedMediaPayload = null;
+      _sharedMediaRequest = null;
 
       unawaited(_loadHighlights());
       unawaited(_loadAboutMeText());
@@ -363,22 +419,21 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     });
 
     try {
-      final rows = await _client
-          .from('vault_about_photos')
-          .select('id, path, created_at')
-          .eq('vault_id', widget.vaultId)
-          .order('created_at', ascending: false);
-
-      final list = (rows as List).cast<Map<String, dynamic>>();
+      final list = await _sharedMediaRows('about_photos');
 
       final items = <Map<String, String>>[];
       for (final r in list) {
         final path = (r['path'] ?? '').toString().trim();
         if (path.isEmpty) continue;
-        final url = await _signedUrl(_aboutPhotosBucket, path);
+        final url = await _signedUrl(
+          _aboutPhotosBucket,
+          path,
+          onAccessError: (_) {
+            _aboutPhotoError ??=
+                'This photo is not available to this family member.';
+          },
+        );
         if (url == null || url.trim().isEmpty) {
-          _aboutPhotoError ??=
-              'Storage access blocked. Check Storage SELECT policy for bucket "$_aboutPhotosBucket".';
           continue;
         }
         items.add({'path': path, 'url': url});
@@ -682,32 +737,20 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     });
 
     try {
-      final ownerId = _ownerId;
-      if (ownerId == null || ownerId.isEmpty) {
-        if (!mounted) return;
-        setState(() => _loadingHighlights = false);
-        return;
-      }
-
-      final prefix = _featuredPrefix(ownerId);
-
-      final list = await _client.storage
-          .from(_featuredPhotosBucket)
-          .list(
-            path: prefix,
-            searchOptions: const SearchOptions(limit: 200, offset: 0),
-          );
+      final rows = await _sharedMediaRows('highlights');
 
       final items = <Map<String, String>>[];
-      for (final obj in list) {
-        final name = obj.name.toString();
-        if (name.trim().isEmpty) continue;
-
-        final fullPath = '$prefix/$name';
-        final url = await _signedUrl(_featuredPhotosBucket, fullPath);
+      for (final row in rows) {
+        final fullPath = (row['path'] ?? '').toString().trim();
+        if (fullPath.isEmpty) continue;
+        final url = await _signedUrl(
+          _featuredPhotosBucket,
+          fullPath,
+          onAccessError: (_) {
+            _highlightsError ??= 'Highlights are temporarily unavailable.';
+          },
+        );
         if (url == null || url.trim().isEmpty) {
-          _highlightsError ??=
-              'Storage access blocked. Check Storage SELECT policy for bucket "$_featuredPhotosBucket".';
           continue;
         }
 
@@ -978,11 +1021,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     });
 
     try {
-      final row = await _client
-          .from('vault_core_voice_note')
-          .select('id, path, title, created_at')
-          .eq('vault_id', widget.vaultId)
-          .maybeSingle();
+      final rows = await _sharedMediaRows('core_voice');
+      final row = rows.isEmpty ? null : rows.first;
 
       if (row == null) {
         if (!mounted) return;
@@ -1001,13 +1041,17 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         return;
       }
 
-      final url = await _signedUrl(_voiceBucket, path);
+      final url = await _signedUrl(
+        _voiceBucket,
+        path,
+        onAccessError: (_) {
+          _coreVoiceError ??= 'This voice introduction is unavailable.';
+        },
+      );
       if (url == null || url.trim().isEmpty) {
         if (!mounted) return;
         setState(() {
           _loadingCoreVoice = false;
-          _coreVoiceError ??=
-              'Storage access blocked. Check Storage SELECT policy for bucket "$_voiceBucket".';
         });
         return;
       }
@@ -1045,13 +1089,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         return;
       }
 
-      final rows = await _client
-          .from('memory_photos')
-          .select('id, memory_id, path, created_at')
-          .eq('vault_id', widget.vaultId)
-          .order('created_at', ascending: false);
-
-      final list = (rows as List).cast<Map<String, dynamic>>();
+      final list = await _sharedMediaRows('memory_photos');
 
       final futures = list.map((r) async {
         final id = (r['id'] ?? '').toString();
@@ -1059,10 +1097,14 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         final path = (r['path'] ?? '').toString().trim();
         if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
 
-        final url = await _signedUrl(_memoryPhotosBucket, path);
+        final url = await _signedUrl(
+          _memoryPhotosBucket,
+          path,
+          onAccessError: (_) {
+            _memoryPhotoError ??= 'Some memory photos are unavailable.';
+          },
+        );
         if (url == null || url.trim().isEmpty) {
-          _memoryPhotoError ??=
-              'Storage access blocked. Check Storage SELECT policy for bucket "$_memoryPhotosBucket".';
           return null;
         }
 
@@ -1099,13 +1141,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         return;
       }
 
-      final rows = await _client
-          .from('memory_voice_notes')
-          .select('id, memory_id, path, title, created_at')
-          .eq('vault_id', widget.vaultId)
-          .order('created_at', ascending: false);
-
-      final list = (rows as List).cast<Map<String, dynamic>>();
+      final list = await _sharedMediaRows('memory_voice');
 
       for (final r in list) {
         final id = (r['id'] ?? '').toString();
@@ -1116,10 +1152,14 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
         if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
 
-        final url = await _signedUrl(_memoryVoiceBucket, path);
+        final url = await _signedUrl(
+          _memoryVoiceBucket,
+          path,
+          onAccessError: (_) {
+            _memoryVoiceError ??= 'Some voice notes are unavailable.';
+          },
+        );
         if (url == null || url.trim().isEmpty) {
-          _memoryVoiceError ??=
-              'Storage access blocked. Check Storage SELECT policy for bucket "$_memoryVoiceBucket".';
           continue;
         }
 
@@ -1648,13 +1688,504 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     );
   }
 
+  Widget _readOnlyProfileHeader() {
+    final name = (_displayName ?? _vaultName).trim();
+    final hasAvatar = (_avatarUrl ?? '').trim().isNotEmpty;
+    final canOpenBranch =
+        _branchDirectionForSlot((_slotKey ?? '').trim()) != null;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.white.withOpacity(0.78),
+            const Color(0xFFF4E8F7).withOpacity(0.82),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: Colors.black.withOpacity(0.06)),
+      ),
+      child: Column(
+        children: [
+          CircleAvatar(
+            radius: 48,
+            backgroundColor: const Color(0xFFE9D7F1),
+            backgroundImage: hasAvatar ? NetworkImage(_avatarUrl!) : null,
+            child: hasAvatar
+                ? null
+                : const Icon(Icons.person_outline, size: 42),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            name.isEmpty ? 'Family vault' : name,
+            style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Stories, voice and moments — shared with family.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.black.withOpacity(0.56)),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: _openAskAI,
+                icon: const Icon(Icons.auto_awesome, size: 18),
+                label: const Text('Ask my AI'),
+              ),
+              if (canOpenBranch)
+                OutlinedButton.icon(
+                  onPressed: _openBranch,
+                  icon: const Icon(Icons.account_tree_outlined, size: 18),
+                  label: const Text('Open branch'),
+                ),
+              Chip(
+                avatar: const Icon(Icons.lock_outline, size: 16),
+                label: const Text('View only'),
+                backgroundColor: Colors.white.withOpacity(0.52),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _socialHighlightsSection() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.48),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.black.withOpacity(0.07)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Highlights',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          if (_loadingHighlights)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_featuredPhotos.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.42),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                _highlightsError == null
+                    ? 'No highlights shared yet.'
+                    : 'Highlights are temporarily unavailable.',
+                style: TextStyle(color: Colors.black.withOpacity(0.58)),
+              ),
+            )
+          else
+            SizedBox(
+              height: 152,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _featuredPhotos.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (_, index) {
+                  final photo = _featuredPhotos[index];
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: _openHighlightsGallery,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Image.network(
+                        photo['url'] ?? '',
+                        width: 118,
+                        height: 152,
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _vaultSectionPicker() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      width: double.infinity,
+      child: SegmentedButton<int>(
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(
+            value: 0,
+            icon: Icon(Icons.view_stream_outlined),
+            label: Text('Memories'),
+          ),
+          ButtonSegment(
+            value: 1,
+            icon: Icon(Icons.person_outline),
+            label: Text('About'),
+          ),
+          ButtonSegment(
+            value: 2,
+            icon: Icon(Icons.photo_library_outlined),
+            label: Text('Media'),
+          ),
+        ],
+        selected: {_selectedVaultSection},
+        onSelectionChanged: (selection) {
+          setState(() => _selectedVaultSection = selection.first);
+        },
+      ),
+    );
+  }
+
+  Widget _detailChip(IconData icon, String value) {
+    return Chip(
+      visualDensity: VisualDensity.compact,
+      avatar: Icon(icon, size: 16),
+      label: Text(value),
+    );
+  }
+
+  Widget _socialMemoryCard(Map<String, dynamic> memory) {
+    final memoryId = (memory['id'] ?? '').toString();
+    final prompt = (memory['prompt_text'] ?? '').toString().trim();
+    final body = (memory['body'] ?? '').toString().trim();
+    final when = (memory['memory_date_label'] ?? '').toString().trim();
+    final people = (memory['people'] ?? '').toString().trim();
+    final location = (memory['location'] ?? '').toString().trim();
+    final photos = _memoryPhotosById[memoryId] ?? const <_MemPhoto>[];
+    final notes = _memoryVoiceById[memoryId] ?? const <_VoiceNote>[];
+    final name = (_displayName ?? _vaultName).trim();
+    final hasAvatar = (_avatarUrl ?? '').trim().isNotEmpty;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      elevation: 0,
+      color: Colors.white.withOpacity(0.74),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: Colors.black.withOpacity(0.07)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () => _openMemoryDetail(memory),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundImage: hasAvatar
+                        ? NetworkImage(_avatarUrl!)
+                        : null,
+                    child: hasAvatar ? null : const Icon(Icons.person_outline),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name.isEmpty ? 'Family vault' : name,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          'Memory · Shared with family',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black.withOpacity(0.55),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (prompt.isNotEmpty)
+                Text(
+                  prompt,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              if (prompt.isNotEmpty && body.isNotEmpty)
+                const SizedBox(height: 7),
+              if (body.isNotEmpty)
+                Text(body, style: const TextStyle(fontSize: 15, height: 1.42)),
+              if (when.isNotEmpty ||
+                  people.isNotEmpty ||
+                  location.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (when.isNotEmpty)
+                      _detailChip(Icons.calendar_today_outlined, when),
+                    if (people.isNotEmpty)
+                      _detailChip(Icons.people_outline, people),
+                    if (location.isNotEmpty)
+                      _detailChip(Icons.location_on_outlined, location),
+                  ],
+                ),
+              ],
+              if (photos.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 230,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: photos.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, index) => ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.network(
+                        photos[index].url,
+                        width: photos.length == 1 ? 520 : 260,
+                        height: 230,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                ...notes.map((note) {
+                  final key = 'mem:${note.id}';
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: IconButton(
+                      icon: Icon(
+                        _playingKey == key && _isPlaying
+                            ? Icons.pause_circle_filled
+                            : Icons.play_circle_fill,
+                      ),
+                      onPressed: () => _togglePlay(note, playKey: key),
+                    ),
+                    title: Text(note.title),
+                    subtitle: const Text('Voice memory'),
+                  );
+                }),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _readOnlyAboutSection() {
+    final aboutText = (_aboutMeText ?? '').trim();
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.58),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'About me',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 10),
+              if (_loadingAboutMeText)
+                const LinearProgressIndicator()
+              else
+                Text(
+                  aboutText.isEmpty
+                      ? 'Nothing has been shared here yet.'
+                      : aboutText,
+                  style: const TextStyle(fontSize: 15, height: 1.45),
+                ),
+              if (_aboutPhotos.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 180,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _aboutPhotos.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    itemBuilder: (_, index) => InkWell(
+                      onTap: _openAboutGallery,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Image.network(
+                          _aboutPhotos[index]['url'] ?? '',
+                          width: 180,
+                          height: 180,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.58),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Voice introduction',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              if (_loadingCoreVoice)
+                const LinearProgressIndicator()
+              else if (_coreVoice == null)
+                const Text('No voice introduction has been shared yet.')
+              else
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: IconButton(
+                    icon: Icon(
+                      _playingKey == 'core:${widget.vaultId}' && _isPlaying
+                          ? Icons.pause_circle_filled
+                          : Icons.play_circle_fill,
+                    ),
+                    onPressed: () => _togglePlay(
+                      _coreVoice!,
+                      playKey: 'core:${widget.vaultId}',
+                    ),
+                  ),
+                  title: Text(_coreVoice!.title),
+                  subtitle: const Text('Tap to listen'),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _readOnlyMediaSection() {
+    final photos = <Map<String, String>>[
+      ..._featuredPhotos,
+      ..._aboutPhotos,
+      for (final group in _memoryPhotosById.values)
+        for (final photo in group) {'path': photo.path, 'url': photo.url},
+    ];
+    final seen = <String>{};
+    final uniquePhotos = photos.where((photo) {
+      final path = photo['path'] ?? '';
+      return path.isNotEmpty && seen.add(path);
+    }).toList();
+    final voices = <_VoiceNote>[
+      if (_coreVoice != null) _coreVoice!,
+      for (final group in _memoryVoiceById.values) ...group,
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.52),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Shared media',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 12),
+          if (uniquePhotos.isEmpty)
+            const Text('No photos have been shared yet.')
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 220,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: uniquePhotos.length,
+              itemBuilder: (_, index) => ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.network(
+                  uniquePhotos[index]['url'] ?? '',
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ),
+          if (voices.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            const Text(
+              'Voice notes',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+            ),
+            ...voices.map((voice) {
+              final key = voice == _coreVoice
+                  ? 'core:${widget.vaultId}'
+                  : 'mem:${voice.id}';
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: IconButton(
+                  icon: Icon(
+                    _playingKey == key && _isPlaying
+                        ? Icons.pause_circle_filled
+                        : Icons.play_circle_fill,
+                  ),
+                  onPressed: () => _togglePlay(voice, playKey: key),
+                ),
+                title: Text(voice.title),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final tileBg = Theme.of(context).colorScheme.surface.withOpacity(0.72);
-
     return Scaffold(
       appBar: AppBar(
-        title: Text(_vaultName),
+        title: Text((_displayName ?? _vaultName).trim()),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -1666,106 +2197,62 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       body: LogoWatermark(
         opacity: 0.03,
         size: 760,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-              ? Center(child: Text('Load failed: $_error'))
-              : ListView.separated(
-                  itemCount: () {
-                    final hasHint = _storageErrorHint != null;
-                    final base = 4 + (hasHint ? 1 : 0);
-                    final mem = _memories.isEmpty ? 1 : _memories.length;
-                    return base + mem;
-                  }(),
-                  separatorBuilder: (_, __) => const Divider(),
-                  itemBuilder: (context, i) {
-                    final hasHint = _storageErrorHint != null;
-
-                    if (i == 0) return _headerCard();
-                    if (i == 1) return _highlightsSection();
-                    if (i == 2) return _aboutMeTextPhotosSection();
-                    if (i == 3) return _aboutMeSection();
-
-                    if (hasHint && i == 4) {
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.black.withOpacity(0.08),
-                          ),
-                          color: Colors.white.withOpacity(0.35),
-                        ),
-                        child: Text(
-                          _storageErrorHint!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.black.withOpacity(0.65),
-                          ),
-                        ),
-                      );
-                    }
-
-                    final memStart = 4 + (hasHint ? 1 : 0);
-
-                    if (_memories.isEmpty) {
-                      if (i == memStart) {
-                        return const Padding(
-                          padding: EdgeInsets.only(top: 10),
-                          child: Center(child: Text('No memories yet.')),
-                        );
-                      }
-                      return const SizedBox.shrink();
-                    }
-
-                    final idx = i - memStart;
-                    if (idx < 0 || idx >= _memories.length) {
-                      return const SizedBox.shrink();
-                    }
-
-                    final m = _memories[idx];
-                    final stage = (m['life_stage'] ?? '').toString();
-                    final prompt = (m['prompt_text'] ?? '').toString();
-                    final body = (m['body'] ?? '').toString();
-
-                    return ListTile(
-                      tileColor: tileBg,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      leading: Chip(label: Text(_prettyStage(stage))),
-                      title: Text(prompt.isEmpty ? '(No prompt)' : prompt),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            body,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Tap to open • photos + voice',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.black.withOpacity(0.55),
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? Center(child: Text('This vault could not be loaded: $_error'))
+            : Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 920),
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 72),
+                    children: [
+                      _readOnlyProfileHeader(),
+                      _socialHighlightsSection(),
+                      _vaultSectionPicker(),
+                      if (_selectedVaultSection == 0) ...[
+                        if (_memories
+                            .where(
+                              (memory) =>
+                                  (memory['prompt_key'] ?? '').toString() !=
+                                  'about_me',
+                            )
+                            .isEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(28),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.55),
+                              borderRadius: BorderRadius.circular(22),
                             ),
-                          ),
-                        ],
-                      ),
-                      trailing: IconButton(
-                        tooltip: 'Open memory',
-                        icon: const Icon(Icons.chevron_right),
-                        onPressed: () => _openMemoryDetail(m),
-                      ),
-                      onTap: () => _openMemoryDetail(m),
-                    );
-                  },
+                            child: const Column(
+                              children: [
+                                Icon(Icons.auto_stories_outlined, size: 42),
+                                SizedBox(height: 12),
+                                Text(
+                                  'No memories shared yet',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          ..._memories
+                              .where(
+                                (memory) =>
+                                    (memory['prompt_key'] ?? '').toString() !=
+                                    'about_me',
+                              )
+                              .map(_socialMemoryCard),
+                      ],
+                      if (_selectedVaultSection == 1) _readOnlyAboutSection(),
+                      if (_selectedVaultSection == 2) _readOnlyMediaSection(),
+                    ],
+                  ),
                 ),
-        ),
+              ),
       ),
     );
   }
