@@ -16,6 +16,6 @@ abstract class WebAudioRecorder {
 
   Future<void> start();
   Future<RecordedAudio> stop(); // stop + return bytes
-  Future<void> cancel();        // stop + discard
+  Future<void> cancel(); // stop + discard
   void dispose();
 }

@@ -105,10 +105,7 @@ class _LegacyVaultCompanionScreenState
     final session = _client.auth.currentSession;
     final token = session?.accessToken?.trim();
     if (token == null || token.isEmpty) return {};
-    return {
-      'Authorization': 'Bearer $token',
-      'authorization': 'Bearer $token',
-    };
+    return {'Authorization': 'Bearer $token', 'authorization': 'Bearer $token'};
   }
 
   String _safeExtract(dynamic v) => (v ?? '').toString().trim();
@@ -130,10 +127,13 @@ class _LegacyVaultCompanionScreenState
     final session = _client.auth.currentSession;
     if (session == null) {
       setState(() {
-        _msgs.add(_ChatMsg(
-          role: _Role.assistant,
-          text: 'You are not signed in (session missing). Please sign in again.',
-        ));
+        _msgs.add(
+          _ChatMsg(
+            role: _Role.assistant,
+            text:
+                'You are not signed in (session missing). Please sign in again.',
+          ),
+        );
       });
       return;
     }
@@ -162,11 +162,7 @@ class _LegacyVaultCompanionScreenState
       };
 
       final res = await _client.functions
-          .invoke(
-            'legacy_vault_ai_chat',
-            headers: headers,
-            body: body,
-          )
+          .invoke('legacy_vault_ai_chat', headers: headers, body: body)
           .timeout(const Duration(seconds: 60));
 
       if (res.status != 200) {
@@ -174,7 +170,9 @@ class _LegacyVaultCompanionScreenState
         final err = (d is Map)
             ? _safeExtract(d['error'] ?? d['message'] ?? d['details'])
             : _safeExtract(d);
-        throw Exception('Function HTTP ${res.status}${err.isEmpty ? '' : ': $err'}');
+        throw Exception(
+          'Function HTTP ${res.status}${err.isEmpty ? '' : ': $err'}',
+        );
       }
 
       final data = res.data;
@@ -186,8 +184,9 @@ class _LegacyVaultCompanionScreenState
         answer = _safeExtract(data['answer'] ?? data['reply']);
         debug = _safeExtract(data['debug']);
         if (answer.isEmpty) {
-          final err =
-              _safeExtract(data['error'] ?? data['message'] ?? data['details']);
+          final err = _safeExtract(
+            data['error'] ?? data['message'] ?? data['details'],
+          );
           if (err.isNotEmpty) answer = 'Error: $err';
         }
       } else if (data is String) {
@@ -231,7 +230,8 @@ class _LegacyVaultCompanionScreenState
         final idx = _msgs.lastIndexWhere(
           (m) => m.role == _Role.assistant && m.isTyping,
         );
-        final text = 'Sorry — the AI took too long to respond. Please try again.';
+        final text =
+            'Sorry — the AI took too long to respond. Please try again.';
         if (idx != -1) {
           _msgs[idx] = _ChatMsg(role: _Role.assistant, text: text);
         } else {
@@ -329,11 +329,7 @@ class _LegacyVaultCompanionScreenState
       return ListView(
         controller: _scroll,
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        children: [
-          _QuickPrompts(
-            onTap: _sending ? null : _sendQuick,
-          ),
-        ],
+        children: [_QuickPrompts(onTap: _sending ? null : _sendQuick)],
       );
     }
 
@@ -344,9 +340,7 @@ class _LegacyVaultCompanionScreenState
       itemCount: _msgs.length + (showQuickPrompts ? 1 : 0),
       itemBuilder: (_, i) {
         if (showQuickPrompts && i == 1) {
-          return _QuickPrompts(
-            onTap: _sending ? null : _sendQuick,
-          );
+          return _QuickPrompts(onTap: _sending ? null : _sendQuick);
         }
 
         final msgIndex = showQuickPrompts ? (i == 0 ? 0 : i - 1) : i;
@@ -375,10 +369,7 @@ class _LegacyVaultCompanionScreenState
             ),
             child: m.isTyping
                 ? const _TypingDots()
-                : SelectableText(
-                    m.text,
-                    style: const TextStyle(height: 1.25),
-                  ),
+                : SelectableText(m.text, style: const TextStyle(height: 1.25)),
           ),
         );
       },
@@ -406,8 +397,9 @@ class _LegacyVaultCompanionScreenState
                       hintText: _accepted ? 'Ask a question…' : 'Loading…',
                       border: const OutlineInputBorder(),
                       filled: true,
-                      fillColor:
-                          Theme.of(context).colorScheme.surface.withOpacity(0.85),
+                      fillColor: Theme.of(
+                        context,
+                      ).colorScheme.surface.withOpacity(0.85),
                     ),
                   ),
                 ),
@@ -442,11 +434,7 @@ class _ChatMsg {
   final String text;
   final bool isTyping;
 
-  _ChatMsg({
-    required this.role,
-    required this.text,
-    this.isTyping = false,
-  });
+  _ChatMsg({required this.role, required this.text, this.isTyping = false});
 }
 
 class _TypingDots extends StatefulWidget {

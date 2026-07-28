@@ -137,16 +137,15 @@ class _CreateVaultScreenState extends State<CreateVaultScreen> {
       // ✅ Added: make sure requests include JWT
       await _ensureSession();
 
-      await _client.from('vaults').insert({
-        'name': name,
-      });
+      await _client.from('vaults').insert({'name': name});
 
       if (!mounted) return;
       Navigator.pop(context, true); // created
     } on PostgrestException catch (e) {
       // If unique constraint blocks second vault, show friendly message
       setState(() {
-        _error = e.message.contains('vaults_owner_unique') ||
+        _error =
+            e.message.contains('vaults_owner_unique') ||
                 e.message.toLowerCase().contains('duplicate') ||
                 e.code == '23505'
             ? 'You already have a vault (one vault per account for now).'
@@ -174,72 +173,76 @@ class _CreateVaultScreenState extends State<CreateVaultScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _existingVault != null
-                ? Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(height: 18),
-                      const Icon(Icons.lock, size: 40),
-                      const SizedBox(height: 12),
-                      Text(
-                        'You already have a vault.',
-                        style: Theme.of(context).textTheme.titleLarge,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'For now, each account has 1 vault to keep things simple.',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      Card(
-                        child: ListTile(
-                          title: Text((_existingVault!['name'] ?? 'Vault').toString()),
-                          subtitle: Text(() {
-                            final created = _formatCreatedDate(_existingVault!['created_at']);
-                            return created.isEmpty ? '' : 'Created: $created';
-                          }()),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          child: const Text('Back to Vaults'),
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    children: [
-                      TextField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Vault name',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      if (_error != null) ...[
-                        Text(_error!, style: const TextStyle(color: Colors.red)),
-                        const SizedBox(height: 10),
-                      ],
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _creating ? null : _createVault,
-                          child: Text(_creating ? 'Creating...' : 'Create Vault'),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Note: One vault per account for now (we’ll expand later).',
-                        style: Theme.of(context).textTheme.bodySmall,
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 18),
+                  const Icon(Icons.lock, size: 40),
+                  const SizedBox(height: 12),
+                  Text(
+                    'You already have a vault.',
+                    style: Theme.of(context).textTheme.titleLarge,
+                    textAlign: TextAlign.center,
                   ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'For now, each account has 1 vault to keep things simple.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Card(
+                    child: ListTile(
+                      title: Text(
+                        (_existingVault!['name'] ?? 'Vault').toString(),
+                      ),
+                      subtitle: Text(() {
+                        final created = _formatCreatedDate(
+                          _existingVault!['created_at'],
+                        );
+                        return created.isEmpty ? '' : 'Created: $created';
+                      }()),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Back to Vaults'),
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  TextField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Vault name',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_error != null) ...[
+                    Text(_error!, style: const TextStyle(color: Colors.red)),
+                    const SizedBox(height: 10),
+                  ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _creating ? null : _createVault,
+                      child: Text(_creating ? 'Creating...' : 'Create Vault'),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Note: One vault per account for now (we’ll expand later).',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
       ),
     );
   }

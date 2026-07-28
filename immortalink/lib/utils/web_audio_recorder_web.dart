@@ -41,7 +41,9 @@ class _WebAudioRecorder implements WebAudioRecorder {
     _stopCompleter = Completer<void>();
 
     // Request mic
-    _stream = await html.window.navigator.mediaDevices!.getUserMedia({'audio': true});
+    _stream = await html.window.navigator.mediaDevices!.getUserMedia({
+      'audio': true,
+    });
 
     // Pick a mime type Edge supports
     final mime = _pickMimeType();
@@ -136,8 +138,13 @@ class _WebAudioRecorder implements WebAudioRecorder {
     // remove listeners
     try {
       if (_recorder != null) {
-        if (_dataHandler != null) _recorder!.removeEventListener('dataavailable', _dataHandler as dynamic);
-        if (_stopHandler != null) _recorder!.removeEventListener('stop', _stopHandler as dynamic);
+        if (_dataHandler != null)
+          _recorder!.removeEventListener(
+            'dataavailable',
+            _dataHandler as dynamic,
+          );
+        if (_stopHandler != null)
+          _recorder!.removeEventListener('stop', _stopHandler as dynamic);
       }
     } catch (_) {}
 

@@ -276,10 +276,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
   Future<String?> _signedUrl(String bucket, String path) async {
     try {
-      final signed = await _supabase.storage.from(bucket).createSignedUrl(
-            path,
-            60 * 60,
-          );
+      final signed = await _supabase.storage
+          .from(bucket)
+          .createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (_) {
@@ -321,10 +320,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
       _nameController.text = (row['name'] ?? '').toString();
       _displayNameController.text = (row['display_name'] ?? '').toString();
-      _birthYearController.text =
-          row['birth_year'] == null ? '' : row['birth_year'].toString();
-      _deathYearController.text =
-          row['death_year'] == null ? '' : row['death_year'].toString();
+      _birthYearController.text = row['birth_year'] == null
+          ? ''
+          : row['birth_year'].toString();
+      _deathYearController.text = row['death_year'] == null
+          ? ''
+          : row['death_year'].toString();
       _aboutController.text = (row['about_me_text'] ?? '').toString();
 
       setState(() {
@@ -414,11 +415,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           continue;
         }
 
-        items.add({
-          'id': id,
-          'path': path,
-          'url': url,
-        });
+        items.add({'id': id, 'path': path, 'url': url});
       }
 
       if (!mounted) return;
@@ -457,7 +454,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final rows = await _supabase
           .from('legacy_memories')
           .select(
-              'id, life_stage, prompt_key, prompt_text, body, created_at, updated_at')
+            'id, life_stage, prompt_key, prompt_text, body, created_at, updated_at',
+          )
           .eq('legacy_member_id', widget.legacyMemberId)
           .eq('family_id', widget.familyId)
           .order('created_at', ascending: false);
@@ -559,7 +557,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final path =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/gallery/$ts.$ext';
 
-      await _supabase.storage.from(_photosBucket).uploadBinary(
+      await _supabase.storage
+          .from(_photosBucket)
+          .uploadBinary(
             path,
             bytes,
             fileOptions: FileOptions(
@@ -608,7 +608,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final newPath =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/profile_picture/$ts.$ext';
 
-      await _supabase.storage.from(_photosBucket).uploadBinary(
+      await _supabase.storage
+          .from(_photosBucket)
+          .uploadBinary(
             newPath,
             bytes,
             fileOptions: FileOptions(
@@ -783,8 +785,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       ];
 
       if (photoPaths.isNotEmpty) {
-        await _supabase
-            .storage
+        await _supabase.storage
             .from(_photosBucket)
             .remove(photoPaths.toSet().toList());
       }
@@ -917,10 +918,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final memoryId = (memory['id'] ?? '').toString();
     if (memoryId.isEmpty) return;
 
-    final promptController =
-        TextEditingController(text: (memory['prompt_text'] ?? '').toString());
-    final bodyController =
-        TextEditingController(text: (memory['body'] ?? '').toString());
+    final promptController = TextEditingController(
+      text: (memory['prompt_text'] ?? '').toString(),
+    );
+    final bodyController = TextEditingController(
+      text: (memory['body'] ?? '').toString(),
+    );
     String stage = (memory['life_stage'] ?? 'mid').toString();
 
     final result = await showDialog<Map<String, String>>(
@@ -1099,7 +1102,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final path =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/$ts.$ext';
 
-      await _supabase.storage.from(_photosBucket).uploadBinary(
+      await _supabase.storage
+          .from(_photosBucket)
+          .uploadBinary(
             path,
             bytes,
             fileOptions: FileOptions(
@@ -1200,22 +1205,23 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                   height: 72,
                   color: Colors.black.withOpacity(0.08),
                   child:
-                      _profilePhotoUrl == null || _profilePhotoUrl!.trim().isEmpty
-                          ? Icon(
-                              Icons.person,
-                              size: 30,
-                              color: Colors.black.withOpacity(0.65),
-                            )
-                          : Image.network(
-                              _profilePhotoUrl!,
-                              fit: BoxFit.cover,
-                              gaplessPlayback: true,
-                              errorBuilder: (_, __, ___) => Icon(
-                                Icons.person,
-                                size: 30,
-                                color: Colors.black.withOpacity(0.65),
-                              ),
-                            ),
+                      _profilePhotoUrl == null ||
+                          _profilePhotoUrl!.trim().isEmpty
+                      ? Icon(
+                          Icons.person,
+                          size: 30,
+                          color: Colors.black.withOpacity(0.65),
+                        )
+                      : Image.network(
+                          _profilePhotoUrl!,
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                          errorBuilder: (_, __, ___) => Icon(
+                            Icons.person,
+                            size: 30,
+                            color: Colors.black.withOpacity(0.65),
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(width: 14),
@@ -1233,9 +1239,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: TextStyle(
-                        color: Colors.black.withOpacity(0.60),
-                      ),
+                      style: TextStyle(color: Colors.black.withOpacity(0.60)),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -1261,8 +1265,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                               _uploadingProfilePhoto
                                   ? 'Uploading…'
                                   : ((_profilePhotoUrl ?? '').trim().isEmpty
-                                      ? 'Add profile picture'
-                                      : 'Change pfp'),
+                                        ? 'Add profile picture'
+                                        : 'Change pfp'),
                             ),
                           ),
                         ),
@@ -1270,7 +1274,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                           height: 40,
                           child: OutlinedButton.icon(
                             onPressed: _openLegacyAi,
-                            icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                            icon: const Icon(
+                              Icons.chat_bubble_outline,
+                              size: 18,
+                            ),
                             label: const Text('Ask (AI)'),
                           ),
                         ),
@@ -1404,10 +1411,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Profile',
-            style: TextStyle(fontWeight: FontWeight.w800),
-          ),
+          const Text('Profile', style: TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 10),
           TextField(
             controller: _nameController,
@@ -1614,11 +1618,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  body,
-                  maxLines: 4,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                Text(body, maxLines: 4, overflow: TextOverflow.ellipsis),
                 _memoryPhotoStrip(memoryId),
               ],
             ),
@@ -1685,9 +1685,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
               style: TextStyle(color: Colors.black.withOpacity(0.60)),
             )
           else
-            Column(
-              children: _memories.map(_memoryCard).toList(),
-            ),
+            Column(children: _memories.map(_memoryCard).toList()),
         ],
       ),
     );
@@ -1734,50 +1732,48 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                    ? Center(child: Text(_error!))
-                    : ListView(
+                ? Center(child: Text(_error!))
+                : ListView(
+                    children: [
+                      _headerCard(),
+                      const SizedBox(height: 12),
+                      _aboutCard(),
+                      const SizedBox(height: 12),
+                      _photosCard(),
+                      const SizedBox(height: 12),
+                      _memoriesCard(),
+                      const SizedBox(height: 12),
+                      _identityCard(),
+                      const SizedBox(height: 12),
+                      _extraDetailsCard(),
+                      const SizedBox(height: 12),
+                      Row(
                         children: [
-                          _headerCard(),
-                          const SizedBox(height: 12),
-                          _aboutCard(),
-                          const SizedBox(height: 12),
-                          _photosCard(),
-                          const SizedBox(height: 12),
-                          _memoriesCard(),
-                          const SizedBox(height: 12),
-                          _identityCard(),
-                          const SizedBox(height: 12),
-                          _extraDetailsCard(),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: (_savingProfile || _deletingProfile)
-                                      ? null
-                                      : _deleteProfile,
-                                  icon: const Icon(Icons.delete_outline),
-                                  label: Text(
-                                    _deletingProfile ? 'Deleting…' : 'Delete',
-                                  ),
-                                ),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: (_savingProfile || _deletingProfile)
+                                  ? null
+                                  : _deleteProfile,
+                              icon: const Icon(Icons.delete_outline),
+                              label: Text(
+                                _deletingProfile ? 'Deleting…' : 'Delete',
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  onPressed: (_savingProfile || _deletingProfile)
-                                      ? null
-                                      : _saveProfile,
-                                  icon: const Icon(Icons.save_outlined),
-                                  label: Text(
-                                    _savingProfile ? 'Saving…' : 'Save',
-                                  ),
-                                ),
-                              ),
-                            ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: (_savingProfile || _deletingProfile)
+                                  ? null
+                                  : _saveProfile,
+                              icon: const Icon(Icons.save_outlined),
+                              label: Text(_savingProfile ? 'Saving…' : 'Save'),
+                            ),
                           ),
                         ],
                       ),
+                    ],
+                  ),
           ),
         ],
       ),

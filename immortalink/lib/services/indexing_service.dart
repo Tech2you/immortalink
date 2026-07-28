@@ -17,10 +17,7 @@ class IndexingService {
   static Map<String, String> _authHeadersOrThrow() {
     final token = _accessTokenOrThrow();
     // Send both casings to avoid weird edge cases.
-    return {
-      'Authorization': 'Bearer $token',
-      'authorization': 'Bearer $token',
-    };
+    return {'Authorization': 'Bearer $token', 'authorization': 'Bearer $token'};
   }
 
   static String _prettyData(dynamic data) {
@@ -55,10 +52,7 @@ class IndexingService {
         .invoke(
           'index_memory',
           headers: headers,
-          body: {
-            'vault_id': vaultId,
-            'memory_id': memoryId,
-          },
+          body: {'vault_id': vaultId, 'memory_id': memoryId},
         )
         .timeout(const Duration(seconds: 60));
 
@@ -171,7 +165,10 @@ class IndexingService {
     required String vaultId,
     required String aboutMeText,
   }) async {
-    final chunks = await indexAboutMe(vaultId: vaultId, aboutMeText: aboutMeText);
+    final chunks = await indexAboutMe(
+      vaultId: vaultId,
+      aboutMeText: aboutMeText,
+    );
     debugPrint('ABOUT ME INDEX DEBUG → vault=$vaultId chunks=$chunks');
   }
 }

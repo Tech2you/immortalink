@@ -28,21 +28,23 @@ Future<void> main() async {
   }
 
   if (url.isEmpty || anon.isEmpty) {
-    runApp(const MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Text(
-            'Missing SUPABASE_URL or SUPABASE_ANON_KEY.\n'
-            'For hosted Flutter Web builds, use --dart-define.\n'
-            'Example:\n'
-            'flutter build web --release \\\n'
-            '  --dart-define=SUPABASE_URL=... \\\n'
-            '  --dart-define=SUPABASE_ANON_KEY=...',
-            textAlign: TextAlign.center,
+    runApp(
+      const MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Text(
+              'Missing SUPABASE_URL or SUPABASE_ANON_KEY.\n'
+              'For hosted Flutter Web builds, use --dart-define.\n'
+              'Example:\n'
+              'flutter build web --release \\\n'
+              '  --dart-define=SUPABASE_URL=... \\\n'
+              '  --dart-define=SUPABASE_ANON_KEY=...',
+              textAlign: TextAlign.center,
+            ),
           ),
         ),
       ),
-    ));
+    );
     return;
   }
 

@@ -303,14 +303,12 @@ class _VaultsScreenState extends State<VaultsScreen> {
       }
     }
     final storedPrimary = (_vault?['family_id'] as String?)?.trim();
+    // The family feed always follows the user's home family. A tree can still
+    // be opened directly without silently changing which family owns the feed.
     final nextActive =
-        memberships.any(
-          (row) => (row['family_id'] ?? '').toString() == _activeFamilyId,
-        )
-        ? _activeFamilyId
-        : (primaryId ??
-              (storedPrimary?.isNotEmpty == true ? storedPrimary : null) ??
-              (familyIds.isEmpty ? null : familyIds.first));
+        primaryId ??
+        (storedPrimary?.isNotEmpty == true ? storedPrimary : null) ??
+        (familyIds.isEmpty ? null : familyIds.first);
 
     if (!mounted) return;
     setState(() {
@@ -343,6 +341,21 @@ class _VaultsScreenState extends State<VaultsScreen> {
     });
 
     try {
+      final currentUserId = _supabase.auth.currentUser?.id;
+      final hiddenRows = currentUserId == null
+          ? <Map<String, dynamic>>[]
+          : List<Map<String, dynamic>>.from(
+              await _supabase
+                  .from('family_feed_hidden_vaults')
+                  .select('hidden_vault_id')
+                  .eq('user_id', currentUserId)
+                  .timeout(const Duration(seconds: 12)),
+            );
+      final hiddenVaultIds = hiddenRows
+          .map((row) => (row['hidden_vault_id'] ?? '').toString().trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+
       final rawMembers = await _supabase
           .from('family_members')
           .select('user_id')
@@ -378,7 +391,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
       for (final v in vaultList) {
         final id = (v['id'] ?? '').toString();
-        if (id.isEmpty || id == currentVaultId) continue;
+        if (id.isEmpty || id == currentVaultId || hiddenVaultIds.contains(id)) {
+          continue;
+        }
         vaultMap[id] = v;
         vaultIds.add(id);
 

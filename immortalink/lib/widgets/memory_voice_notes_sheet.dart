@@ -170,11 +170,7 @@ class _VoiceRow extends StatelessWidget {
             icon: const Icon(Icons.play_circle_outline),
           ),
           Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
           IconButton(
             tooltip: 'Rename',

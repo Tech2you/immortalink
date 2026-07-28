@@ -532,6 +532,88 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     );
   }
 
+  Future<List<_TreePerson>?> _chooseParentsForSibling({
+    required _TreePerson focus,
+    required String siblingName,
+  }) async {
+    final parents = _parentsOf(focus);
+    if (parents.isEmpty) {
+      return <_TreePerson>[await _ensureSiblingParent(focus)];
+    }
+    if (!mounted) return null;
+
+    final selectedParentKeys = <String>{};
+    final selectedKeys = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text('Which parent does $siblingName share?'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Select one parent for a half-sibling, or both parents '
+                    'for a full sibling.',
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1E8F6),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Text(
+                      'Only the selected parents will be linked to this '
+                      'sibling.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final parent in parents)
+                    CheckboxListTile(
+                      value: selectedParentKeys.contains(parent.key),
+                      title: Text(parent.name),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (checked) {
+                        setDialogState(() {
+                          if (checked == true) {
+                            selectedParentKeys.add(parent.key);
+                          } else {
+                            selectedParentKeys.remove(parent.key);
+                          }
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: selectedParentKeys.isEmpty
+                  ? null
+                  : () => Navigator.pop(dialogContext, {...selectedParentKeys}),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (selectedKeys == null || selectedKeys.isEmpty) return null;
+    return parents
+        .where((parent) => selectedKeys.contains(parent.key))
+        .toList();
+  }
+
   Future<void> _insertParentChildRelationship({
     required String parentType,
     required String parentId,
@@ -651,6 +733,122 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not update the children’s parents: $e')),
+      );
+    }
+  }
+
+  Future<void> _chooseSiblingsForParent({
+    required _TreePerson focus,
+    required String parentType,
+    required String parentId,
+    required String parentName,
+  }) async {
+    final siblings = _siblingsOf(focus);
+    if (siblings.isEmpty || !mounted) return;
+
+    final selected = <String>{};
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text(
+            'Does $parentName also parent any of ${focus.name}’s siblings?',
+          ),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$parentName is now connected as ${focus.name}’s parent. '
+                    'Select only the siblings who are also their children.',
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1E8F6),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Text(
+                      'Unselected siblings keep their existing parentage. '
+                      'This supports half-siblings and different parent '
+                      'combinations.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    value:
+                        selected.isNotEmpty &&
+                            selected.length != siblings.length
+                        ? null
+                        : selected.length == siblings.length,
+                    tristate:
+                        selected.isNotEmpty &&
+                        selected.length != siblings.length,
+                    title: const Text('Select all current siblings'),
+                    onChanged: (value) {
+                      setDialogState(() {
+                        selected.clear();
+                        if (value == true) {
+                          selected.addAll(
+                            siblings.map((sibling) => sibling.key),
+                          );
+                        }
+                      });
+                    },
+                  ),
+                  for (final sibling in siblings)
+                    CheckboxListTile(
+                      value: selected.contains(sibling.key),
+                      title: Text(sibling.name),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          if (value == true) {
+                            selected.add(sibling.key);
+                          } else {
+                            selected.remove(sibling.key);
+                          }
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, <String>{}),
+              child: Text('Only ${focus.name}'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, {...selected}),
+              child: const Text('Save selected'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == null || result.isEmpty) return;
+
+    try {
+      for (final sibling in siblings.where(
+        (sibling) => result.contains(sibling.key),
+      )) {
+        await _insertParentChildRelationship(
+          parentType: parentType,
+          parentId: parentId,
+          childType: sibling.type,
+          childId: sibling.id,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update the siblings’ parentage: $e')),
       );
     }
   }
@@ -780,6 +978,15 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         throw Exception('You need your own vault before inviting relatives.');
       }
 
+      List<_TreePerson>? siblingParents;
+      if (kind == _RelativeKind.sibling) {
+        siblingParents = await _chooseParentsForSibling(
+          focus: focus,
+          siblingName: 'the invited sibling',
+        );
+        if (siblingParents == null || siblingParents.isEmpty) return;
+      }
+
       final inserted = await _supabase
           .from('family_invites')
           .insert({
@@ -820,7 +1027,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           secondId = inviteId;
           relationshipKind = 'spouse';
         case _RelativeKind.sibling:
-          final parent = await _ensureSiblingParent(focus);
+          final parent = siblingParents!.first;
           firstType = parent.type;
           firstId = parent.id;
           secondType = 'invite';
@@ -836,6 +1043,17 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         'relationship_kind': relationshipKind,
       });
 
+      if (kind == _RelativeKind.sibling) {
+        for (final parent in siblingParents!.skip(1)) {
+          await _insertParentChildRelationship(
+            parentType: parent.type,
+            parentId: parent.id,
+            childType: 'invite',
+            childId: inviteId,
+          );
+        }
+      }
+
       if (!mounted) return;
       if (kind == _RelativeKind.spouse) {
         await _chooseChildrenForSpouse(
@@ -850,6 +1068,13 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           childType: 'invite',
           childId: inviteId,
           childName: 'the invited child',
+        );
+      } else if (kind == _RelativeKind.parent) {
+        await _chooseSiblingsForParent(
+          focus: focus,
+          parentType: 'invite',
+          parentId: inviteId,
+          parentName: 'The invited parent',
         );
       }
       if (!mounted) return;
@@ -1026,6 +1251,19 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                         return;
                       }
 
+                      List<_TreePerson>? siblingParents;
+                      if (kind == _RelativeKind.sibling) {
+                        final displayName = displayNameController.text.trim();
+                        siblingParents = await _chooseParentsForSibling(
+                          focus: focus,
+                          siblingName: displayName.isEmpty ? name : displayName,
+                        );
+                        if (siblingParents == null || siblingParents.isEmpty) {
+                          return;
+                        }
+                        if (!dialogContext.mounted) return;
+                      }
+
                       setDialogState(() {
                         saving = true;
                         error = null;
@@ -1033,7 +1271,11 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
 
                       try {
                         var anchor = focus;
-                        if (grandchildWithMissingParent) {
+                        var createKind = kind;
+                        if (kind == _RelativeKind.sibling) {
+                          anchor = siblingParents!.first;
+                          createKind = _RelativeKind.child;
+                        } else if (grandchildWithMissingParent) {
                           anchor = await _createMissingParentPlaceholder(focus);
                         } else if (lineagePlaceholderCount > 0) {
                           anchor = await _createLineagePlaceholderChain(
@@ -1048,7 +1290,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                             'p_family_id': widget.familyId,
                             'p_anchor_type': anchor.type,
                             'p_anchor_id': anchor.id,
-                            'p_relation': _kindLabel(kind),
+                            'p_relation': _kindLabel(createKind),
                             'p_name': name,
                             'p_display_name':
                                 displayNameController.text.trim().isEmpty
@@ -1067,6 +1309,16 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                           throw Exception(
                             'The legacy relative was created without an id.',
                           );
+                        }
+                        if (kind == _RelativeKind.sibling) {
+                          for (final parent in siblingParents!.skip(1)) {
+                            await _insertParentChildRelationship(
+                              parentType: parent.type,
+                              parentId: parent.id,
+                              childType: 'legacy',
+                              childId: createdId,
+                            );
+                          }
                         }
                         if (!dialogContext.mounted) return;
                         Navigator.pop(dialogContext);
@@ -1088,6 +1340,13 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                             childType: 'legacy',
                             childId: createdId,
                             childName: createdName,
+                          );
+                        } else if (kind == _RelativeKind.parent) {
+                          await _chooseSiblingsForParent(
+                            focus: focus,
+                            parentType: 'legacy',
+                            parentId: createdId,
+                            parentName: createdName,
                           );
                         }
                         await _load(keepFocusKey: focus.key);

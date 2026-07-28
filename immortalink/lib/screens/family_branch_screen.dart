@@ -59,8 +59,9 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     required String path,
   }) async {
     try {
-      final signed =
-          await _supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
+      final signed = await _supabase.storage
+          .from(bucket)
+          .createSignedUrl(path, 60 * 60);
       final sep = signed.contains('?') ? '&' : '?';
       return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (_) {
@@ -101,8 +102,9 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
           continue;
         }
 
-        final existingIsProfile =
-            existing.toLowerCase().contains('/profile_picture/');
+        final existingIsProfile = existing.toLowerCase().contains(
+          '/profile_picture/',
+        );
 
         if (!existingIsProfile && isProfilePath) {
           result[legacyId] = path;
@@ -224,16 +226,14 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
     for (final legacy in _legacyMembers) {
       final slotKey = (legacy['slot_key'] ?? '').toString().trim();
-      final replacedByVaultId =
-          (legacy['replaced_by_vault_id'] ?? '').toString().trim();
+      final replacedByVaultId = (legacy['replaced_by_vault_id'] ?? '')
+          .toString()
+          .trim();
 
       if (slotKey.isEmpty) continue;
       if (replacedByVaultId.isNotEmpty) continue;
 
-      result[slotKey] = {
-        ...legacy,
-        '__legacy': true,
-      };
+      result[slotKey] = {...legacy, '__legacy': true};
     }
 
     return result;
@@ -250,13 +250,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     if (node.type == 'legacy') {
       for (final l in _legacyMembers) {
         if ((l['id'] ?? '').toString() == node.id) {
-          final replacedByVaultId =
-              (l['replaced_by_vault_id'] ?? '').toString().trim();
+          final replacedByVaultId = (l['replaced_by_vault_id'] ?? '')
+              .toString()
+              .trim();
           if (replacedByVaultId.isNotEmpty) return null;
-          return {
-            ...l,
-            '__legacy': true,
-          };
+          return {...l, '__legacy': true};
         }
       }
     }
@@ -281,59 +279,59 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     return _nodeRefFromPerson(person);
   }
 
- List<_NodeRef?> _refsForDisplaySlots({
-  required List<String?> slotKeys,
-  required List<_NodeRef> relatedRefs,
-}) {
-  final result = List<_NodeRef?>.filled(slotKeys.length, null);
-  final used = <String>{};
+  List<_NodeRef?> _refsForDisplaySlots({
+    required List<String?> slotKeys,
+    required List<_NodeRef> relatedRefs,
+  }) {
+    final result = List<_NodeRef?>.filled(slotKeys.length, null);
+    final used = <String>{};
 
-  int nextOpenIndex() {
-    for (int i = 0; i < result.length; i++) {
-      if (result[i] == null) return i;
+    int nextOpenIndex() {
+      for (int i = 0; i < result.length; i++) {
+        if (result[i] == null) return i;
+      }
+      return -1;
     }
-    return -1;
-  }
 
-  // First priority: actual relationship-linked people for this branch.
-  for (final ref in relatedRefs) {
-    final key = _nodeKey(ref);
-    if (used.contains(key)) continue;
+    // First priority: actual relationship-linked people for this branch.
+    for (final ref in relatedRefs) {
+      final key = _nodeKey(ref);
+      if (used.contains(key)) continue;
 
-    final hintedSlot = _slotHintForNode(ref);
-    final hintedIndex = slotKeys.indexOf(hintedSlot);
+      final hintedSlot = _slotHintForNode(ref);
+      final hintedIndex = slotKeys.indexOf(hintedSlot);
 
-    if (hintedIndex != -1 && result[hintedIndex] == null) {
-      result[hintedIndex] = ref;
-      used.add(key);
-    }
-  }
-
-  // Second priority: place remaining related people left-to-right in open slots.
-  for (final ref in relatedRefs) {
-    final key = _nodeKey(ref);
-    if (used.contains(key)) continue;
-
-    final openIndex = nextOpenIndex();
-    if (openIndex == -1) break;
-
-    result[openIndex] = ref;
-    used.add(key);
-  }
-
-  // Only if there are NO relationship-linked people at all do we fall back
-  // to slot-bound people.
-  if (relatedRefs.isEmpty) {
-    for (int i = 0; i < slotKeys.length; i++) {
-      final slotRef = _slotRef(slotKeys[i]);
-      if (slotRef != null) {
-        result[i] = slotRef;
+      if (hintedIndex != -1 && result[hintedIndex] == null) {
+        result[hintedIndex] = ref;
+        used.add(key);
       }
     }
-  }
 
-  return result;
-} 
+    // Second priority: place remaining related people left-to-right in open slots.
+    for (final ref in relatedRefs) {
+      final key = _nodeKey(ref);
+      if (used.contains(key)) continue;
+
+      final openIndex = nextOpenIndex();
+      if (openIndex == -1) break;
+
+      result[openIndex] = ref;
+      used.add(key);
+    }
+
+    // Only if there are NO relationship-linked people at all do we fall back
+    // to slot-bound people.
+    if (relatedRefs.isEmpty) {
+      for (int i = 0; i < slotKeys.length; i++) {
+        final slotRef = _slotRef(slotKeys[i]);
+        if (slotRef != null) {
+          result[i] = slotRef;
+        }
+      }
+    }
+
+    return result;
+  }
 
   List<_NodeRef?> _ancestorRefsForDisplay(
     _NodeRef? childRef,
@@ -341,10 +339,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
   ) {
     final slotKeys = _ancestorSlotKeysForNodeFromSlot(childSlotKey);
     final relatedRefs = childRef == null ? <_NodeRef>[] : _parentsOf(childRef);
-    return _refsForDisplaySlots(
-      slotKeys: slotKeys,
-      relatedRefs: relatedRefs,
-    );
+    return _refsForDisplaySlots(slotKeys: slotKeys, relatedRefs: relatedRefs);
   }
 
   List<_NodeRef?> _descendantRefsForDisplay(
@@ -352,11 +347,10 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     String? parentSlotKey,
   ) {
     final slotKeys = _descendantSlotKeysForNodeFromSlot(parentSlotKey);
-    final relatedRefs = parentRef == null ? <_NodeRef>[] : _childrenOf(parentRef);
-    return _refsForDisplaySlots(
-      slotKeys: slotKeys,
-      relatedRefs: relatedRefs,
-    );
+    final relatedRefs = parentRef == null
+        ? <_NodeRef>[]
+        : _childrenOf(parentRef);
+    return _refsForDisplaySlots(slotKeys: slotKeys, relatedRefs: relatedRefs);
   }
 
   String _slotHintForNode(_NodeRef ref) {
@@ -407,23 +401,25 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     final idx = ordered.indexOf(slot);
     return idx == -1 ? 999 : idx;
   }
-void _putSlotFromGlobalIfMissing(
-  Map<String, Map<String, dynamic>> visible,
-  Map<String, Map<String, dynamic>> global,
-  String slotKey, {
-  required Map<String, dynamic> viewer,
-}) {
-  if (visible.containsKey(slotKey)) return;
 
-  final person = global[slotKey];
-  if (person == null) return;
+  void _putSlotFromGlobalIfMissing(
+    Map<String, Map<String, dynamic>> visible,
+    Map<String, Map<String, dynamic>> global,
+    String slotKey, {
+    required Map<String, dynamic> viewer,
+  }) {
+    if (visible.containsKey(slotKey)) return;
 
-  visible[slotKey] = {
-    ...person,
-    '__viewer_relation_slot': slotKey,
-    '__viewer_person_id': viewer['id'],
-  };
-}
+    final person = global[slotKey];
+    if (person == null) return;
+
+    visible[slotKey] = {
+      ...person,
+      '__viewer_relation_slot': slotKey,
+      '__viewer_person_id': viewer['id'],
+    };
+  }
+
   void _sortNodeRefs(List<_NodeRef> refs) {
     refs.sort((a, b) {
       final slotA = _slotHintForNode(a);
@@ -443,7 +439,6 @@ void _putSlotFromGlobalIfMissing(
       return nameA.compareTo(nameB);
     });
   }
-
 
   List<String?> _ancestorSlotKeysForNodeFromSlot(String? slot) {
     switch ((slot ?? '').trim()) {
@@ -537,20 +532,16 @@ void _putSlotFromGlobalIfMissing(
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => VaultHomeScreen(
-            vaultId: vaultId,
-            vaultName: vaultName,
-          ),
+          builder: (_) =>
+              VaultHomeScreen(vaultId: vaultId, vaultName: vaultName),
         ),
       );
     } else {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => VaultReadOnlyScreen(
-            vaultId: vaultId,
-            vaultName: vaultName,
-          ),
+          builder: (_) =>
+              VaultReadOnlyScreen(vaultId: vaultId, vaultName: vaultName),
         ),
       );
     }
@@ -865,158 +856,155 @@ void _putSlotFromGlobalIfMissing(
   }
 
   Future<_AncestorViewModel> _buildAncestorViewModel() async {
-  final explicitRoot = _explicitRootNodeRef();
+    final explicitRoot = _explicitRootNodeRef();
 
-  _NodeRef? focusRef;
-  String focusFallback = widget.rootLabel;
+    _NodeRef? focusRef;
+    String focusFallback = widget.rootLabel;
 
-  if (explicitRoot != null) {
-    focusRef = explicitRoot;
-  } else {
-    focusRef = _rootNodeRefFromSlot();
-  }
+    if (explicitRoot != null) {
+      focusRef = explicitRoot;
+    } else {
+      focusRef = _rootNodeRefFromSlot();
+    }
 
-  final focusPerson = focusRef == null ? null : _personForNode(focusRef);
-  final generations = <_AncestorGeneration>[];
+    final focusPerson = focusRef == null ? null : _personForNode(focusRef);
+    final generations = <_AncestorGeneration>[];
 
-  final firstGenSlotKeys =
-      _ancestorSlotKeysForNodeFromSlot(widget.rootSlotKey);
-  final firstGenRefs = _ancestorRefsForDisplay(
-    focusRef,
-    widget.rootSlotKey,
-  );
-
-  if (firstGenSlotKeys.isNotEmpty) {
-    generations.add(
-      _AncestorGeneration(
-        depth: 1,
-        nodes: List.generate(firstGenSlotKeys.length, (index) {
-          final ref = index < firstGenRefs.length ? firstGenRefs[index] : null;
-          return _AncestorBranchNode(
-            ref: ref,
-            childRefForAdd: focusRef,
-            slotKeyForAdd: firstGenSlotKeys[index],
-          );
-        }),
-      ),
+    final firstGenSlotKeys = _ancestorSlotKeysForNodeFromSlot(
+      widget.rootSlotKey,
     );
-  }
+    final firstGenRefs = _ancestorRefsForDisplay(focusRef, widget.rootSlotKey);
 
-  final secondGenNodes = <_AncestorBranchNode>[];
-  for (int firstIndex = 0; firstIndex < firstGenSlotKeys.length; firstIndex++) {
-    final firstGenRef =
-        firstIndex < firstGenRefs.length ? firstGenRefs[firstIndex] : null;
-    final firstGenSlotKey = firstGenSlotKeys[firstIndex];
-    final parentSlots = _ancestorSlotKeysForNodeFromSlot(firstGenSlotKey);
-    final parentRefs = _ancestorRefsForDisplay(
-      firstGenRef,
-      firstGenSlotKey,
-    );
-
-    for (int i = 0; i < parentSlots.length; i++) {
-      final ref = i < parentRefs.length ? parentRefs[i] : null;
-      secondGenNodes.add(
-        _AncestorBranchNode(
-          ref: ref,
-          childRefForAdd: firstGenRef,
-          slotKeyForAdd: parentSlots[i],
+    if (firstGenSlotKeys.isNotEmpty) {
+      generations.add(
+        _AncestorGeneration(
+          depth: 1,
+          nodes: List.generate(firstGenSlotKeys.length, (index) {
+            final ref = index < firstGenRefs.length
+                ? firstGenRefs[index]
+                : null;
+            return _AncestorBranchNode(
+              ref: ref,
+              childRefForAdd: focusRef,
+              slotKeyForAdd: firstGenSlotKeys[index],
+            );
+          }),
         ),
       );
     }
-  }
 
-  if (secondGenNodes.isNotEmpty) {
-    generations.add(
-      _AncestorGeneration(
-        depth: 2,
-        nodes: secondGenNodes,
-      ),
+    final secondGenNodes = <_AncestorBranchNode>[];
+    for (
+      int firstIndex = 0;
+      firstIndex < firstGenSlotKeys.length;
+      firstIndex++
+    ) {
+      final firstGenRef = firstIndex < firstGenRefs.length
+          ? firstGenRefs[firstIndex]
+          : null;
+      final firstGenSlotKey = firstGenSlotKeys[firstIndex];
+      final parentSlots = _ancestorSlotKeysForNodeFromSlot(firstGenSlotKey);
+      final parentRefs = _ancestorRefsForDisplay(firstGenRef, firstGenSlotKey);
+
+      for (int i = 0; i < parentSlots.length; i++) {
+        final ref = i < parentRefs.length ? parentRefs[i] : null;
+        secondGenNodes.add(
+          _AncestorBranchNode(
+            ref: ref,
+            childRefForAdd: firstGenRef,
+            slotKeyForAdd: parentSlots[i],
+          ),
+        );
+      }
+    }
+
+    if (secondGenNodes.isNotEmpty) {
+      generations.add(_AncestorGeneration(depth: 2, nodes: secondGenNodes));
+    }
+
+    return _AncestorViewModel(
+      focusPerson: focusPerson,
+      focusFallback: focusFallback,
+      generations: generations,
     );
   }
-
-  return _AncestorViewModel(
-    focusPerson: focusPerson,
-    focusFallback: focusFallback,
-    generations: generations,
-  );
-}
 
   Future<_DescendantViewModel> _buildDescendantViewModel() async {
-  final explicitRoot = _explicitRootNodeRef();
+    final explicitRoot = _explicitRootNodeRef();
 
-  _NodeRef? focusRef;
-  String focusFallback = widget.rootLabel;
+    _NodeRef? focusRef;
+    String focusFallback = widget.rootLabel;
 
-  if (explicitRoot != null) {
-    focusRef = explicitRoot;
-  } else {
-    focusRef = _rootNodeRefFromSlot();
-  }
+    if (explicitRoot != null) {
+      focusRef = explicitRoot;
+    } else {
+      focusRef = _rootNodeRefFromSlot();
+    }
 
-  final focusPerson = focusRef == null ? null : _personForNode(focusRef);
-  final generations = <_DescendantGeneration>[];
+    final focusPerson = focusRef == null ? null : _personForNode(focusRef);
+    final generations = <_DescendantGeneration>[];
 
-  final firstGenSlotKeys =
-      _descendantSlotKeysForNodeFromSlot(widget.rootSlotKey);
-  final firstGenRefs = _descendantRefsForDisplay(
-    focusRef,
-    widget.rootSlotKey,
-  );
-
-  if (firstGenSlotKeys.isNotEmpty) {
-    generations.add(
-      _DescendantGeneration(
-        depth: 1,
-        nodes: List.generate(firstGenSlotKeys.length, (index) {
-          final ref = index < firstGenRefs.length ? firstGenRefs[index] : null;
-          return _DescendantBranchNode(
-            ref: ref,
-            parentRefForAdd: focusRef,
-            slotKeyForAdd: firstGenSlotKeys[index],
-          );
-        }),
-      ),
+    final firstGenSlotKeys = _descendantSlotKeysForNodeFromSlot(
+      widget.rootSlotKey,
     );
-  }
-
-  final secondGenNodes = <_DescendantBranchNode>[];
-  for (int firstIndex = 0; firstIndex < firstGenSlotKeys.length; firstIndex++) {
-    final firstGenRef =
-        firstIndex < firstGenRefs.length ? firstGenRefs[firstIndex] : null;
-    final firstGenSlotKey = firstGenSlotKeys[firstIndex];
-    final childSlots = _descendantSlotKeysForNodeFromSlot(firstGenSlotKey);
-    final childRefs = _descendantRefsForDisplay(
-      firstGenRef,
-      firstGenSlotKey,
+    final firstGenRefs = _descendantRefsForDisplay(
+      focusRef,
+      widget.rootSlotKey,
     );
 
-    for (int i = 0; i < childSlots.length; i++) {
-      final ref = i < childRefs.length ? childRefs[i] : null;
-      secondGenNodes.add(
-        _DescendantBranchNode(
-          ref: ref,
-          parentRefForAdd: firstGenRef,
-          slotKeyForAdd: childSlots[i],
+    if (firstGenSlotKeys.isNotEmpty) {
+      generations.add(
+        _DescendantGeneration(
+          depth: 1,
+          nodes: List.generate(firstGenSlotKeys.length, (index) {
+            final ref = index < firstGenRefs.length
+                ? firstGenRefs[index]
+                : null;
+            return _DescendantBranchNode(
+              ref: ref,
+              parentRefForAdd: focusRef,
+              slotKeyForAdd: firstGenSlotKeys[index],
+            );
+          }),
         ),
       );
     }
-  }
 
-  if (secondGenNodes.isNotEmpty) {
-    generations.add(
-      _DescendantGeneration(
-        depth: 2,
-        nodes: secondGenNodes,
-      ),
+    final secondGenNodes = <_DescendantBranchNode>[];
+    for (
+      int firstIndex = 0;
+      firstIndex < firstGenSlotKeys.length;
+      firstIndex++
+    ) {
+      final firstGenRef = firstIndex < firstGenRefs.length
+          ? firstGenRefs[firstIndex]
+          : null;
+      final firstGenSlotKey = firstGenSlotKeys[firstIndex];
+      final childSlots = _descendantSlotKeysForNodeFromSlot(firstGenSlotKey);
+      final childRefs = _descendantRefsForDisplay(firstGenRef, firstGenSlotKey);
+
+      for (int i = 0; i < childSlots.length; i++) {
+        final ref = i < childRefs.length ? childRefs[i] : null;
+        secondGenNodes.add(
+          _DescendantBranchNode(
+            ref: ref,
+            parentRefForAdd: firstGenRef,
+            slotKeyForAdd: childSlots[i],
+          ),
+        );
+      }
+    }
+
+    if (secondGenNodes.isNotEmpty) {
+      generations.add(_DescendantGeneration(depth: 2, nodes: secondGenNodes));
+    }
+
+    return _DescendantViewModel(
+      focusPerson: focusPerson,
+      focusFallback: focusFallback,
+      generations: generations,
     );
   }
-
-  return _DescendantViewModel(
-    focusPerson: focusPerson,
-    focusFallback: focusFallback,
-    generations: generations,
-  );
-}
 
   String _generationTitle(int depth) {
     if (depth == 1) return 'One generation further back';
@@ -1053,10 +1041,7 @@ void _putSlotFromGlobalIfMissing(
   String _generateInviteCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     final random = Random.secure();
-    return List.generate(
-      10,
-      (_) => chars[random.nextInt(chars.length)],
-    ).join();
+    return List.generate(10, (_) => chars[random.nextInt(chars.length)]).join();
   }
 
   Future<String> _createUniqueInviteCode() async {
@@ -1070,7 +1055,9 @@ void _putSlotFromGlobalIfMissing(
 
       if (exists == null) return code;
     }
-    throw Exception('Could not generate a unique invite code. Please try again.');
+    throw Exception(
+      'Could not generate a unique invite code. Please try again.',
+    );
   }
 
   Future<void> _createAncestorInvite({
@@ -1186,9 +1173,9 @@ void _putSlotFromGlobalIfMissing(
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Invite failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));
     }
   }
 
@@ -1305,9 +1292,9 @@ void _putSlotFromGlobalIfMissing(
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Invite failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));
     }
   }
 
@@ -1438,15 +1425,19 @@ void _putSlotFromGlobalIfMissing(
 
                       if (birthYearController.text.trim().isNotEmpty &&
                           birthYear == null) {
-                        setInner(() =>
-                            errorText = 'Birth year must be a valid number.');
+                        setInner(
+                          () =>
+                              errorText = 'Birth year must be a valid number.',
+                        );
                         return;
                       }
 
                       if (deathYearController.text.trim().isNotEmpty &&
                           deathYear == null) {
-                        setInner(() =>
-                            errorText = 'Death year must be a valid number.');
+                        setInner(
+                          () =>
+                              errorText = 'Death year must be a valid number.',
+                        );
                         return;
                       }
 
@@ -1472,8 +1463,9 @@ void _putSlotFromGlobalIfMissing(
                                 'family_id': widget.familyId,
                                 'slot_key': slotKey,
                                 'name': name,
-                                'display_name':
-                                    displayName.isEmpty ? null : displayName,
+                                'display_name': displayName.isEmpty
+                                    ? null
+                                    : displayName,
                                 'birth_year': birthYear,
                                 'death_year': deathYear,
                                 'created_by': uid,
@@ -1482,8 +1474,9 @@ void _putSlotFromGlobalIfMissing(
                               .select('id')
                               .maybeSingle();
 
-                          createdLegacyId =
-                              (inserted?['id'] ?? '').toString().trim();
+                          createdLegacyId = (inserted?['id'] ?? '')
+                              .toString()
+                              .trim();
                         } else {
                           final legacyId = await _supabase.rpc(
                             'create_legacy_relative',
@@ -1493,16 +1486,16 @@ void _putSlotFromGlobalIfMissing(
                               'p_anchor_id': childRef.id,
                               'p_relation': 'parent',
                               'p_name': name,
-                              'p_display_name':
-                                  displayName.isEmpty ? null : displayName,
+                              'p_display_name': displayName.isEmpty
+                                  ? null
+                                  : displayName,
                               'p_birth_year': birthYear,
                               'p_death_year': deathYear,
                               'p_about_me_text': about.isEmpty ? null : about,
                             },
                           );
 
-                          createdLegacyId =
-                              (legacyId ?? '').toString().trim();
+                          createdLegacyId = (legacyId ?? '').toString().trim();
 
                           if (createdLegacyId.isNotEmpty &&
                               slotKey != null &&
@@ -1672,15 +1665,19 @@ void _putSlotFromGlobalIfMissing(
 
                       if (birthYearController.text.trim().isNotEmpty &&
                           birthYear == null) {
-                        setInner(() =>
-                            errorText = 'Birth year must be a valid number.');
+                        setInner(
+                          () =>
+                              errorText = 'Birth year must be a valid number.',
+                        );
                         return;
                       }
 
                       if (deathYearController.text.trim().isNotEmpty &&
                           deathYear == null) {
-                        setInner(() =>
-                            errorText = 'Death year must be a valid number.');
+                        setInner(
+                          () =>
+                              errorText = 'Death year must be a valid number.',
+                        );
                         return;
                       }
 
@@ -1706,8 +1703,9 @@ void _putSlotFromGlobalIfMissing(
                                 'family_id': widget.familyId,
                                 'slot_key': slotKey,
                                 'name': name,
-                                'display_name':
-                                    displayName.isEmpty ? null : displayName,
+                                'display_name': displayName.isEmpty
+                                    ? null
+                                    : displayName,
                                 'birth_year': birthYear,
                                 'death_year': deathYear,
                                 'created_by': uid,
@@ -1716,8 +1714,9 @@ void _putSlotFromGlobalIfMissing(
                               .select('id')
                               .maybeSingle();
 
-                          createdLegacyId =
-                              (inserted?['id'] ?? '').toString().trim();
+                          createdLegacyId = (inserted?['id'] ?? '')
+                              .toString()
+                              .trim();
                         } else {
                           final legacyId = await _supabase.rpc(
                             'create_legacy_relative',
@@ -1727,16 +1726,16 @@ void _putSlotFromGlobalIfMissing(
                               'p_anchor_id': parentRef.id,
                               'p_relation': 'child',
                               'p_name': name,
-                              'p_display_name':
-                                  displayName.isEmpty ? null : displayName,
+                              'p_display_name': displayName.isEmpty
+                                  ? null
+                                  : displayName,
                               'p_birth_year': birthYear,
                               'p_death_year': deathYear,
                               'p_about_me_text': about.isEmpty ? null : about,
                             },
                           );
 
-                          createdLegacyId =
-                              (legacyId ?? '').toString().trim();
+                          createdLegacyId = (legacyId ?? '').toString().trim();
 
                           if (createdLegacyId.isNotEmpty &&
                               slotKey != null &&
@@ -1819,7 +1818,9 @@ void _putSlotFromGlobalIfMissing(
                   child: Icon(Icons.person_add_alt_1),
                 ),
                 title: const Text('Invite relative'),
-                subtitle: const Text('Create an invite linked as a parent here'),
+                subtitle: const Text(
+                  'Create an invite linked as a parent here',
+                ),
                 onTap: () {
                   Navigator.pop(ctx);
                   _createAncestorInvite(
@@ -1835,8 +1836,9 @@ void _putSlotFromGlobalIfMissing(
                   child: Icon(Icons.history_edu_outlined),
                 ),
                 title: const Text('Add legacy predecessor'),
-                subtitle:
-                    const Text('Create a family-owned ancestor profile here'),
+                subtitle: const Text(
+                  'Create a family-owned ancestor profile here',
+                ),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showLegacyAncestorDialog(
@@ -1907,8 +1909,9 @@ void _putSlotFromGlobalIfMissing(
                   child: Icon(Icons.history_edu_outlined),
                 ),
                 title: const Text('Add legacy descendant'),
-                subtitle:
-                    const Text('Create a family-owned descendant profile here'),
+                subtitle: const Text(
+                  'Create a family-owned descendant profile here',
+                ),
                 onTap: () {
                   Navigator.pop(ctx);
                   _showLegacyDescendantDialog(
@@ -1999,15 +2002,18 @@ void _putSlotFromGlobalIfMissing(
                               if (person == null) {
                                 return _MiniBranchAddCard(
                                   label: 'Add ancestor',
-                                  onTap: (node.childRefForAdd == null &&
+                                  onTap:
+                                      (node.childRefForAdd == null &&
                                           (node.slotKeyForAdd == null ||
-                                              node.slotKeyForAdd!.trim().isEmpty))
+                                              node.slotKeyForAdd!
+                                                  .trim()
+                                                  .isEmpty))
                                       ? null
                                       : () => _openAncestorAddOptions(
-                                            childRef: node.childRefForAdd,
-                                            title: 'Ancestor',
-                                            slotKey: node.slotKeyForAdd,
-                                          ),
+                                          childRef: node.childRefForAdd,
+                                          title: 'Ancestor',
+                                          slotKey: node.slotKeyForAdd,
+                                        ),
                                 );
                               }
 
@@ -2111,15 +2117,18 @@ void _putSlotFromGlobalIfMissing(
                               if (person == null) {
                                 return _MiniBranchAddCard(
                                   label: 'Add descendant',
-                                  onTap: (node.parentRefForAdd == null &&
+                                  onTap:
+                                      (node.parentRefForAdd == null &&
                                           (node.slotKeyForAdd == null ||
-                                              node.slotKeyForAdd!.trim().isEmpty))
+                                              node.slotKeyForAdd!
+                                                  .trim()
+                                                  .isEmpty))
                                       ? null
                                       : () => _openDescendantAddOptions(
-                                            parentRef: node.parentRefForAdd,
-                                            title: 'Descendant',
-                                            slotKey: node.slotKeyForAdd,
-                                          ),
+                                          parentRef: node.parentRefForAdd,
+                                          title: 'Descendant',
+                                          slotKey: node.slotKeyForAdd,
+                                        ),
                                 );
                               }
 
@@ -2131,13 +2140,16 @@ void _putSlotFromGlobalIfMissing(
                                 },
                                 onBranchTap: () async {
                                   final isLegacy = person['__legacy'] == true;
-                                  final personId =
-                                      (person['id'] ?? '').toString().trim();
+                                  final personId = (person['id'] ?? '')
+                                      .toString()
+                                      .trim();
 
                                   final personRef = _nodeRefFromPerson(person);
                                   if (personRef == null) return;
 
-                                  final nextSlotKey = _slotHintForNode(personRef);
+                                  final nextSlotKey = _slotHintForNode(
+                                    personRef,
+                                  );
                                   if (nextSlotKey.isEmpty) return;
 
                                   await Navigator.push(
@@ -2151,10 +2163,12 @@ void _putSlotFromGlobalIfMissing(
                                         ),
                                         rootSlotKey: nextSlotKey,
                                         direction: 'descendant',
-                                        rootNodeType:
-                                            isLegacy ? 'legacy' : 'vault',
-                                        rootNodeId:
-                                            personId.isEmpty ? null : personId,
+                                        rootNodeType: isLegacy
+                                            ? 'legacy'
+                                            : 'vault',
+                                        rootNodeId: personId.isEmpty
+                                            ? null
+                                            : personId,
                                       ),
                                     ),
                                   );
@@ -2205,10 +2219,10 @@ void _putSlotFromGlobalIfMissing(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!))
-              : isAncestor
-                  ? _buildAncestorRelationshipView()
-                  : _buildDescendantRelationshipView(),
+          ? Center(child: Text(_error!))
+          : isAncestor
+          ? _buildAncestorRelationshipView()
+          : _buildDescendantRelationshipView(),
     );
   }
 }
@@ -2241,10 +2255,7 @@ class _BranchIntroCard extends StatelessWidget {
   final String title;
   final String subtitle;
 
-  const _BranchIntroCard({
-    required this.title,
-    required this.subtitle,
-  });
+  const _BranchIntroCard({required this.title, required this.subtitle});
 
   @override
   Widget build(BuildContext context) {
@@ -2260,18 +2271,13 @@ class _BranchIntroCard extends StatelessWidget {
           children: [
             Text(
               title,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-              ),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
               subtitle,
-              style: TextStyle(
-                color: Colors.black.withOpacity(0.65),
-              ),
+              style: TextStyle(color: Colors.black.withOpacity(0.65)),
               textAlign: TextAlign.center,
             ),
           ],
@@ -2292,10 +2298,7 @@ class _BranchSectionTitle extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: Text(
         title,
-        style: const TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w800,
-        ),
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
       ),
     );
   }
@@ -2431,10 +2434,7 @@ class _MiniBranchAddCard extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
 
-  const _MiniBranchAddCard({
-    required this.label,
-    required this.onTap,
-  });
+  const _MiniBranchAddCard({required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -2458,10 +2458,7 @@ class _MiniBranchAddCard extends StatelessWidget {
               CircleAvatar(
                 radius: 22,
                 backgroundColor: Colors.black.withOpacity(0.08),
-                child: Icon(
-                  Icons.add,
-                  color: Colors.black.withOpacity(0.65),
-                ),
+                child: Icon(Icons.add, color: Colors.black.withOpacity(0.65)),
               ),
               const SizedBox(height: 10),
               Text(
@@ -2482,10 +2479,7 @@ class _BranchAvatar extends StatelessWidget {
   final String? url;
   final double radius;
 
-  const _BranchAvatar({
-    required this.url,
-    required this.radius,
-  });
+  const _BranchAvatar({required this.url, required this.radius});
 
   @override
   Widget build(BuildContext context) {
@@ -2527,10 +2521,7 @@ class _NodeRef {
   final String type;
   final String id;
 
-  const _NodeRef({
-    required this.type,
-    required this.id,
-  });
+  const _NodeRef({required this.type, required this.id});
 }
 
 class _AncestorBranchNode {
@@ -2561,18 +2552,12 @@ class _AncestorGeneration {
   final int depth;
   final List<_AncestorBranchNode> nodes;
 
-  const _AncestorGeneration({
-    required this.depth,
-    required this.nodes,
-  });
+  const _AncestorGeneration({required this.depth, required this.nodes});
 }
 
 class _DescendantGeneration {
   final int depth;
   final List<_DescendantBranchNode> nodes;
 
-  const _DescendantGeneration({
-    required this.depth,
-    required this.nodes,
-  });
+  const _DescendantGeneration({required this.depth, required this.nodes});
 }

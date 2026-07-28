@@ -51,6 +51,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   String? _ownerId;
   String? _familyId;
   String? _slotKey;
+  bool _hiddenFromMyFeed = false;
+  bool _updatingFeedPreference = false;
 
   static const String _avatarBucket = 'avatars';
   static const String _featuredPhotosBucket = 'vault_photos';
@@ -335,6 +337,22 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         } catch (_) {}
       }
 
+      var hiddenFromMyFeed = false;
+      final currentUserId = _client.auth.currentUser?.id;
+      if (currentUserId != null) {
+        try {
+          final hiddenRow = await _client
+              .from('family_feed_hidden_vaults')
+              .select('hidden_vault_id')
+              .eq('user_id', currentUserId)
+              .eq('hidden_vault_id', widget.vaultId)
+              .maybeSingle();
+          hiddenFromMyFeed = hiddenRow != null;
+        } catch (_) {
+          // A feed preference should never prevent the vault from opening.
+        }
+      }
+
       final data = await _client
           .from('memories')
           .select(
@@ -350,6 +368,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         _ownerId = ownerId;
         _familyId = familyId;
         _slotKey = slotKey;
+        _hiddenFromMyFeed = hiddenFromMyFeed;
         _avatarUrl = signed;
         _displayName = (dn ?? _vaultName).toString();
         _memories = List<Map<String, dynamic>>.from(data);
@@ -375,6 +394,81 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _toggleFeedPreference() async {
+    if (_updatingFeedPreference) return;
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return;
+    final name = (_displayName ?? _vaultName).trim();
+
+    if (!_hiddenFromMyFeed) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            name.isEmpty ? 'Hide their posts?' : "Hide $name's posts?",
+          ),
+          content: const Text(
+            'Their memories will no longer appear in your Family Feed. '
+            'This only changes your feed, they will not be notified, and '
+            'you can still visit their vault or undo this at any time.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Hide posts'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
+    setState(() => _updatingFeedPreference = true);
+    try {
+      if (_hiddenFromMyFeed) {
+        await _client
+            .from('family_feed_hidden_vaults')
+            .delete()
+            .eq('user_id', userId)
+            .eq('hidden_vault_id', widget.vaultId);
+      } else {
+        await _client.from('family_feed_hidden_vaults').insert({
+          'user_id': userId,
+          'hidden_vault_id': widget.vaultId,
+        });
+      }
+      if (!mounted) return;
+      setState(() => _hiddenFromMyFeed = !_hiddenFromMyFeed);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _hiddenFromMyFeed
+                ? 'Their posts are now hidden from your feed.'
+                : 'Their posts will appear in your feed again.',
+          ),
+        ),
+      );
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update your feed: ${e.message}')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not update your feed. Try again.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _updatingFeedPreference = false);
+      }
     }
   }
 
@@ -1747,6 +1841,26 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                   icon: const Icon(Icons.account_tree_outlined, size: 18),
                   label: const Text('Open branch'),
                 ),
+              OutlinedButton.icon(
+                onPressed: _updatingFeedPreference
+                    ? null
+                    : _toggleFeedPreference,
+                icon: _updatingFeedPreference
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        _hiddenFromMyFeed
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        size: 18,
+                      ),
+                label: Text(
+                  _hiddenFromMyFeed ? 'Show in my feed' : 'Hide from my feed',
+                ),
+              ),
               Chip(
                 avatar: const Icon(Icons.lock_outline, size: 16),
                 label: const Text('View only'),

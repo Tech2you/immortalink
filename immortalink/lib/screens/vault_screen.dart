@@ -69,9 +69,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (created == true) {
       await _loadVaults();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vault created.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vault created.')));
     }
   }
 
@@ -79,15 +79,14 @@ class _VaultsScreenState extends State<VaultsScreen> {
     final vaultId = (v['id'] ?? '').toString().trim();
     final displayName = (v['display_name'] ?? '').toString().trim();
     final name = (v['name'] ?? 'Vault').toString().trim();
-    final vaultName = displayName.isNotEmpty ? displayName : (name.isNotEmpty ? name : 'Vault');
+    final vaultName = displayName.isNotEmpty
+        ? displayName
+        : (name.isNotEmpty ? name : 'Vault');
 
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => VaultHomeScreen(
-          vaultId: vaultId,
-          vaultName: vaultName,
-        ),
+        builder: (_) => VaultHomeScreen(vaultId: vaultId, vaultName: vaultName),
       ),
     );
 
@@ -98,7 +97,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
     final vaultId = (v['id'] ?? '').toString();
     final displayName = (v['display_name'] ?? '').toString().trim();
     final name = (v['name'] ?? 'Vault').toString().trim();
-    final vaultName = displayName.isNotEmpty ? displayName : (name.isNotEmpty ? name : 'Vault');
+    final vaultName = displayName.isNotEmpty
+        ? displayName
+        : (name.isNotEmpty ? name : 'Vault');
 
     final ok = await showDialog<bool>(
       context: context,
@@ -124,20 +125,20 @@ class _VaultsScreenState extends State<VaultsScreen> {
       await _client.from('vaults').delete().eq('id', vaultId);
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Deleted "$vaultName".')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Deleted "$vaultName".')));
       await _loadVaults();
     } on PostgrestException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete failed: ${e.message}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: ${e.message}')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
     }
   }
 
@@ -170,79 +171,83 @@ class _VaultsScreenState extends State<VaultsScreen> {
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _error != null
-                    ? ListView(
-                        children: [
-                          const SizedBox(height: 80),
-                          Center(
-                            child: Text(
-                              'Load failed: $_error',
-                              textAlign: TextAlign.center,
+                ? ListView(
+                    children: [
+                      const SizedBox(height: 80),
+                      Center(
+                        child: Text(
+                          'Load failed: $_error',
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Center(
+                        child: OutlinedButton.icon(
+                          onPressed: _loadVaults,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Try again'),
+                        ),
+                      ),
+                    ],
+                  )
+                : _vaults.isEmpty
+                ? ListView(
+                    children: [
+                      const SizedBox(height: 90),
+                      Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('No vaults yet.'),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              onPressed: _openCreateVault,
+                              child: const Text('Create your first vault'),
                             ),
-                          ),
-                          const SizedBox(height: 14),
-                          Center(
-                            child: OutlinedButton.icon(
-                              onPressed: _loadVaults,
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Try again'),
-                            ),
-                          ),
-                        ],
-                      )
-                    : _vaults.isEmpty
-                        ? ListView(
-                            children: [
-                              const SizedBox(height: 90),
-                              Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Text('No vaults yet.'),
-                                    const SizedBox(height: 12),
-                                    ElevatedButton(
-                                      onPressed: _openCreateVault,
-                                      child: const Text('Create your first vault'),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          )
-                        : ListView.separated(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            itemCount: _vaults.length,
-                            separatorBuilder: (_, __) => const Divider(),
-                            itemBuilder: (context, index) {
-                              final v = _vaults[index];
-                              final displayName = (v['display_name'] ?? '').toString().trim();
-                              final name = (v['name'] ?? 'Vault').toString().trim();
-                              final title = displayName.isNotEmpty ? displayName : (name.isNotEmpty ? name : 'Vault');
-                              final createdAt = (v['created_at'] ?? '').toString();
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    itemCount: _vaults.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (context, index) {
+                      final v = _vaults[index];
+                      final displayName = (v['display_name'] ?? '')
+                          .toString()
+                          .trim();
+                      final name = (v['name'] ?? 'Vault').toString().trim();
+                      final title = displayName.isNotEmpty
+                          ? displayName
+                          : (name.isNotEmpty ? name : 'Vault');
+                      final createdAt = (v['created_at'] ?? '').toString();
 
-                              return ListTile(
-                                tileColor: tileBg,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                title: Text(title),
-                                subtitle: Text(
-                                  createdAt.isEmpty ? '' : 'Created: $createdAt',
-                                ),
-                                onTap: () => _openVault(v),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Delete vault',
-                                      icon: const Icon(Icons.delete_outline),
-                                      onPressed: () => _deleteVault(v),
-                                    ),
-                                    const Icon(Icons.chevron_right),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
+                      return ListTile(
+                        tileColor: tileBg,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        title: Text(title),
+                        subtitle: Text(
+                          createdAt.isEmpty ? '' : 'Created: $createdAt',
+                        ),
+                        onTap: () => _openVault(v),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Delete vault',
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: () => _deleteVault(v),
+                            ),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
         ),
       ),
