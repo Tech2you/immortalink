@@ -630,6 +630,98 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     });
   }
 
+  Future<void> _insertSpouseRelationship({
+    required String firstType,
+    required String firstId,
+    required String secondType,
+    required String secondId,
+  }) async {
+    await _supabase.from('family_relationships').insert({
+      'family_id': widget.familyId,
+      'parent_type': firstType,
+      'parent_id': firstId,
+      'child_type': secondType,
+      'child_id': secondId,
+      'relationship_kind': 'spouse',
+    });
+  }
+
+  Future<List<_TreePerson>?> _choosePartnersForParent({
+    required _TreePerson focus,
+    required String parentName,
+  }) async {
+    final existingParents = _parentsOf(focus);
+    if (existingParents.isEmpty) return <_TreePerson>[];
+    if (!mounted) return null;
+
+    final selected = <String>{};
+    final selectedKeys = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text('Who is $parentName partnered with?'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Select any existing parent who is or was this '
+                    'parent’s spouse or partner.',
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1E8F6),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Text(
+                      'Only selected people receive a spouse link. Leave '
+                      'everyone unselected if these parents were not partners.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final parent in existingParents)
+                    CheckboxListTile(
+                      value: selected.contains(parent.key),
+                      title: Text(parent.name),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          if (value == true) {
+                            selected.add(parent.key);
+                          } else {
+                            selected.remove(parent.key);
+                          }
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, {...selected}),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (selectedKeys == null) return null;
+    return existingParents
+        .where((parent) => selectedKeys.contains(parent.key))
+        .toList();
+  }
+
   Future<void> _chooseChildrenForSpouse({
     required _TreePerson focus,
     required String spouseType,
@@ -987,6 +1079,15 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         if (siblingParents == null || siblingParents.isEmpty) return;
       }
 
+      List<_TreePerson>? parentPartners;
+      if (kind == _RelativeKind.parent) {
+        parentPartners = await _choosePartnersForParent(
+          focus: focus,
+          parentName: 'the invited parent',
+        );
+        if (parentPartners == null) return;
+      }
+
       final inserted = await _supabase
           .from('family_invites')
           .insert({
@@ -1050,6 +1151,17 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
             parentId: parent.id,
             childType: 'invite',
             childId: inviteId,
+          );
+        }
+      }
+
+      if (kind == _RelativeKind.parent) {
+        for (final partner in parentPartners ?? const <_TreePerson>[]) {
+          await _insertSpouseRelationship(
+            firstType: 'invite',
+            firstId: inviteId,
+            secondType: partner.type,
+            secondId: partner.id,
           );
         }
       }
@@ -1264,6 +1376,17 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                         if (!dialogContext.mounted) return;
                       }
 
+                      List<_TreePerson>? parentPartners;
+                      if (kind == _RelativeKind.parent) {
+                        final displayName = displayNameController.text.trim();
+                        parentPartners = await _choosePartnersForParent(
+                          focus: focus,
+                          parentName: displayName.isEmpty ? name : displayName,
+                        );
+                        if (parentPartners == null) return;
+                        if (!dialogContext.mounted) return;
+                      }
+
                       setDialogState(() {
                         saving = true;
                         error = null;
@@ -1317,6 +1440,17 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                               parentId: parent.id,
                               childType: 'legacy',
                               childId: createdId,
+                            );
+                          }
+                        }
+                        if (kind == _RelativeKind.parent) {
+                          for (final partner
+                              in parentPartners ?? const <_TreePerson>[]) {
+                            await _insertSpouseRelationship(
+                              firstType: 'legacy',
+                              firstId: createdId,
+                              secondType: partner.type,
+                              secondId: partner.id,
                             );
                           }
                         }
