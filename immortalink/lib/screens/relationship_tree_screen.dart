@@ -498,51 +498,15 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     return List.generate(10, (_) => chars[random.nextInt(chars.length)]).join();
   }
 
-  Future<_TreePerson> _ensureSiblingParent(_TreePerson focus) async {
-    final parents = _parentsOf(focus);
-    if (parents.isNotEmpty) return parents.first;
-
-    final id = await _supabase.rpc(
-      'create_legacy_relative',
-      params: {
-        'p_family_id': widget.familyId,
-        'p_anchor_type': focus.type,
-        'p_anchor_id': focus.id,
-        'p_relation': 'parent',
-        'p_name': 'Parent not added yet',
-        'p_display_name': 'Parent not added yet',
-        'p_birth_year': null,
-        'p_death_year': null,
-        'p_about_me_text':
-            'Placeholder created to preserve a sibling relationship.',
-      },
-    );
-    final placeholderId = (id ?? '').toString().trim();
-    if (placeholderId.isEmpty) {
-      throw Exception('Could not create the missing-parent placeholder.');
-    }
-    return _TreePerson(
-      type: 'legacy',
-      id: placeholderId,
-      name: 'Parent not added yet',
-      ownerId: null,
-      slotKey: null,
-      avatarUrl: null,
-      isPlaceholder: true,
-    );
-  }
-
   Future<List<_TreePerson>?> _chooseParentsForSibling({
     required _TreePerson focus,
     required String siblingName,
   }) async {
     final parents = _parentsOf(focus);
-    if (parents.isEmpty) {
-      return <_TreePerson>[await _ensureSiblingParent(focus)];
-    }
     if (!mounted) return null;
 
     final selectedParentKeys = <String>{};
+    var siblingOnly = parents.isEmpty;
     final selectedKeys = await showDialog<Set<String>>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -556,8 +520,8 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Select one parent for a half-sibling, or both parents '
-                    'for a full sibling.',
+                    'Select shared parents for a half- or full sibling, or '
+                    'keep this as a sibling-only connection.',
                   ),
                   const SizedBox(height: 10),
                   Container(
@@ -567,11 +531,27 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: const Text(
-                      'Only the selected parents will be linked to this '
-                      'sibling.',
+                      'Only selected parents will be linked. A sibling-only '
+                      'connection leaves parent lineage unconnected.',
                     ),
                   ),
                   const SizedBox(height: 8),
+                  CheckboxListTile(
+                    value: siblingOnly,
+                    title: const Text('Sibling only (no parent lineage)'),
+                    subtitle: const Text(
+                      'Keep the sibling connection without linking either '
+                      'person to a parent.',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    contentPadding: EdgeInsets.zero,
+                    onChanged: (checked) {
+                      setDialogState(() {
+                        siblingOnly = checked == true;
+                        if (siblingOnly) selectedParentKeys.clear();
+                      });
+                    },
+                  ),
                   for (final parent in parents)
                     CheckboxListTile(
                       value: selectedParentKeys.contains(parent.key),
@@ -581,6 +561,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                       onChanged: (checked) {
                         setDialogState(() {
                           if (checked == true) {
+                            siblingOnly = false;
                             selectedParentKeys.add(parent.key);
                           } else {
                             selectedParentKeys.remove(parent.key);
@@ -598,7 +579,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: selectedParentKeys.isEmpty
+              onPressed: !siblingOnly && selectedParentKeys.isEmpty
                   ? null
                   : () => Navigator.pop(dialogContext, {...selectedParentKeys}),
               child: const Text('Continue'),
@@ -608,7 +589,8 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       ),
     );
 
-    if (selectedKeys == null || selectedKeys.isEmpty) return null;
+    if (selectedKeys == null) return null;
+    if (selectedKeys.isEmpty) return <_TreePerson>[];
     return parents
         .where((parent) => selectedKeys.contains(parent.key))
         .toList();
@@ -1076,7 +1058,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           focus: focus,
           siblingName: 'the invited sibling',
         );
-        if (siblingParents == null || siblingParents.isEmpty) return;
+        if (siblingParents == null) return;
       }
 
       List<_TreePerson>? parentPartners;
@@ -1128,11 +1110,17 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           secondId = inviteId;
           relationshipKind = 'spouse';
         case _RelativeKind.sibling:
-          final parent = siblingParents!.first;
-          firstType = parent.type;
-          firstId = parent.id;
           secondType = 'invite';
           secondId = inviteId;
+          if (siblingParents!.isEmpty) {
+            firstType = focus.type;
+            firstId = focus.id;
+            relationshipKind = 'sibling';
+          } else {
+            final parent = siblingParents.first;
+            firstType = parent.type;
+            firstId = parent.id;
+          }
       }
 
       await _supabase.from('family_relationships').insert({
@@ -1370,7 +1358,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                           focus: focus,
                           siblingName: displayName.isEmpty ? name : displayName,
                         );
-                        if (siblingParents == null || siblingParents.isEmpty) {
+                        if (siblingParents == null) {
                           return;
                         }
                         if (!dialogContext.mounted) return;
@@ -1395,8 +1383,13 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                       try {
                         var anchor = focus;
                         var createKind = kind;
-                        if (kind == _RelativeKind.sibling) {
+                        final siblingOnly =
+                            kind == _RelativeKind.sibling &&
+                            siblingParents!.isEmpty;
+                        if (kind == _RelativeKind.sibling && !siblingOnly) {
                           anchor = siblingParents!.first;
+                          createKind = _RelativeKind.child;
+                        } else if (siblingOnly) {
                           createKind = _RelativeKind.child;
                         } else if (grandchildWithMissingParent) {
                           anchor = await _createMissingParentPlaceholder(focus);
@@ -1434,13 +1427,24 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                           );
                         }
                         if (kind == _RelativeKind.sibling) {
-                          for (final parent in siblingParents!.skip(1)) {
-                            await _insertParentChildRelationship(
-                              parentType: parent.type,
-                              parentId: parent.id,
-                              childType: 'legacy',
-                              childId: createdId,
-                            );
+                          if (siblingOnly) {
+                            await _supabase
+                                .from('family_relationships')
+                                .update({'relationship_kind': 'sibling'})
+                                .eq('family_id', widget.familyId)
+                                .eq('parent_type', focus.type)
+                                .eq('parent_id', focus.id)
+                                .eq('child_type', 'legacy')
+                                .eq('child_id', createdId);
+                          } else {
+                            for (final parent in siblingParents!.skip(1)) {
+                              await _insertParentChildRelationship(
+                                parentType: parent.type,
+                                parentId: parent.id,
+                                childType: 'legacy',
+                                childId: createdId,
+                              );
+                            }
                           }
                         }
                         if (kind == _RelativeKind.parent) {
@@ -2027,6 +2031,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     final branchGroupsByRow = <int, List<_FamilyBranch>>{};
     for (final entry in childKeysByParentSet.entries) {
       final parentKeys = parentKeysBySet[entry.key]!;
+      final parentKeySet = parentKeys.toSet();
       final parentPoints = parentKeys
           .map((key) => positionByKey[key]!)
           .toList();
@@ -2045,12 +2050,30 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           }
         }
       }
+      final partnerLines = <_PartnerLine>[];
+      final addedPartnerPairs = <String>{};
+      for (final relationship in _relationships) {
+        if (relationship.kind != 'spouse' ||
+            !parentKeySet.contains(relationship.firstKey) ||
+            !parentKeySet.contains(relationship.secondKey)) {
+          continue;
+        }
+        final pairKeys = [relationship.firstKey, relationship.secondKey]
+          ..sort();
+        if (!addedPartnerPairs.add(pairKeys.join('|'))) continue;
+        final first = positionByKey[relationship.firstKey];
+        final second = positionByKey[relationship.secondKey];
+        if (first != null && second != null) {
+          partnerLines.add(_PartnerLine(first, second));
+        }
+      }
       branchGroupsByRow
           .putIfAbsent(rowKey, () => <_FamilyBranch>[])
           .add(
             _FamilyBranch(
               parents: parentPoints,
               children: childPoints,
+              partnerLines: partnerLines,
               branchOriginX: spouseBranchOrigin?.dx,
             ),
           );
@@ -2434,15 +2457,24 @@ class _CanvasConnection {
   const _CanvasConnection(this.first, this.second);
 }
 
+class _PartnerLine {
+  final Offset first;
+  final Offset second;
+
+  const _PartnerLine(this.first, this.second);
+}
+
 class _FamilyBranch {
   final List<Offset> parents;
   final List<Offset> children;
+  final List<_PartnerLine> partnerLines;
   final double laneOffset;
   final double? branchOriginX;
 
   const _FamilyBranch({
     required this.parents,
     required this.children,
+    required this.partnerLines,
     this.laneOffset = 0,
     this.branchOriginX,
   });
@@ -2450,6 +2482,7 @@ class _FamilyBranch {
   _FamilyBranch withLaneOffset(double value) => _FamilyBranch(
     parents: parents,
     children: children,
+    partnerLines: partnerLines,
     laneOffset: value,
     branchOriginX: branchOriginX,
   );
@@ -2500,20 +2533,33 @@ class _RelationshipLinesPainter extends CustomPainter {
     final barLeft = min(branchOriginX, childXs.reduce(min));
     final barRight = max(branchOriginX, childXs.reduce(max));
 
+    for (final partnerLine in branch.partnerLines) {
+      canvas.drawLine(partnerLine.first, partnerLine.second, paint);
+    }
+
     if (branch.parents.length > 1) {
+      final mergeY = parentY + (branchY - parentY) * 0.45;
       final parentXs = branch.parents.map((point) => point.dx).toList();
+      for (final parent in branch.parents) {
+        canvas.drawLine(parent, Offset(parent.dx, mergeY), paint);
+      }
       canvas.drawLine(
-        Offset(parentXs.reduce(min), parentY),
-        Offset(parentXs.reduce(max), parentY),
+        Offset(parentXs.reduce(min), mergeY),
+        Offset(parentXs.reduce(max), mergeY),
+        paint,
+      );
+      canvas.drawLine(
+        Offset(branchOriginX, mergeY),
+        Offset(branchOriginX, branchY),
+        paint,
+      );
+    } else {
+      canvas.drawLine(
+        Offset(branchOriginX, parentY),
+        Offset(branchOriginX, branchY),
         paint,
       );
     }
-
-    canvas.drawLine(
-      Offset(branchOriginX, parentY),
-      Offset(branchOriginX, branchY),
-      paint,
-    );
     if ((barRight - barLeft).abs() > 0.5) {
       canvas.drawLine(
         Offset(barLeft, branchY),
@@ -2740,19 +2786,41 @@ class _MiniMapPainter extends CustomPainter {
       final barLeft = min(branchOriginX, childXs.reduce(min));
       final barRight = max(branchOriginX, childXs.reduce(max));
 
-      if (branch.parents.length > 1) {
-        final parentXs = branch.parents.map((point) => point.dx).toList();
+      for (final partnerLine in branch.partnerLines) {
         canvas.drawLine(
-          mapPoint(Offset(parentXs.reduce(min), parentY)),
-          mapPoint(Offset(parentXs.reduce(max), parentY)),
+          mapPoint(partnerLine.first),
+          mapPoint(partnerLine.second),
           linePaint,
         );
       }
-      canvas.drawLine(
-        mapPoint(Offset(branchOriginX, parentY)),
-        mapPoint(Offset(branchOriginX, branchY)),
-        linePaint,
-      );
+
+      if (branch.parents.length > 1) {
+        final mergeY = parentY + (branchY - parentY) * 0.45;
+        final parentXs = branch.parents.map((point) => point.dx).toList();
+        for (final parent in branch.parents) {
+          canvas.drawLine(
+            mapPoint(parent),
+            mapPoint(Offset(parent.dx, mergeY)),
+            linePaint,
+          );
+        }
+        canvas.drawLine(
+          mapPoint(Offset(parentXs.reduce(min), mergeY)),
+          mapPoint(Offset(parentXs.reduce(max), mergeY)),
+          linePaint,
+        );
+        canvas.drawLine(
+          mapPoint(Offset(branchOriginX, mergeY)),
+          mapPoint(Offset(branchOriginX, branchY)),
+          linePaint,
+        );
+      } else {
+        canvas.drawLine(
+          mapPoint(Offset(branchOriginX, parentY)),
+          mapPoint(Offset(branchOriginX, branchY)),
+          linePaint,
+        );
+      }
       canvas.drawLine(
         mapPoint(Offset(barLeft, branchY)),
         mapPoint(Offset(barRight, branchY)),

@@ -690,9 +690,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
     }
   }
 
-  Future<void> _ensureFamilyAndOpenTree() async {
+  Future<void> _ensureFamilyAndOpenTree({bool createAnother = false}) async {
     final familyId = _activeFamilyId?.trim();
-    if (familyId != null && familyId.isNotEmpty) {
+    if (!createAnother && familyId != null && familyId.isNotEmpty) {
       if (!mounted) return;
       Navigator.push(
         context,
@@ -708,12 +708,14 @@ class _VaultsScreenState extends State<VaultsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Invite your family'),
+        title: Text(
+          createAnother ? 'Create another family' : 'Invite your family',
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'Create your family group first. Next we’ll do slot invites.',
+              'Choose a name for this family. You can invite relatives after it is created.',
             ),
             const SizedBox(height: 12),
             TextField(
@@ -812,7 +814,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: _ensureFamilyAndOpenTree,
+              onPressed: () => _ensureFamilyAndOpenTree(),
               icon: const Icon(Icons.group_add),
               label: const Text('Create your family tree'),
             ),
@@ -878,13 +880,24 @@ class _VaultsScreenState extends State<VaultsScreen> {
               );
             }),
             const Divider(),
-            SizedBox(
-              width: double.infinity,
-              child: TextButton.icon(
-                onPressed: _openJoinFamilyScreen,
-                icon: const Icon(Icons.group_add),
-                label: const Text('Join another family'),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: _openJoinFamilyScreen,
+                    icon: const Icon(Icons.group_add),
+                    label: const Text('Join another family'),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        _ensureFamilyAndOpenTree(createAnother: true),
+                    icon: const Icon(Icons.add_circle_outline),
+                    label: const Text('Create another family'),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
