@@ -1365,7 +1365,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                       }
 
                       List<_TreePerson>? parentPartners;
-                      if (kind == _RelativeKind.parent) {
+                      final isGapLineage = lineagePlaceholderCount > 0;
+
+                      if (kind == _RelativeKind.parent && !isGapLineage) {
                         final displayName = displayNameController.text.trim();
                         parentPartners = await _choosePartnersForParent(
                           focus: focus,
@@ -1393,7 +1395,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                           createKind = _RelativeKind.child;
                         } else if (grandchildWithMissingParent) {
                           anchor = await _createMissingParentPlaceholder(focus);
-                        } else if (lineagePlaceholderCount > 0) {
+                        } else if (isGapLineage) {
                           anchor = await _createLineagePlaceholderChain(
                             focus,
                             kind,
@@ -1447,7 +1449,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                             }
                           }
                         }
-                        if (kind == _RelativeKind.parent) {
+                        if (kind == _RelativeKind.parent && !isGapLineage) {
                           for (final partner
                               in parentPartners ?? const <_TreePerson>[]) {
                             await _insertSpouseRelationship(
@@ -1479,7 +1481,8 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                             childId: createdId,
                             childName: createdName,
                           );
-                        } else if (kind == _RelativeKind.parent) {
+                        } else if (kind == _RelativeKind.parent &&
+                            !isGapLineage) {
                           await _chooseSiblingsForParent(
                             focus: focus,
                             parentType: 'legacy',
@@ -1741,8 +1744,18 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                 subtitle: const Text(
                   'Create placeholders and a legacy profile',
                 ),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(sheetContext);
+                  await Future<void>.delayed(Duration.zero);
+                  final confirmed = await _confirmGapInvite(
+                    focus: focus,
+                    relativeLabel: relativeLabel,
+                    placeholderText: placeholderText,
+                    actionLabel: 'Create legacy $relativeLabel',
+                    subjectVerb: 'Creating this legacy',
+                    branchNoun: 'legacy profile',
+                  );
+                  if (!confirmed) return;
                   _showLegacyDialog(
                     direction,
                     focus,
@@ -1762,6 +1775,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     required _TreePerson focus,
     required String relativeLabel,
     required String placeholderText,
+    String actionLabel = 'Create invite',
+    String subjectVerb = 'Inviting this',
+    String branchNoun = 'invitation',
   }) async {
     if (!mounted) return false;
     return await showDialog<bool>(
@@ -1770,7 +1786,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
             icon: const Icon(Icons.account_tree_outlined),
             title: Text('Create a new gap lineage?'),
             content: Text(
-              'Inviting this $relativeLabel will create $placeholderText from ${focus.name}.\n\nIf the $relativeLabel belongs beneath or above someone already shown, cancel and tap that person’s bubble first so the invitation joins the correct branch.',
+              '$subjectVerb $relativeLabel will create $placeholderText from ${focus.name}.\n\nIf the $relativeLabel belongs beneath or above someone already shown, cancel and tap that person’s bubble first so the $branchNoun joins the correct branch.',
             ),
             actions: [
               TextButton(
@@ -1779,7 +1795,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Create invite'),
+                child: Text(actionLabel),
               ),
             ],
           ),
