@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'family_branch_screen.dart';
 import 'vault_companion_screen.dart';
+import '../utils/web_audio_recorder.dart';
 
 class LegacyVaultScreen extends StatefulWidget {
   final String legacyMemberId;
@@ -23,8 +26,11 @@ class LegacyVaultScreen extends StatefulWidget {
 
 class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   final _supabase = Supabase.instance.client;
+  final WebAudioRecorder _recorder = createWebAudioRecorder();
+  final AudioPlayer _voicePlayer = AudioPlayer();
 
   static const String _photosBucket = 'vault_photos';
+  static const String _memoryVoiceBucket = 'memory_voice';
 
   bool _loading = true;
   bool _savingProfile = false;
@@ -34,6 +40,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   bool _loadingPhotos = true;
   bool _loadingMemories = true;
   bool _loadingMemoryPhotos = true;
+  bool _loadingMemoryVoice = true;
   bool _showExtraDetails = false;
   int _selectedLegacySection = 0;
 
@@ -41,6 +48,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   String? _photoError;
   String? _memoryError;
   String? _memoryPhotoError;
+  String? _memoryVoiceError;
+  String? _playingVoiceKey;
 
   Map<String, dynamic>? _row;
 
@@ -51,6 +60,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   List<Map<String, String>> _photos = [];
   List<Map<String, dynamic>> _memories = [];
   final Map<String, List<Map<String, String>>> _memoryPhotosById = {};
+  final Map<String, List<_LegacyVoiceNote>> _memoryVoiceById = {};
 
   final _nameController = TextEditingController();
   final _displayNameController = TextEditingController();
@@ -61,11 +71,17 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   @override
   void initState() {
     super.initState();
+    _voicePlayer.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _playingVoiceKey = null);
+    });
     _load();
   }
 
   @override
   void dispose() {
+    if (_recorder.isRecording) unawaited(_recorder.cancel());
+    _recorder.dispose();
+    _voicePlayer.dispose();
     _nameController.dispose();
     _displayNameController.dispose();
     _birthYearController.dispose();
@@ -254,6 +270,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     if (lower.endsWith('.png')) return 'png';
     if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'jpg';
     if (lower.endsWith('.webp')) return 'webp';
+    if (lower.endsWith('.m4a')) return 'm4a';
+    if (lower.endsWith('.mp3')) return 'mp3';
+    if (lower.endsWith('.wav')) return 'wav';
+    if (lower.endsWith('.aac')) return 'aac';
+    if (lower.endsWith('.ogg')) return 'ogg';
+    if (lower.endsWith('.webm')) return 'webm';
     return 'jpg';
   }
 
@@ -263,6 +285,18 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         return 'image/png';
       case 'webp':
         return 'image/webp';
+      case 'm4a':
+        return 'audio/mp4';
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'wav':
+        return 'audio/wav';
+      case 'aac':
+        return 'audio/aac';
+      case 'ogg':
+        return 'audio/ogg';
+      case 'webm':
+        return 'audio/webm';
       case 'jpg':
       case 'jpeg':
       default:
@@ -336,6 +370,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _loadPhotos();
       await _loadMemories();
       await _loadMemoryPhotos();
+      await _loadMemoryVoice();
     } on PostgrestException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -455,7 +490,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final rows = await _supabase
           .from('legacy_memories')
           .select(
-            'id, life_stage, prompt_key, prompt_text, body, created_at, updated_at',
+            'id, life_stage, prompt_key, prompt_text, body, created_at, updated_at, memory_date_label, people, location, mood',
           )
           .eq('legacy_member_id', widget.legacyMemberId)
           .eq('family_id', widget.familyId)
@@ -534,6 +569,281 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         _loadingMemoryPhotos = false;
       });
     }
+  }
+
+  String _memoryVoicePrefix(String userId, String memoryId) =>
+      '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/voice';
+
+  String _friendlyVoiceTitle(String storedTitle) {
+    final title = storedTitle.trim();
+    if (title.isEmpty ||
+        RegExp(
+          r'^Recorded \d+\.(webm|m4a|mp3|wav|aac|ogg)$',
+          caseSensitive: false,
+        ).hasMatch(title)) {
+      return 'Voice note';
+    }
+    return title;
+  }
+
+  Future<void> _loadMemoryVoice() async {
+    if (!mounted) return;
+
+    setState(() {
+      _loadingMemoryVoice = true;
+      _memoryVoiceError = null;
+      _memoryVoiceById.clear();
+    });
+
+    try {
+      final rows = await _supabase
+          .from('legacy_memory_voice_notes')
+          .select('id, legacy_memory_id, path, title, created_at')
+          .eq('legacy_member_id', widget.legacyMemberId)
+          .eq('family_id', widget.familyId)
+          .order('created_at', ascending: false);
+
+      final list = (rows as List).cast<Map<String, dynamic>>();
+
+      for (final r in list) {
+        final id = (r['id'] ?? '').toString();
+        final memoryId = (r['legacy_memory_id'] ?? '').toString();
+        final path = (r['path'] ?? '').toString().trim();
+        final title = (r['title'] ?? '').toString().trim();
+        final createdAt = (r['created_at'] ?? '').toString();
+
+        if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
+
+        final url = await _signedUrl(_memoryVoiceBucket, path);
+        if (url == null || url.trim().isEmpty) continue;
+
+        _memoryVoiceById
+            .putIfAbsent(memoryId, () => [])
+            .add(
+              _LegacyVoiceNote(
+                id: id,
+                path: path,
+                title: _friendlyVoiceTitle(title),
+                url: url,
+                createdAt: createdAt,
+              ),
+            );
+      }
+
+      if (!mounted) return;
+      setState(() => _loadingMemoryVoice = false);
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _memoryVoiceError = e.message;
+        _loadingMemoryVoice = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _memoryVoiceError = e.toString();
+        _loadingMemoryVoice = false;
+      });
+    }
+  }
+
+  String _voiceLength(int totalSeconds) {
+    final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  Future<void> _toggleVoice(_LegacyVoiceNote note) async {
+    final key = 'legacy_voice:${note.id}';
+    try {
+      if (_playingVoiceKey == key) {
+        await _voicePlayer.pause();
+        if (mounted) setState(() => _playingVoiceKey = null);
+        return;
+      }
+
+      await _voicePlayer.stop();
+      await _voicePlayer.play(UrlSource(note.url));
+      if (mounted) setState(() => _playingVoiceKey = key);
+    } catch (e) {
+      _toast('Could not play voice note: $e');
+    }
+  }
+
+  Future<void> _togglePendingVoice(
+    List<_LegacyPendingVoice> voices,
+    int index,
+    VoidCallback refresh,
+  ) async {
+    if (index < 0 || index >= voices.length) return;
+
+    final key = 'pending_voice:$index';
+    try {
+      if (_playingVoiceKey == key) {
+        await _voicePlayer.pause();
+        _playingVoiceKey = null;
+        refresh();
+        return;
+      }
+
+      await _voicePlayer.stop();
+      await _voicePlayer.play(
+        BytesSource(Uint8List.fromList(voices[index].audio.bytes)),
+      );
+      _playingVoiceKey = key;
+      refresh();
+    } catch (e) {
+      _toast('Could not play this voice take: $e');
+    }
+  }
+
+  Future<_LegacyPendingVoice?> _recordLegacyVoiceTake() async {
+    if (!_recorder.isSupported) {
+      _toast('Recording is not supported on this device yet.');
+      return null;
+    }
+
+    String? error;
+    int seconds = 0;
+    bool stopping = false;
+    Timer? timer;
+
+    final recorded =
+        await showModalBottomSheet<({RecordedAudio audio, int seconds})>(
+          context: context,
+          isDismissible: false,
+          enableDrag: false,
+          isScrollControlled: true,
+          builder: (sheetContext) => StatefulBuilder(
+            builder: (sheetContext, setSheetState) {
+              Future<void> start() async {
+                if (_recorder.isRecording || stopping || error != null) return;
+                try {
+                  await _recorder.start();
+                  timer = Timer.periodic(const Duration(seconds: 1), (_) {
+                    seconds += 1;
+                    if (sheetContext.mounted) setSheetState(() {});
+                  });
+                } catch (e) {
+                  if (sheetContext.mounted) {
+                    setSheetState(() => error = e.toString());
+                  }
+                }
+              }
+
+              WidgetsBinding.instance.addPostFrameCallback((_) => start());
+              final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
+              final remaining = (seconds % 60).toString().padLeft(2, '0');
+
+              return SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    22,
+                    16,
+                    22,
+                    22 + MediaQuery.of(sheetContext).viewInsets.bottom,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.black26,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      const SizedBox(height: 22),
+                      const Icon(
+                        Icons.graphic_eq,
+                        size: 54,
+                        color: Color(0xFF76558F),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Recording voice note',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Speak naturally. You can listen before preserving it.',
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        '$minutes:$remaining',
+                        style: const TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (error != null) ...[
+                        const SizedBox(height: 12),
+                        Text(error!, style: const TextStyle(color: Colors.red)),
+                      ],
+                      const SizedBox(height: 22),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: stopping
+                                  ? null
+                                  : () async {
+                                      timer?.cancel();
+                                      await _recorder.cancel();
+                                      if (sheetContext.mounted) {
+                                        Navigator.pop(sheetContext);
+                                      }
+                                    },
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: stopping || !_recorder.isRecording
+                                  ? null
+                                  : () async {
+                                      setSheetState(() => stopping = true);
+                                      timer?.cancel();
+                                      try {
+                                        final audio = await _recorder.stop();
+                                        if (sheetContext.mounted) {
+                                          Navigator.pop(sheetContext, (
+                                            audio: audio,
+                                            seconds: seconds,
+                                          ));
+                                        }
+                                      } catch (e) {
+                                        setSheetState(() {
+                                          error = e.toString();
+                                          stopping = false;
+                                        });
+                                      }
+                                    },
+                              icon: const Icon(Icons.stop_circle_outlined),
+                              label: const Text('Stop and keep'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+
+    timer?.cancel();
+    if (recorded == null) return null;
+    return _LegacyPendingVoice(
+      audio: recorded.audio,
+      seconds: recorded.seconds,
+    );
   }
 
   Future<void> _uploadPhoto() async {
@@ -809,104 +1119,53 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   }
 
   Future<void> _openAddMemory() async {
-    final promptController = TextEditingController();
-    final bodyController = TextEditingController();
-    String stage = 'mid';
-
-    final result = await showDialog<Map<String, String>>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setInner) => AlertDialog(
-          title: const Text('Add memory'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: stage,
-                  decoration: const InputDecoration(
-                    labelText: 'Life stage',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'early', child: Text('Early life')),
-                    DropdownMenuItem(value: 'mid', child: Text('Mid life')),
-                    DropdownMenuItem(value: 'late', child: Text('Late life')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setInner(() => stage = v);
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: promptController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Memory title / prompt',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: bodyController,
-                  minLines: 4,
-                  maxLines: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'Memory details',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx, {
-                  'life_stage': stage,
-                  'prompt_text': promptController.text.trim(),
-                  'body': bodyController.text.trim(),
-                });
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
+    final result = await _showLegacyMemoryEditor(
+      title: 'New memory',
+      actionLabel: 'Preserve memory',
     );
 
     if (result == null) return;
 
-    final promptText = (result['prompt_text'] ?? '').trim();
-    final body = (result['body'] ?? '').trim();
-    final lifeStage = (result['life_stage'] ?? 'mid').trim();
+    final promptText = result.promptText.trim();
+    final body = result.body.trim();
+    final lifeStage = result.lifeStage.trim();
+    final mood = result.mood.trim();
+    final when = result.memoryDateLabel.trim();
+    final people = result.people.trim();
+    final location = result.location.trim();
 
-    if (promptText.isEmpty) {
-      _toast('Memory title is required.');
-      return;
-    }
-    if (body.isEmpty) {
-      _toast('Memory details are required.');
+    if (body.isEmpty && result.photos.isEmpty && result.voices.isEmpty) {
+      _toast('Write something, add a photo, or record a voice note first.');
       return;
     }
 
     try {
-      await _supabase.from('legacy_memories').insert({
-        'legacy_member_id': widget.legacyMemberId,
-        'family_id': widget.familyId,
-        'life_stage': lifeStage,
-        'prompt_key': 'legacy_memory',
-        'prompt_text': promptText,
-        'body': body,
-      });
+      final inserted = await _supabase
+          .from('legacy_memories')
+          .insert({
+            'legacy_member_id': widget.legacyMemberId,
+            'family_id': widget.familyId,
+            'life_stage': lifeStage,
+            'prompt_key': 'legacy_memory',
+            'prompt_text': promptText,
+            'body': body,
+            'memory_date_label': when.isEmpty ? null : when,
+            'people': people.isEmpty ? null : people,
+            'location': location.isEmpty ? null : location,
+            'mood': mood.isEmpty ? null : mood,
+          })
+          .select('id')
+          .single();
+
+      final memoryId = (inserted['id'] ?? '').toString();
+      if (memoryId.isEmpty) throw Exception('The memory could not be created.');
+
+      await _uploadPendingMemoryPhotos(memoryId, result.photos);
+      await _uploadPendingMemoryVoice(memoryId, result.voices);
 
       await _loadMemories();
       await _loadMemoryPhotos();
+      await _loadMemoryVoice();
       _toast('Memory added.');
     } on PostgrestException catch (e) {
       _toast('Add memory failed: ${e.message}');
@@ -919,93 +1178,37 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final memoryId = (memory['id'] ?? '').toString();
     if (memoryId.isEmpty) return;
 
-    final promptController = TextEditingController(
-      text: (memory['prompt_text'] ?? '').toString(),
-    );
-    final bodyController = TextEditingController(
-      text: (memory['body'] ?? '').toString(),
-    );
-    String stage = (memory['life_stage'] ?? 'mid').toString();
-
-    final result = await showDialog<Map<String, String>>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setInner) => AlertDialog(
-          title: const Text('Edit memory'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: stage,
-                  decoration: const InputDecoration(
-                    labelText: 'Life stage',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'early', child: Text('Early life')),
-                    DropdownMenuItem(value: 'mid', child: Text('Mid life')),
-                    DropdownMenuItem(value: 'late', child: Text('Late life')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setInner(() => stage = v);
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: promptController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Memory title / prompt',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: bodyController,
-                  minLines: 4,
-                  maxLines: 8,
-                  decoration: const InputDecoration(
-                    labelText: 'Memory details',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx, {
-                  'life_stage': stage,
-                  'prompt_text': promptController.text.trim(),
-                  'body': bodyController.text.trim(),
-                });
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
+    final result = await _showLegacyMemoryEditor(
+      title: 'Edit memory',
+      actionLabel: 'Save changes',
+      memoryId: memoryId,
+      initialStage: (memory['life_stage'] ?? 'mid').toString(),
+      initialPrompt: (memory['prompt_text'] ?? '').toString(),
+      initialBody: (memory['body'] ?? '').toString(),
+      initialMood: (memory['mood'] ?? '').toString(),
+      initialWhen: (memory['memory_date_label'] ?? '').toString(),
+      initialPeople: (memory['people'] ?? '').toString(),
+      initialLocation: (memory['location'] ?? '').toString(),
     );
 
     if (result == null) return;
 
-    final promptText = (result['prompt_text'] ?? '').trim();
-    final body = (result['body'] ?? '').trim();
-    final lifeStage = (result['life_stage'] ?? 'mid').trim();
+    final promptText = result.promptText.trim();
+    final body = result.body.trim();
+    final lifeStage = result.lifeStage.trim();
+    final mood = result.mood.trim();
+    final when = result.memoryDateLabel.trim();
+    final people = result.people.trim();
+    final location = result.location.trim();
 
-    if (promptText.isEmpty) {
-      _toast('Memory title is required.');
-      return;
-    }
-    if (body.isEmpty) {
-      _toast('Memory details are required.');
+    final existingPhotos = _memoryPhotosById[memoryId] ?? [];
+    final existingVoices = _memoryVoiceById[memoryId] ?? [];
+    if (body.isEmpty &&
+        existingPhotos.isEmpty &&
+        existingVoices.isEmpty &&
+        result.photos.isEmpty &&
+        result.voices.isEmpty) {
+      _toast('Write something, add a photo, or record a voice note first.');
       return;
     }
 
@@ -1016,19 +1219,599 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             'life_stage': lifeStage,
             'prompt_text': promptText,
             'body': body,
+            'memory_date_label': when.isEmpty ? null : when,
+            'people': people.isEmpty ? null : people,
+            'location': location.isEmpty ? null : location,
+            'mood': mood.isEmpty ? null : mood,
             'updated_at': DateTime.now().toUtc().toIso8601String(),
           })
           .eq('id', memoryId)
           .eq('legacy_member_id', widget.legacyMemberId)
           .eq('family_id', widget.familyId);
 
+      await _uploadPendingMemoryPhotos(memoryId, result.photos);
+      await _uploadPendingMemoryVoice(memoryId, result.voices);
+
       await _loadMemories();
+      await _loadMemoryPhotos();
+      await _loadMemoryVoice();
       _toast('Memory updated.');
     } on PostgrestException catch (e) {
       _toast('Update failed: ${e.message}');
     } catch (e) {
       _toast('Update failed: $e');
     }
+  }
+
+  Future<_LegacyMemoryEditResult?> _showLegacyMemoryEditor({
+    required String title,
+    required String actionLabel,
+    String? memoryId,
+    String initialStage = 'mid',
+    String initialPrompt = '',
+    String initialBody = '',
+    String initialMood = '',
+    String initialWhen = '',
+    String initialPeople = '',
+    String initialLocation = '',
+  }) async {
+    final promptController = TextEditingController(text: initialPrompt);
+    final bodyController = TextEditingController(text: initialBody);
+    final whenController = TextEditingController(text: initialWhen);
+    final peopleController = TextEditingController(text: initialPeople);
+    final locationController = TextEditingController(text: initialLocation);
+    final pendingPhotos = <_LegacyPendingPhoto>[];
+    final pendingVoices = <_LegacyPendingVoice>[];
+    var stage = initialStage.trim().isEmpty ? 'mid' : initialStage.trim();
+    String? selectedMood = initialMood.trim().isEmpty
+        ? null
+        : initialMood.trim();
+    var showDetails =
+        selectedMood != null ||
+        stage != 'mid' ||
+        whenController.text.trim().isNotEmpty ||
+        peopleController.text.trim().isNotEmpty ||
+        locationController.text.trim().isNotEmpty;
+    final displayName = _titleFromRow(_row);
+    final hasPhoto = (_profilePhotoUrl ?? '').trim().isNotEmpty;
+
+    final result = await showDialog<_LegacyMemoryEditResult>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final existingPhotos = memoryId == null
+              ? const <Map<String, String>>[]
+              : _memoryPhotosById[memoryId] ?? const <Map<String, String>>[];
+          final existingVoices = memoryId == null
+              ? const <_LegacyVoiceNote>[]
+              : _memoryVoiceById[memoryId] ?? const <_LegacyVoiceNote>[];
+
+          _LegacyMemoryEditResult memoryResult() => _LegacyMemoryEditResult(
+            lifeStage: stage,
+            promptText: promptController.text.trim(),
+            body: bodyController.text.trim(),
+            mood: selectedMood ?? '',
+            memoryDateLabel: whenController.text.trim(),
+            people: peopleController.text.trim(),
+            location: locationController.text.trim(),
+            photos: List.unmodifiable(pendingPhotos),
+            voices: List.unmodifiable(pendingVoices),
+          );
+
+          Future<void> pickPendingPhotos() async {
+            try {
+              final picked = await FilePicker.platform.pickFiles(
+                type: FileType.image,
+                allowMultiple: true,
+                withData: true,
+              );
+              if (picked == null) return;
+
+              final selected = picked.files
+                  .where((file) => file.bytes != null)
+                  .map(
+                    (file) => _LegacyPendingPhoto(
+                      name: file.name,
+                      bytes: file.bytes!,
+                      extension: _extFromName(file.name),
+                    ),
+                  )
+                  .toList();
+
+              final available =
+                  10 - existingPhotos.length - pendingPhotos.length;
+              final accepted = selected.take(available).toList();
+              setDialogState(() => pendingPhotos.addAll(accepted));
+
+              if (selected.length > available) {
+                _toast('You can add up to 10 photos to one memory.');
+              }
+            } catch (e) {
+              _toast('Could not add photos: $e');
+            }
+          }
+
+          Future<void> recordPendingVoice() async {
+            final voice = await _recordLegacyVoiceTake();
+            if (voice == null || !dialogContext.mounted) return;
+            setDialogState(() => pendingVoices.add(voice));
+          }
+
+          Future<void> submitMemory() async {
+            if (promptController.text.trim().isNotEmpty) {
+              Navigator.pop(dialogContext, memoryResult());
+              return;
+            }
+
+            final keepUntitled = await showDialog<bool>(
+              context: dialogContext,
+              builder: (confirmContext) => AlertDialog(
+                title: const Text('Preserve without a title?'),
+                content: const Text(
+                  'You can add this memory without a title and let the story speak for itself.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(confirmContext, false),
+                    child: const Text('Add title'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(confirmContext, true),
+                    child: const Text('Preserve without title'),
+                  ),
+                ],
+              ),
+            );
+
+            if (keepUntitled == true && dialogContext.mounted) {
+              Navigator.pop(dialogContext, memoryResult());
+            }
+          }
+
+          return Dialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 18,
+            ),
+            backgroundColor: const Color(0xFFFFF8FF),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 640,
+                maxHeight: MediaQuery.of(dialogContext).size.height * 0.88,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(22, 20, 22, 22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Cancel',
+                          onPressed: () => Navigator.pop(dialogContext),
+                          icon: const Icon(Icons.arrow_back),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 25,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: submitMemory,
+                          child: Text(
+                            actionLabel == 'Preserve memory'
+                                ? 'Preserve'
+                                : 'Save',
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 26,
+                          backgroundImage: hasPhoto
+                              ? NetworkImage(_profilePhotoUrl!)
+                              : null,
+                          child: hasPhoto
+                              ? null
+                              : const Icon(Icons.person_outline),
+                        ),
+                        const SizedBox(width: 13),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                displayName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              Text(
+                                'Saving to this legacy profile',
+                                style: TextStyle(
+                                  color: Colors.black.withValues(alpha: 0.58),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    TextField(
+                      controller: promptController,
+                      maxLines: 1,
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.title),
+                        hintText: 'Title this memory',
+                        filled: true,
+                        fillColor: Colors.white.withValues(alpha: 0.62),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: bodyController,
+                      minLines: 7,
+                      maxLines: 12,
+                      autofocus: initialBody.trim().isEmpty,
+                      decoration: InputDecoration(
+                        hintText:
+                            'What would you like this profile to remember?',
+                        filled: true,
+                        fillColor: const Color(0xFFF4EEF5),
+                        alignLabelWithHint: true,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(22),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: pickPendingPhotos,
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: Text(
+                            pendingPhotos.isEmpty && existingPhotos.isEmpty
+                                ? 'Add photos'
+                                : 'More photos',
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _recorder.isSupported
+                              ? recordPendingVoice
+                              : null,
+                          icon: const Icon(Icons.mic_none),
+                          label: Text(
+                            pendingVoices.isEmpty && existingVoices.isEmpty
+                                ? 'Record voice'
+                                : 'Add another voice note',
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (existingPhotos.isNotEmpty ||
+                        pendingPhotos.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Photos',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 116,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount:
+                              existingPhotos.length + pendingPhotos.length,
+                          separatorBuilder: (_, _) => const SizedBox(width: 10),
+                          itemBuilder: (_, index) {
+                            if (index < existingPhotos.length) {
+                              final photo = existingPhotos[index];
+                              return Stack(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: Image.network(
+                                      photo['url'] ?? '',
+                                      width: 116,
+                                      height: 116,
+                                      fit: BoxFit.cover,
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 5,
+                                    right: 5,
+                                    child: IconButton.filledTonal(
+                                      tooltip: 'Remove photo',
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: memoryId == null
+                                          ? null
+                                          : () async {
+                                              await _deleteMemoryPhoto(
+                                                memoryId,
+                                                photo,
+                                              );
+                                              if (dialogContext.mounted) {
+                                                setDialogState(() {});
+                                              }
+                                            },
+                                      icon: const Icon(Icons.close, size: 18),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+
+                            final pendingIndex = index - existingPhotos.length;
+                            final photo = pendingPhotos[pendingIndex];
+                            return Stack(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Image.memory(
+                                    photo.bytes,
+                                    width: 116,
+                                    height: 116,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 5,
+                                  right: 5,
+                                  child: IconButton.filledTonal(
+                                    tooltip: 'Remove photo',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () => setDialogState(
+                                      () =>
+                                          pendingPhotos.removeAt(pendingIndex),
+                                    ),
+                                    icon: const Icon(Icons.close, size: 18),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                    if (existingVoices.isNotEmpty ||
+                        pendingVoices.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Voice notes',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...existingVoices.map(
+                        (note) => Card(
+                          elevation: 0,
+                          color: const Color(0xFFF4EEF5),
+                          child: ListTile(
+                            leading: IconButton.filled(
+                              tooltip: 'Play voice note',
+                              onPressed: () async {
+                                await _toggleVoice(note);
+                                if (dialogContext.mounted) {
+                                  setDialogState(() {});
+                                }
+                              },
+                              icon: Icon(
+                                _playingVoiceKey == 'legacy_voice:${note.id}'
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
+                              ),
+                            ),
+                            title: Text(note.title),
+                            subtitle: const Text('Voice note'),
+                            trailing: IconButton(
+                              tooltip: 'Remove voice note',
+                              onPressed: memoryId == null
+                                  ? null
+                                  : () async {
+                                      await _deleteMemoryVoice(memoryId, note);
+                                      if (dialogContext.mounted) {
+                                        setDialogState(() {});
+                                      }
+                                    },
+                              icon: const Icon(Icons.close),
+                            ),
+                          ),
+                        ),
+                      ),
+                      ...List.generate(pendingVoices.length, (index) {
+                        final voice = pendingVoices[index];
+                        final key = 'pending_voice:$index';
+                        return Card(
+                          elevation: 0,
+                          color: const Color(0xFFF4EEF5),
+                          child: ListTile(
+                            leading: IconButton.filled(
+                              tooltip: 'Listen to take',
+                              onPressed: () => _togglePendingVoice(
+                                pendingVoices,
+                                index,
+                                () => setDialogState(() {}),
+                              ),
+                              icon: Icon(
+                                _playingVoiceKey == key
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
+                              ),
+                            ),
+                            title: Text('Voice note ${index + 1}'),
+                            subtitle: Text(
+                              '${_voiceLength(voice.seconds)} - Tap play to check this take',
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Remove this take',
+                              onPressed: () async {
+                                if (_playingVoiceKey == key) {
+                                  await _voicePlayer.stop();
+                                  _playingVoiceKey = null;
+                                }
+                                setDialogState(
+                                  () => pendingVoices.removeAt(index),
+                                );
+                              },
+                              icon: const Icon(Icons.close),
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                    const SizedBox(height: 14),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.42),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: const Icon(Icons.tune),
+                            title: const Text('Add details'),
+                            subtitle: const Text(
+                              'How it seemed, when, where, or who was there',
+                            ),
+                            trailing: Icon(
+                              showDetails
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                            ),
+                            onTap: () => setDialogState(
+                              () => showDetails = !showDetails,
+                            ),
+                          ),
+                          if (showDetails)
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'How did they seem to find this experience?',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children:
+                                        const [
+                                          'Happy',
+                                          'Playful',
+                                          'Proud',
+                                          'Grateful',
+                                          'Nostalgic',
+                                          'Calm',
+                                          'Surprised',
+                                          'Sad',
+                                          'Difficult',
+                                          'Mixed feelings',
+                                        ].map((mood) {
+                                          return ChoiceChip(
+                                            label: Text(mood),
+                                            selected: selectedMood == mood,
+                                            onSelected: (selected) {
+                                              setDialogState(() {
+                                                selectedMood = selected
+                                                    ? mood
+                                                    : null;
+                                              });
+                                            },
+                                          );
+                                        }).toList(),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  TextField(
+                                    controller: whenController,
+                                    decoration: const InputDecoration(
+                                      prefixIcon: Icon(
+                                        Icons.calendar_today_outlined,
+                                      ),
+                                      labelText: 'When was this?',
+                                      hintText:
+                                          'For example: Summer 1984 or when they were young',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  TextField(
+                                    controller: peopleController,
+                                    decoration: const InputDecoration(
+                                      prefixIcon: Icon(Icons.people_outline),
+                                      labelText: 'Who was there?',
+                                      hintText: 'Names or a short description',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  TextField(
+                                    controller: locationController,
+                                    decoration: const InputDecoration(
+                                      prefixIcon: Icon(
+                                        Icons.location_on_outlined,
+                                      ),
+                                      labelText: 'Where did it happen?',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: submitMemory,
+                        icon: const Icon(Icons.auto_awesome, size: 18),
+                        label: Text(actionLabel),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    promptController.dispose();
+    bodyController.dispose();
+    whenController.dispose();
+    peopleController.dispose();
+    locationController.dispose();
+    return result;
   }
 
   Future<void> _deleteMemory(Map<String, dynamic> memory) async {
@@ -1057,13 +1840,21 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
     try {
       final photos = _memoryPhotosById[memoryId] ?? [];
-      final paths = photos
+      final voiceNotes = _memoryVoiceById[memoryId] ?? [];
+      final photoPaths = photos
           .map((p) => (p['path'] ?? '').trim())
           .where((p) => p.isNotEmpty)
           .toList();
+      final voicePaths = voiceNotes
+          .map((v) => v.path.trim())
+          .where((p) => p.isNotEmpty)
+          .toList();
 
-      if (paths.isNotEmpty) {
-        await _supabase.storage.from(_photosBucket).remove(paths);
+      if (photoPaths.isNotEmpty) {
+        await _supabase.storage.from(_photosBucket).remove(photoPaths);
+      }
+      if (voicePaths.isNotEmpty) {
+        await _supabase.storage.from(_memoryVoiceBucket).remove(voicePaths);
       }
 
       await _supabase
@@ -1075,6 +1866,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
       await _loadMemories();
       await _loadMemoryPhotos();
+      await _loadMemoryVoice();
       _toast('Memory deleted.');
     } on PostgrestException catch (e) {
       _toast('Delete failed: ${e.message}');
@@ -1130,6 +1922,77 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     }
   }
 
+  Future<void> _uploadPendingMemoryPhotos(
+    String memoryId,
+    List<_LegacyPendingPhoto> photos,
+  ) async {
+    if (photos.isEmpty) return;
+
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('Not signed in');
+
+    for (var index = 0; index < photos.length; index++) {
+      final photo = photos[index];
+      final ts = DateTime.now().microsecondsSinceEpoch + index;
+      final path =
+          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/$ts.${photo.extension}';
+
+      await _supabase.storage
+          .from(_photosBucket)
+          .uploadBinary(
+            path,
+            photo.bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _contentTypeFromExt(photo.extension),
+            ),
+          );
+
+      await _supabase.from('legacy_memory_photos').insert({
+        'legacy_memory_id': memoryId,
+        'legacy_member_id': widget.legacyMemberId,
+        'family_id': widget.familyId,
+        'path': path,
+      });
+    }
+  }
+
+  Future<void> _uploadPendingMemoryVoice(
+    String memoryId,
+    List<_LegacyPendingVoice> voices,
+  ) async {
+    if (voices.isEmpty) return;
+
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) throw Exception('Not signed in');
+
+    for (var index = 0; index < voices.length; index++) {
+      final audio = voices[index].audio;
+      final ts = DateTime.now().microsecondsSinceEpoch + index;
+      final path =
+          '${_memoryVoicePrefix(userId, memoryId)}/$ts.${audio.extension}';
+
+      await _supabase.storage
+          .from(_memoryVoiceBucket)
+          .uploadBinary(
+            path,
+            Uint8List.fromList(audio.bytes),
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: audio.mimeType,
+            ),
+          );
+
+      await _supabase.from('legacy_memory_voice_notes').insert({
+        'legacy_memory_id': memoryId,
+        'legacy_member_id': widget.legacyMemberId,
+        'family_id': widget.familyId,
+        'path': path,
+        'title': 'Voice note',
+      });
+    }
+  }
+
   Future<void> _deleteMemoryPhoto(
     String memoryId,
     Map<String, String> photo,
@@ -1154,6 +2017,38 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
       await _loadMemoryPhotos();
       _toast('Photo deleted.');
+    } on PostgrestException catch (e) {
+      _toast('Delete failed: ${e.message}');
+    } catch (e) {
+      _toast('Delete failed: $e');
+    }
+  }
+
+  Future<void> _deleteMemoryVoice(
+    String memoryId,
+    _LegacyVoiceNote note,
+  ) async {
+    try {
+      final key = 'legacy_voice:${note.id}';
+      if (_playingVoiceKey == key) {
+        await _voicePlayer.stop();
+        if (mounted) setState(() => _playingVoiceKey = null);
+      }
+
+      if (note.path.trim().isNotEmpty) {
+        await _supabase.storage.from(_memoryVoiceBucket).remove([note.path]);
+      }
+
+      await _supabase
+          .from('legacy_memory_voice_notes')
+          .delete()
+          .eq('id', note.id)
+          .eq('legacy_memory_id', memoryId)
+          .eq('legacy_member_id', widget.legacyMemberId)
+          .eq('family_id', widget.familyId);
+
+      await _loadMemoryVoice();
+      _toast('Voice note deleted.');
     } on PostgrestException catch (e) {
       _toast('Delete failed: ${e.message}');
     } catch (e) {
@@ -1877,13 +2772,86 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     );
   }
 
+  Widget _memoryVoiceStrip(String memoryId) {
+    final notes = _memoryVoiceById[memoryId] ?? [];
+
+    if (_loadingMemoryVoice) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          'Loading voice…',
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.black.withValues(alpha: 0.55),
+          ),
+        ),
+      );
+    }
+
+    if (_memoryVoiceError != null) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          'Voice load issue: $_memoryVoiceError',
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.black.withValues(alpha: 0.55),
+          ),
+        ),
+      );
+    }
+
+    if (notes.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Column(
+        children: notes.take(2).map((note) {
+          return Card(
+            elevation: 0,
+            color: const Color(0xFFF4EEF5),
+            child: ListTile(
+              dense: true,
+              leading: IconButton(
+                tooltip: 'Play voice note',
+                onPressed: () => _toggleVoice(note),
+                icon: Icon(
+                  _playingVoiceKey == 'legacy_voice:${note.id}'
+                      ? Icons.pause_circle_filled
+                      : Icons.play_circle_fill,
+                ),
+              ),
+              title: Text(
+                note.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: const Text('Voice memory'),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _memoryCard(Map<String, dynamic> m) {
     final memoryId = (m['id'] ?? '').toString();
     final stage = (m['life_stage'] ?? '').toString();
     final prompt = (m['prompt_text'] ?? '').toString();
     final body = (m['body'] ?? '').toString();
+    final mood = (m['mood'] ?? '').toString().trim();
+    final when = (m['memory_date_label'] ?? '').toString().trim();
+    final people = (m['people'] ?? '').toString().trim();
+    final location = (m['location'] ?? '').toString().trim();
     final title = _titleFromRow(_row);
     final hasPhoto = (_profilePhotoUrl ?? '').trim().isNotEmpty;
+    final details = <Widget>[
+      if (mood.isNotEmpty) _legacyDetailChip(Icons.favorite_border, mood),
+      if (when.isNotEmpty) _legacyDetailChip(Icons.event_outlined, when),
+      if (people.isNotEmpty) _legacyDetailChip(Icons.people_outline, people),
+      if (location.isNotEmpty)
+        _legacyDetailChip(Icons.location_on_outlined, location),
+    ];
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1955,7 +2923,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             if (prompt.isNotEmpty && body.isNotEmpty) const SizedBox(height: 7),
             if (body.isNotEmpty)
               Text(body, style: const TextStyle(fontSize: 15, height: 1.42)),
+            if (details.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(spacing: 8, runSpacing: 8, children: details),
+            ],
             _memoryPhotoStrip(memoryId),
+            _memoryVoiceStrip(memoryId),
             const Divider(height: 24),
             Row(
               children: [
@@ -1974,6 +2947,25 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _legacyDetailChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F0F8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: const Color(0xFF76558F)),
+          const SizedBox(width: 7),
+          Text(label),
+        ],
       ),
     );
   }
@@ -2090,4 +3082,63 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       ),
     );
   }
+}
+
+class _LegacyMemoryEditResult {
+  final String lifeStage;
+  final String promptText;
+  final String body;
+  final String mood;
+  final String memoryDateLabel;
+  final String people;
+  final String location;
+  final List<_LegacyPendingPhoto> photos;
+  final List<_LegacyPendingVoice> voices;
+
+  const _LegacyMemoryEditResult({
+    required this.lifeStage,
+    required this.promptText,
+    required this.body,
+    required this.mood,
+    required this.memoryDateLabel,
+    required this.people,
+    required this.location,
+    required this.photos,
+    required this.voices,
+  });
+}
+
+class _LegacyPendingPhoto {
+  final String name;
+  final Uint8List bytes;
+  final String extension;
+
+  const _LegacyPendingPhoto({
+    required this.name,
+    required this.bytes,
+    required this.extension,
+  });
+}
+
+class _LegacyPendingVoice {
+  final RecordedAudio audio;
+  final int seconds;
+
+  const _LegacyPendingVoice({required this.audio, required this.seconds});
+}
+
+class _LegacyVoiceNote {
+  final String id;
+  final String path;
+  final String title;
+  final String url;
+  final String createdAt;
+
+  const _LegacyVoiceNote({
+    required this.id,
+    required this.path,
+    required this.title,
+    required this.url,
+    required this.createdAt,
+  });
 }
