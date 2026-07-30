@@ -147,6 +147,72 @@ serve(async (req) => {
     const memoryVoiceNoteId = textClean(
       payload?.memory_voice_note_id || payload?.memoryVoiceNoteId || payload?.memory_voice_noteId || ""
     );
+    const legacyMemoryVoiceNoteId = textClean(
+      payload?.legacy_memory_voice_note_id || payload?.legacyMemoryVoiceNoteId || ""
+    );
+    const legacyMemberId = textClean(
+      payload?.legacy_member_id || payload?.legacyMemberId || ""
+    );
+    const familyId = textClean(payload?.family_id || payload?.familyId || "");
+
+    if (legacyMemoryVoiceNoteId) {
+      let legacyQuery = userClient
+        .from("legacy_memory_voice_notes")
+        .select("id, legacy_memory_id, legacy_member_id, family_id, title, path, created_at")
+        .eq("id", legacyMemoryVoiceNoteId);
+      if (legacyMemberId) legacyQuery = legacyQuery.eq("legacy_member_id", legacyMemberId);
+      if (familyId) legacyQuery = legacyQuery.eq("family_id", familyId);
+
+      const { data: legacyVn, error: legacyVnErr } = await withTimeout(
+        legacyQuery.maybeSingle(),
+        5000,
+        "DB(legacy_memory_voice_notes)"
+      );
+
+      if (legacyVnErr) return json(500, { error: legacyVnErr.message });
+      if (!legacyVn) return json(403, { error: "Not allowed or not found" });
+
+      const legacyMemoryId = textClean(legacyVn.legacy_memory_id || "");
+      const storagePath = textClean(legacyVn.path || "");
+
+      if (!legacyMemoryId) return json(400, { error: "legacy_memory_id is empty on legacy_memory_voice_notes row" });
+      if (!storagePath) return json(400, { error: "path is empty on legacy_memory_voice_notes row" });
+
+      const audioBytes = await withTimeout(
+        downloadVoiceNoteBytes({ admin, storagePath }),
+        15000,
+        "download audio"
+      );
+
+      const transcript = await withTimeout(
+        transcribeWithOpenAI({ apiKey: OPENAI_API_KEY, audioBytes, storagePath }),
+        30000,
+        "transcription"
+      );
+
+      if (!transcript) {
+        return json(200, {
+          ok: true,
+          legacy_memory_voice_note_id: legacyMemoryVoiceNoteId,
+          legacy_memory_id: legacyMemoryId,
+          chunk_count: 0,
+          note: "No speech detected.",
+        });
+      }
+
+      await admin
+        .from("legacy_memory_voice_notes")
+        .update({ transcript })
+        .eq("id", legacyMemoryVoiceNoteId);
+
+      return json(200, {
+        ok: true,
+        legacy_memory_voice_note_id: legacyMemoryVoiceNoteId,
+        legacy_memory_id: legacyMemoryId,
+        chunk_count: 0,
+        transcript_preview: transcript.slice(0, 240),
+      });
+    }
 
     if (!vaultId) return json(400, { error: "vault_id is required" });
     if (!memoryVoiceNoteId) return json(400, { error: "memory_voice_note_id is required" });

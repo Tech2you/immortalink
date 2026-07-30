@@ -440,6 +440,12 @@ RELATIONSHIP RULE:
 
 GROUNDING:
 - Only answer personal facts that are present in Vault context.
+- Treat each saved memory block as a separate source. Do not merge actions,
+  places, moods, or details from different memory blocks unless one block
+  explicitly connects them.
+- For a question about a specific event, date, birthday, place, or person,
+  answer from the best matching memory block only. If another memory contains a
+  different activity, do not place that activity into the specific event.
 - Connect concrete facts to their natural broader topics when the link is clear.
   For example, exams, grades and studying are academic experiences; jobs and
   qualifications are career experiences. Do not say a broad topic is missing
@@ -466,7 +472,7 @@ STYLE:
 `;
 
   const user = `
-Vault context (the only source of personal truth):
+Vault context (the only source of personal truth; each separated block is a separate memory/source):
 ${context || "(no saved memories found)"}
 
 User question:
@@ -822,7 +828,7 @@ serve(async (req) => {
         const { data: memories, error: memErr } = await withTimeout(
           supabase
             .from("legacy_memories")
-            .select("prompt_text, body")
+            .select("id, prompt_text, body, memory_date_label, people, location, mood")
             .eq("legacy_member_id", legacyMemberId)
             .eq("family_id", familyId)
             .order("created_at", { ascending: false })
@@ -833,11 +839,52 @@ serve(async (req) => {
 
         if (memErr) return json({ error: `DB error: ${memErr.message}` }, 500);
 
+        const { data: voiceNotes, error: voiceErr } = await withTimeout(
+          supabase
+            .from("legacy_memory_voice_notes")
+            .select("legacy_memory_id, title, transcript, created_at")
+            .eq("legacy_member_id", legacyMemberId)
+            .eq("family_id", familyId)
+            .order("created_at", { ascending: true }),
+          4_000,
+          "DB(legacy_memory_voice_notes)"
+        );
+
+        if (voiceErr) return json({ error: `DB error: ${voiceErr.message}` }, 500);
+
+        const voicesByMemory = new Map<string, string[]>();
+        for (const note of ((voiceNotes as any[]) || [])) {
+          const memoryId = textClean(note?.legacy_memory_id || "");
+          const transcript = textClean(note?.transcript || "");
+          if (!memoryId || !transcript) continue;
+          const title = textClean(note?.title || "Voice note") || "Voice note";
+          const list = voicesByMemory.get(memoryId) || [];
+          list.push(`Voice note ${list.length + 1} (${title}):\n${transcript}`);
+          voicesByMemory.set(memoryId, list);
+        }
+
         const list = (memories as any[]) || [];
         for (const m of list) {
+          const id = textClean(m?.id || "");
           const p = textClean(m?.prompt_text || "");
           const b = textClean(m?.body || "");
-          if (p || b) contextParts.push(`Q: ${p}\nA: ${b}`.trim());
+          const when = textClean(m?.memory_date_label || "");
+          const people = textClean(m?.people || "");
+          const location = textClean(m?.location || "");
+          const mood = textClean(m?.mood || "");
+          const voiceContext = id ? voicesByMemory.get(id) || [] : [];
+          const memoryText = [
+            "--- Legacy memory source ---",
+            p ? `Title: ${p}` : "",
+            b ? `Memory: ${b}` : "",
+            when ? `When: ${when}` : "",
+            people ? `People: ${people}` : "",
+            location ? `Location: ${location}` : "",
+            mood ? `Mood: ${mood}` : "",
+            ...voiceContext,
+            "--- End legacy memory source ---",
+          ].filter(Boolean).join("\n");
+          if (memoryText) contextParts.push(memoryText);
         }
       } else {
         const { data: memories, error: memErr } = await withTimeout(

@@ -1983,13 +1983,52 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             ),
           );
 
-      await _supabase.from('legacy_memory_voice_notes').insert({
-        'legacy_memory_id': memoryId,
-        'legacy_member_id': widget.legacyMemberId,
-        'family_id': widget.familyId,
-        'path': path,
-        'title': 'Voice note',
-      });
+      final inserted = await _supabase
+          .from('legacy_memory_voice_notes')
+          .insert({
+            'legacy_memory_id': memoryId,
+            'legacy_member_id': widget.legacyMemberId,
+            'family_id': widget.familyId,
+            'path': path,
+            'title': 'Voice note',
+          })
+          .select('id')
+          .maybeSingle();
+
+      final voiceId = (inserted?['id'] ?? '').toString().trim();
+      if (voiceId.isNotEmpty) {
+        unawaited(_indexLegacyMemoryVoice(voiceId));
+      }
+    }
+  }
+
+  Future<void> _indexLegacyMemoryVoice(String voiceId) async {
+    final token = _supabase.auth.currentSession?.accessToken.trim();
+    if (token == null || token.isEmpty) return;
+
+    try {
+      final res = await _supabase.functions.invoke(
+        'index_voice_note',
+        headers: {
+          'Authorization': 'Bearer $token',
+          'authorization': 'Bearer $token',
+        },
+        body: {
+          'legacy_memory_voice_note_id': voiceId,
+          'legacyMemberId': widget.legacyMemberId,
+          'legacy_member_id': widget.legacyMemberId,
+          'familyId': widget.familyId,
+          'family_id': widget.familyId,
+        },
+      );
+
+      if (res.status != 200) {
+        throw Exception('HTTP ${res.status}: ${res.data}');
+      }
+
+      await _loadMemoryVoice();
+    } catch (e) {
+      _toast('Voice saved, but AI indexing failed: $e');
     }
   }
 
