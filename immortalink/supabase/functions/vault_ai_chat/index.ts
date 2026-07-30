@@ -272,11 +272,12 @@ function cousinLabel(viewerDepth: number, ownerDepth: number): string {
 
 function resolveRelationshipFromGraph(
   viewerVaultId: string,
-  ownerVaultId: string,
+  ownerId: string,
   rows: RelationshipRow[],
+  ownerType = "vault",
 ): GraphRelation | null {
   const viewerKey = `vault:${viewerVaultId}`;
-  const ownerKey = `vault:${ownerVaultId}`;
+  const ownerKey = `${ownerType}:${ownerId}`;
   if (viewerKey === ownerKey) {
     return { viewerToOwner: "owner", ownerToViewer: "owner" };
   }
@@ -535,64 +536,101 @@ serve(async (req) => {
 
     const payload = await req.json().catch(() => ({}));
     const vaultId = textClean(payload?.vaultId || payload?.vault_id || "");
+    const legacyMemberId = textClean(
+      payload?.legacyMemberId || payload?.legacy_member_id || "",
+    );
     const question = textClean(payload?.question || payload?.prompt || payload?.message || "");
     const displayNameFromClient = textClean(payload?.displayName || payload?.display_name || "");
     const requestedFamilyId = textClean(payload?.familyId || payload?.family_id || "");
 
     const viewerDisplayName = textClean(payload?.viewerDisplayName || payload?.viewer_display_name || "");
 
-    if (!vaultId) return json({ error: "vaultId is required" }, 400);
+    const isLegacyChat = !vaultId && !!legacyMemberId;
+
+    if (!vaultId && !legacyMemberId) {
+      return json({ error: "vaultId or legacyMemberId is required" }, 400);
+    }
     if (!question) return json({ error: "question is required" }, 400);
 
-    const { data: vaultRow, error: vErr } = await withTimeout(
-      supabase
-        .from("vaults")
-        .select("id, owner_id, family_id, name, display_name")
-        .eq("id", vaultId)
-        .maybeSingle(),
-      4_000,
-      "DB(vaults)"
-    );
+    let familyId = requestedFamilyId;
+    let vaultOwnerUserId = "";
+    let ownerDisplayName = "this person";
+    let legacyRow: any = null;
 
-    if (vErr) return json({ error: `DB error: ${vErr.message}` }, 500);
-    if (!vaultRow) return json({ error: "Vault not found or not allowed" }, 403);
-
-    const vaultOwnerUserId = textClean((vaultRow as any).owner_id || "");
-    let familyId = requestedFamilyId || textClean((vaultRow as any).family_id || "");
-
-    if (requestedFamilyId) {
-      const { data: sharedRows, error: sharedErr } = await withTimeout(
-        supabase
-          .from("family_members")
-          .select("user_id")
-          .eq("family_id", requestedFamilyId)
-          .in("user_id", [viewerUserId, vaultOwnerUserId]),
-        3_000,
-        "DB(active family membership)",
-      );
-      const sharedIds = new Set(
-        Array.isArray(sharedRows)
-          ? sharedRows.map((row) => textClean((row as any).user_id || ""))
-          : [],
-      );
-      if (
-        sharedErr ||
-        !sharedIds.has(viewerUserId) ||
-        !sharedIds.has(vaultOwnerUserId)
-      ) {
-        return json({ error: "Vault is not part of the selected family" }, 403);
+    if (isLegacyChat) {
+      let legacyQuery = supabase
+        .from("legacy_family_members")
+        .select("id, family_id, slot_key, name, display_name, about_me_text")
+        .eq("id", legacyMemberId);
+      if (requestedFamilyId) {
+        legacyQuery = legacyQuery.eq("family_id", requestedFamilyId);
       }
-      familyId = requestedFamilyId;
-    }
 
-    const ownerDisplayName =
-      textClean((vaultRow as any).display_name || "") ||
-      textClean((vaultRow as any).name || "") ||
-      "this person";
+      const { data: row, error: legacyErr } = await withTimeout(
+        legacyQuery.maybeSingle(),
+        4_000,
+        "DB(legacy_family_members)"
+      );
+
+      if (legacyErr) return json({ error: `DB error: ${legacyErr.message}` }, 500);
+      if (!row) return json({ error: "Legacy profile not found or not allowed" }, 403);
+
+      legacyRow = row;
+      familyId = requestedFamilyId || textClean((legacyRow as any).family_id || "");
+      ownerDisplayName =
+        textClean((legacyRow as any).display_name || "") ||
+        textClean((legacyRow as any).name || "") ||
+        "this person";
+    } else {
+      const { data: vaultRow, error: vErr } = await withTimeout(
+        supabase
+          .from("vaults")
+          .select("id, owner_id, family_id, name, display_name")
+          .eq("id", vaultId)
+          .maybeSingle(),
+        4_000,
+        "DB(vaults)"
+      );
+
+      if (vErr) return json({ error: `DB error: ${vErr.message}` }, 500);
+      if (!vaultRow) return json({ error: "Vault not found or not allowed" }, 403);
+
+      vaultOwnerUserId = textClean((vaultRow as any).owner_id || "");
+      familyId = requestedFamilyId || textClean((vaultRow as any).family_id || "");
+
+      if (requestedFamilyId) {
+        const { data: sharedRows, error: sharedErr } = await withTimeout(
+          supabase
+            .from("family_members")
+            .select("user_id")
+            .eq("family_id", requestedFamilyId)
+            .in("user_id", [viewerUserId, vaultOwnerUserId]),
+          3_000,
+          "DB(active family membership)",
+        );
+        const sharedIds = new Set(
+          Array.isArray(sharedRows)
+            ? sharedRows.map((row) => textClean((row as any).user_id || ""))
+            : [],
+        );
+        if (
+          sharedErr ||
+          !sharedIds.has(viewerUserId) ||
+          !sharedIds.has(vaultOwnerUserId)
+        ) {
+          return json({ error: "Vault is not part of the selected family" }, 403);
+        }
+      }
+
+      ownerDisplayName =
+        textClean((vaultRow as any).display_name || "") ||
+        textClean((vaultRow as any).name || "") ||
+        "this person";
+    }
 
     const displayName = displayNameFromClient || ownerDisplayName;
 
-    const isOwnerAsking = !!vaultOwnerUserId && viewerUserId === vaultOwnerUserId;
+    const isOwnerAsking = !isLegacyChat && !!vaultOwnerUserId && viewerUserId === vaultOwnerUserId;
 
     // =========================
     // Relationship resolution (robust)
@@ -633,8 +671,9 @@ serve(async (req) => {
           if (!graphErr && Array.isArray(graphRows)) {
             const graphRelation = resolveRelationshipFromGraph(
               viewerVaultId,
-              vaultId,
+              isLegacyChat ? legacyMemberId : vaultId,
               graphRows as RelationshipRow[],
+              isLegacyChat ? "legacy" : "vault",
             );
             if (graphRelation) {
               viewerToOwner = graphRelation.viewerToOwner;
@@ -654,7 +693,10 @@ serve(async (req) => {
             .from("family_members")
             .select("user_id, role, slot_key")
             .eq("family_id", familyId)
-            .in("user_id", [viewerUserId, vaultOwnerUserId]),
+            .in(
+              "user_id",
+              isLegacyChat ? [viewerUserId] : [viewerUserId, vaultOwnerUserId],
+            ),
           3_000,
           "DB(family_members)"
         );
@@ -666,13 +708,16 @@ serve(async (req) => {
               viewerRole = textClean((r as any).role || viewerRole) || viewerRole;
               viewerSlotKey = textClean((r as any).slot_key || "");
             }
-            if (uid === vaultOwnerUserId) {
+            if (!isLegacyChat && uid === vaultOwnerUserId) {
               ownerSlotKey = textClean((r as any).slot_key || "");
             }
           }
         }
       } catch (_) {
         // ignore MVP
+      }
+      if (isLegacyChat) {
+        ownerSlotKey = textClean((legacyRow as any)?.slot_key || "");
       }
 
       // ✅ Key logic:
@@ -747,45 +792,73 @@ serve(async (req) => {
     let contextParts: string[] = [];
 
     try {
-      const { data: chunks, error: chunkErr } = await withTimeout(
-        supabase
-          .from("memory_chunks")
-          .select("chunk_text, chunk_index, created_at")
-          .eq("vault_id", vaultId)
-          .order("created_at", { ascending: false })
-          .order("chunk_index", { ascending: true })
-          .limit(60),
-        4_000,
-        "DB(memory_chunks)"
-      );
+      if (!isLegacyChat) {
+        const { data: chunks, error: chunkErr } = await withTimeout(
+          supabase
+            .from("memory_chunks")
+            .select("chunk_text, chunk_index, created_at")
+            .eq("vault_id", vaultId)
+            .order("created_at", { ascending: false })
+            .order("chunk_index", { ascending: true })
+            .limit(60),
+          4_000,
+          "DB(memory_chunks)"
+        );
 
-      if (!chunkErr && Array.isArray(chunks) && chunks.length > 0) {
-        for (const c of chunks) {
-          const content = textClean((c as any)?.chunk_text || "");
-          if (content) contextParts.push(content);
+        if (!chunkErr && Array.isArray(chunks) && chunks.length > 0) {
+          for (const c of chunks) {
+            const content = textClean((c as any)?.chunk_text || "");
+            if (content) contextParts.push(content);
+          }
         }
       }
     } catch (_) {}
 
     if (contextParts.length === 0) {
-      const { data: memories, error: memErr } = await withTimeout(
-        supabase
-          .from("memories")
-          .select("prompt_text, body")
-          .eq("vault_id", vaultId)
-          .order("created_at", { ascending: false })
-          .limit(8),
-        4_000,
-        "DB(memories)"
-      );
+      if (isLegacyChat) {
+        const about = textClean((legacyRow as any)?.about_me_text || "");
+        if (about) contextParts.push(`About ${displayName}: ${about}`);
 
-      if (memErr) return json({ error: `DB error: ${memErr.message}` }, 500);
+        const { data: memories, error: memErr } = await withTimeout(
+          supabase
+            .from("legacy_memories")
+            .select("prompt_text, body")
+            .eq("legacy_member_id", legacyMemberId)
+            .eq("family_id", familyId)
+            .order("created_at", { ascending: false })
+            .limit(12),
+          4_000,
+          "DB(legacy_memories)"
+        );
 
-      const list = (memories as any[]) || [];
-      for (const m of list) {
-        const p = textClean(m?.prompt_text || "");
-        const b = textClean(m?.body || "");
-        if (p || b) contextParts.push(`Q: ${p}\nA: ${b}`.trim());
+        if (memErr) return json({ error: `DB error: ${memErr.message}` }, 500);
+
+        const list = (memories as any[]) || [];
+        for (const m of list) {
+          const p = textClean(m?.prompt_text || "");
+          const b = textClean(m?.body || "");
+          if (p || b) contextParts.push(`Q: ${p}\nA: ${b}`.trim());
+        }
+      } else {
+        const { data: memories, error: memErr } = await withTimeout(
+          supabase
+            .from("memories")
+            .select("prompt_text, body")
+            .eq("vault_id", vaultId)
+            .order("created_at", { ascending: false })
+            .limit(8),
+          4_000,
+          "DB(memories)"
+        );
+
+        if (memErr) return json({ error: `DB error: ${memErr.message}` }, 500);
+
+        const list = (memories as any[]) || [];
+        for (const m of list) {
+          const p = textClean(m?.prompt_text || "");
+          const b = textClean(m?.body || "");
+          if (p || b) contextParts.push(`Q: ${p}\nA: ${b}`.trim());
+        }
       }
     }
 

@@ -1238,79 +1238,167 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     final aboutController = TextEditingController();
     var saving = false;
     String? error;
+    final dialogTitle = lineageRelativeLabel != null
+        ? 'Add legacy $lineageRelativeLabel'
+        : grandchildWithMissingParent
+        ? 'Add legacy grandchild'
+        : 'Add legacy ${_kindLabel(kind)}';
+
+    InputDecoration legacyFieldDecoration(
+      String label, {
+      IconData? icon,
+      String? hintText,
+    }) => InputDecoration(
+      labelText: label,
+      hintText: hintText,
+      prefixIcon: icon == null ? null : Icon(icon, size: 20),
+      filled: true,
+      fillColor: Colors.white.withValues(alpha: 0.72),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.12)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.10)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: const BorderSide(color: Color(0xFF7B5B8E), width: 1.8),
+      ),
+    );
 
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
-          title: Text(
-            lineageRelativeLabel != null
-                ? 'Add legacy $lineageRelativeLabel'
-                : grandchildWithMissingParent
-                ? 'Add legacy grandchild'
-                : 'Add legacy ${_kindLabel(kind)}',
+          backgroundColor: const Color(0xFFFFF8FE),
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          contentPadding: const EdgeInsets.fromLTRB(24, 14, 24, 12),
+          actionsPadding: const EdgeInsets.fromLTRB(18, 0, 24, 22),
+          title: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEADCF2),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.history_edu_outlined,
+                  color: Color(0xFF5B2D73),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      dialogTitle,
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Create a family profile now. Stories, photos and more can come later.',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.black.withValues(alpha: 0.58),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           content: SizedBox(
-            width: 460,
+            width: 500,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   TextField(
                     controller: nameController,
                     autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Name *',
-                      border: OutlineInputBorder(),
+                    decoration: legacyFieldDecoration(
+                      'Name *',
+                      icon: Icons.person_outline,
+                      hintText: 'Their full name',
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: displayNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name (optional)',
-                      border: OutlineInputBorder(),
+                    decoration: legacyFieldDecoration(
+                      'Display name',
+                      icon: Icons.alternate_email,
+                      hintText: 'What family calls them',
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
                         child: TextField(
                           controller: birthYearController,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Birth year',
-                            border: OutlineInputBorder(),
+                          decoration: legacyFieldDecoration(
+                            'Born',
+                            icon: Icons.cake_outlined,
+                            hintText: 'Year',
                           ),
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: TextField(
                           controller: deathYearController,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Death year',
-                            border: OutlineInputBorder(),
+                          decoration: legacyFieldDecoration(
+                            'Passed',
+                            icon: Icons.favorite_border,
+                            hintText: 'Year',
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   TextField(
                     controller: aboutController,
                     minLines: 3,
                     maxLines: 6,
-                    decoration: const InputDecoration(
-                      labelText: 'About / notes (optional)',
-                      border: OutlineInputBorder(),
+                    decoration: legacyFieldDecoration(
+                      'About them',
+                      icon: Icons.auto_stories_outlined,
+                      hintText: 'A memory, nickname, or quick note',
                     ),
                   ),
                   if (error != null) ...[
-                    const SizedBox(height: 10),
-                    Text(error!, style: const TextStyle(color: Colors.red)),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFE9E9),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        error!,
+                        style: const TextStyle(color: Color(0xFF9E2A2A)),
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -1322,6 +1410,17 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
               child: const Text('Cancel'),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF6E5A93),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 14,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
               onPressed: saving
                   ? null
                   : () async {
@@ -1498,7 +1597,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                         });
                       }
                     },
-              child: Text(saving ? 'Saving…' : 'Create'),
+              child: Text(saving ? 'Saving...' : 'Create profile'),
             ),
           ],
         ),

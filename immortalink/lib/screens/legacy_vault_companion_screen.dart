@@ -103,7 +103,7 @@ class _LegacyVaultCompanionScreenState
 
   Map<String, String> _authHeadersOrEmpty() {
     final session = _client.auth.currentSession;
-    final token = session?.accessToken?.trim();
+    final token = session?.accessToken.trim();
     if (token == null || token.isEmpty) return {};
     return {'Authorization': 'Bearer $token', 'authorization': 'Bearer $token'};
   }
@@ -152,7 +152,9 @@ class _LegacyVaultCompanionScreenState
       final headers = _authHeadersOrEmpty();
 
       final body = {
+        'legacyMemberId': widget.legacyMemberId,
         'legacy_member_id': widget.legacyMemberId,
+        'familyId': widget.familyId,
         'family_id': widget.familyId,
         'question': text,
         'displayName': widget.displayName,
@@ -162,7 +164,7 @@ class _LegacyVaultCompanionScreenState
       };
 
       final res = await _client.functions
-          .invoke('legacy_vault_ai_chat', headers: headers, body: body)
+          .invoke('vault_ai_chat', headers: headers, body: body)
           .timeout(const Duration(seconds: 60));
 
       if (res.status != 200) {
@@ -263,7 +265,9 @@ class _LegacyVaultCompanionScreenState
     final title = 'Vault Companion • ${widget.displayName}';
 
     final bgTop = Theme.of(context).colorScheme.surface;
-    final bgBottom = Theme.of(context).colorScheme.surface.withOpacity(0.55);
+    final bgBottom = Theme.of(
+      context,
+    ).colorScheme.surface.withValues(alpha: 0.55);
 
     return Scaffold(
       appBar: AppBar(title: Text(title)),
@@ -308,15 +312,15 @@ class _LegacyVaultCompanionScreenState
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
-        color: Theme.of(context).colorScheme.surface.withOpacity(0.70),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.70),
       ),
       child: Row(
         children: [
           Expanded(
             child: Text(
               'Ask me anything. I’ll answer as thoughtfully as I can, based on what your family has saved in this legacy vault.',
-              style: TextStyle(color: Colors.black.withOpacity(0.70)),
+              style: TextStyle(color: Colors.black.withValues(alpha: 0.70)),
             ),
           ),
         ],
@@ -355,14 +359,18 @@ class _LegacyVaultCompanionScreenState
             constraints: const BoxConstraints(maxWidth: 620),
             decoration: BoxDecoration(
               color: isUser
-                  ? Theme.of(context).colorScheme.primary.withOpacity(0.12)
-                  : Theme.of(context).colorScheme.surface.withOpacity(0.88),
+                  ? Theme.of(
+                      context,
+                    ).colorScheme.primary.withValues(alpha: 0.12)
+                  : Theme.of(
+                      context,
+                    ).colorScheme.surface.withValues(alpha: 0.88),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.black.withOpacity(0.06)),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
               boxShadow: [
                 BoxShadow(
                   blurRadius: 10,
-                  color: Colors.black.withOpacity(0.04),
+                  color: Colors.black.withValues(alpha: 0.04),
                   offset: const Offset(0, 4),
                 ),
               ],
@@ -399,7 +407,7 @@ class _LegacyVaultCompanionScreenState
                       filled: true,
                       fillColor: Theme.of(
                         context,
-                      ).colorScheme.surface.withOpacity(0.85),
+                      ).colorScheme.surface.withValues(alpha: 0.85),
                     ),
                   ),
                 ),
@@ -469,7 +477,7 @@ class _TypingDotsState extends State<_TypingDots> {
     return Text(
       'Typing$dots',
       style: TextStyle(
-        color: Colors.black.withOpacity(0.60),
+        color: Colors.black.withValues(alpha: 0.60),
         fontWeight: FontWeight.w600,
       ),
     );
@@ -484,11 +492,12 @@ class _QuickPrompts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <String>[
+      'Where did you grow up?',
       'What should I know about you?',
-      'What kind of person were you?',
-      'What did you value most?',
-      'What memories has the family saved about you?',
+      'What were you like as a child?',
+      'What mattered most to you?',
       'How are we related?',
+      'What memory always makes you smile?',
     ];
 
     return Padding(

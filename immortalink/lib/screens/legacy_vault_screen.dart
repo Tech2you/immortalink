@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'family_branch_screen.dart';
-import 'legacy_vault_companion_screen.dart';
+import 'vault_companion_screen.dart';
 
 class LegacyVaultScreen extends StatefulWidget {
   final String legacyMemberId;
@@ -35,6 +35,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   bool _loadingMemories = true;
   bool _loadingMemoryPhotos = true;
   bool _showExtraDetails = false;
+  int _selectedLegacySection = 0;
 
   String? _error;
   String? _photoError;
@@ -90,7 +91,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => LegacyVaultCompanionScreen(
+        builder: (_) => VaultCompanionScreen(
           legacyMemberId: widget.legacyMemberId,
           familyId: widget.familyId,
           displayName: displayName,
@@ -1164,9 +1165,16 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     return Container(
       padding: padding ?? const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
-        color: Colors.white.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+        color: Colors.white.withValues(alpha: 0.58),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 18,
+            offset: const Offset(0, 7),
+          ),
+        ],
       ),
       child: child,
     );
@@ -1177,117 +1185,401 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final subtitle = _subtitleFromRow(_row);
     final slotKey = (_row?['slot_key'] ?? '').toString().trim();
     final canOpenBranch = _branchDirectionForSlot(slotKey) != null;
+    final hasPhoto = (_profilePhotoUrl ?? '').trim().isNotEmpty;
 
-    return _fieldCard(
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFF2E5F6), Color(0xFFFFFBFF)],
+        ),
+      ),
       child: Column(
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Stack(
+            clipBehavior: Clip.none,
             children: [
-              const Spacer(),
-              if (canOpenBranch)
-                SizedBox(
-                  height: 40,
-                  child: OutlinedButton.icon(
-                    onPressed: _openBranch,
-                    icon: const Icon(Icons.account_tree_outlined, size: 18),
-                    label: const Text('Open branch'),
+              CircleAvatar(
+                radius: 48,
+                backgroundColor: Colors.white,
+                backgroundImage: hasPhoto
+                    ? NetworkImage(_profilePhotoUrl!)
+                    : null,
+                child: hasPhoto
+                    ? null
+                    : const Icon(Icons.person_outline, size: 44),
+              ),
+              Positioned(
+                right: -5,
+                bottom: -4,
+                child: Material(
+                  color: const Color(0xFF76558F),
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    tooltip: 'Change profile photo',
+                    onPressed: _uploadingProfilePhoto
+                        ? null
+                        : _uploadOrReplaceProfilePhoto,
+                    icon: _uploadingProfilePhoto
+                        ? const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.camera_alt_outlined,
+                            size: 18,
+                            color: Colors.white,
+                          ),
                   ),
                 ),
+              ),
             ],
           ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+          const SizedBox(height: 14),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.black.withValues(alpha: 0.58)),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Family profile - memories, photos and stories kept together.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.black.withValues(alpha: 0.50),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 10,
+            runSpacing: 10,
             children: [
-              ClipOval(
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  color: Colors.black.withOpacity(0.08),
-                  child:
-                      _profilePhotoUrl == null ||
-                          _profilePhotoUrl!.trim().isEmpty
-                      ? Icon(
-                          Icons.person,
-                          size: 30,
-                          color: Colors.black.withOpacity(0.65),
-                        )
-                      : Image.network(
-                          _profilePhotoUrl!,
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          errorBuilder: (_, __, ___) => Icon(
-                            Icons.person,
-                            size: 30,
-                            color: Colors.black.withOpacity(0.65),
-                          ),
-                        ),
-                ),
+              FilledButton.icon(
+                onPressed: _openLegacyAi,
+                icon: const Icon(Icons.auto_awesome_outlined, size: 18),
+                label: const Text('Ask their AI'),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(color: Colors.black.withOpacity(0.60)),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Family-owned predecessor profile',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black.withOpacity(0.55),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        SizedBox(
-                          height: 40,
-                          child: OutlinedButton.icon(
-                            onPressed: _uploadingProfilePhoto
-                                ? null
-                                : _uploadOrReplaceProfilePhoto,
-                            icon: const Icon(Icons.person_outline),
-                            label: Text(
-                              _uploadingProfilePhoto
-                                  ? 'Uploading…'
-                                  : ((_profilePhotoUrl ?? '').trim().isEmpty
-                                        ? 'Add profile picture'
-                                        : 'Change pfp'),
-                            ),
-                          ),
-                        ),
-                        SizedBox(
-                          height: 40,
-                          child: OutlinedButton.icon(
-                            onPressed: _openLegacyAi,
-                            icon: const Icon(
-                              Icons.chat_bubble_outline,
-                              size: 18,
-                            ),
-                            label: const Text('Ask (AI)'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+              if (canOpenBranch)
+                OutlinedButton.icon(
+                  onPressed: _openBranch,
+                  icon: const Icon(Icons.account_tree_outlined, size: 18),
+                  label: const Text('Branch'),
                 ),
+              OutlinedButton.icon(
+                onPressed: () => setState(() => _selectedLegacySection = 1),
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Edit profile'),
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _legacyComposerCard() {
+    return _fieldCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: _openAddMemory,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F0F8),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.auto_stories_outlined),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'What story should this profile remember next?',
+                      style: TextStyle(
+                        color: Colors.black.withValues(alpha: 0.68),
+                      ),
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward, size: 18),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ActionChip(
+                avatar: const Icon(Icons.edit_note, size: 18),
+                label: const Text('Write memory'),
+                onPressed: _openAddMemory,
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.photo_camera_outlined, size: 18),
+                label: const Text('Add photos'),
+                onPressed: _uploadingPhoto ? null : _uploadPhoto,
+              ),
+              ActionChip(
+                avatar: const Icon(Icons.person_outline, size: 18),
+                label: const Text('About'),
+                onPressed: () => setState(() => _selectedLegacySection = 1),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionPicker() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: SegmentedButton<int>(
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(
+            value: 0,
+            icon: Icon(Icons.view_stream_outlined),
+            label: Text('Memories'),
+          ),
+          ButtonSegment(
+            value: 1,
+            icon: Icon(Icons.person_outline),
+            label: Text('About'),
+          ),
+          ButtonSegment(
+            value: 2,
+            icon: Icon(Icons.photo_library_outlined),
+            label: Text('Media'),
+          ),
+        ],
+        selected: {_selectedLegacySection},
+        onSelectionChanged: (selection) {
+          setState(() => _selectedLegacySection = selection.first);
+        },
+      ),
+    );
+  }
+
+  Widget _legacyTextField({
+    required TextEditingController controller,
+    required String label,
+    String? hintText,
+    IconData? icon,
+    int minLines = 1,
+    int maxLines = 1,
+    TextInputType? keyboardType,
+    bool alignLabelWithHint = false,
+  }) {
+    return TextField(
+      controller: controller,
+      minLines: minLines,
+      maxLines: maxLines,
+      keyboardType: keyboardType,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hintText,
+        prefixIcon: icon == null ? null : Icon(icon, size: 20),
+        filled: true,
+        fillColor: Colors.white.withValues(alpha: 0.72),
+        alignLabelWithHint: alignLabelWithHint,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.12)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.10)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: const BorderSide(color: Color(0xFF7B5B8E), width: 1.8),
+        ),
+      ),
+    );
+  }
+
+  Widget _savePill({bool compact = false}) {
+    return OutlinedButton.icon(
+      onPressed: (_savingProfile || _deletingProfile) ? null : _saveProfile,
+      icon: const Icon(Icons.save_outlined, size: 18),
+      label: Text(_savingProfile ? 'Saving...' : 'Save'),
+      style: OutlinedButton.styleFrom(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 16 : 24,
+          vertical: compact ? 12 : 14,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+    );
+  }
+
+  Widget _profileActions() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: (_savingProfile || _deletingProfile)
+                  ? null
+                  : _deleteProfile,
+              icon: const Icon(Icons.delete_outline),
+              label: Text(_deletingProfile ? 'Deleting...' : 'Delete'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: _savePill()),
+        ],
+      ),
+    );
+  }
+
+  Widget _activeSection() {
+    switch (_selectedLegacySection) {
+      case 1:
+        return Column(
+          children: [
+            _aboutCard(),
+            const SizedBox(height: 12),
+            _identityCard(),
+            const SizedBox(height: 12),
+            _extraDetailsCard(),
+            const SizedBox(height: 12),
+            _profileActions(),
+          ],
+        );
+      case 2:
+        return _mediaCard();
+      default:
+        return _memoriesCard();
+    }
+  }
+
+  Widget _emptyPhotoTile() {
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: _uploadingPhoto ? null : _uploadPhoto,
+      child: Container(
+        width: 104,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF2E7F5),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: const Color(0xFF76558F).withValues(alpha: 0.18),
+          ),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_circle_outline, size: 30),
+            SizedBox(height: 8),
+            Text('New photo'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _mediaCard() {
+    return _fieldCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Their media',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _uploadingPhoto ? null : _uploadPhoto,
+                icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                label: Text(_uploadingPhoto ? 'Adding...' : 'Add'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_loadingPhotos)
+            const Center(child: CircularProgressIndicator())
+          else if (_photoError != null)
+            Text(
+              'Photo load issue: $_photoError',
+              style: TextStyle(color: Colors.black.withValues(alpha: 0.60)),
+            )
+          else if (_photos.isEmpty)
+            const Text('Photos added to this profile will appear here.')
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 220,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: _photos.length,
+              itemBuilder: (_, index) {
+                final photo = _photos[index];
+                final url = (photo['url'] ?? '').trim();
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      url.isEmpty
+                          ? Container(
+                              color: Colors.black.withValues(alpha: 0.05),
+                            )
+                          : Image.network(url, fit: BoxFit.cover),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: InkWell(
+                          onTap: () => _deletePhoto(photo),
+                          child: CircleAvatar(
+                            radius: 15,
+                            backgroundColor: Colors.black.withValues(
+                              alpha: 0.58,
+                            ),
+                            child: const Icon(
+                              Icons.delete_outline,
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );
@@ -1298,20 +1590,31 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'About them',
-            style: TextStyle(fontWeight: FontWeight.w800),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'About them',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+              ),
+              _savePill(compact: true),
+            ],
           ),
           const SizedBox(height: 10),
-          TextField(
+          Text(
+            'Add the details family should remember: personality, values, places, stories.',
+            style: TextStyle(color: Colors.black.withValues(alpha: 0.58)),
+          ),
+          const SizedBox(height: 12),
+          _legacyTextField(
             controller: _aboutController,
             minLines: 6,
             maxLines: 12,
-            decoration: const InputDecoration(
-              labelText: 'Family notes, memories, personality, stories',
-              border: OutlineInputBorder(),
-              alignLabelWithHint: true,
-            ),
+            label: 'About them',
+            hintText: 'Family notes, memories, personality, stories',
+            icon: Icons.auto_stories_outlined,
+            alignLabelWithHint: true,
           ),
         ],
       ),
@@ -1325,18 +1628,16 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         children: [
           Row(
             children: [
-              const Text(
-                'Photos',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const Spacer(),
-              SizedBox(
-                height: 40,
-                child: OutlinedButton.icon(
-                  onPressed: _uploadingPhoto ? null : _uploadPhoto,
-                  icon: const Icon(Icons.add_photo_alternate_outlined),
-                  label: Text(_uploadingPhoto ? 'Uploading…' : 'Add photo'),
+              const Expanded(
+                child: Text(
+                  'Highlights',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                 ),
+              ),
+              TextButton.icon(
+                onPressed: _uploadingPhoto ? null : _uploadPhoto,
+                icon: const Icon(Icons.add, size: 18),
+                label: Text(_uploadingPhoto ? 'Adding...' : 'Add'),
               ),
             ],
           ),
@@ -1351,55 +1652,41 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           else if (_photoError != null)
             Text(
               'Photo load issue: $_photoError',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
-            )
-          else if (_photos.isEmpty)
-            Text(
-              'No photos yet. Add a few warm family photos.',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+              style: TextStyle(color: Colors.black.withValues(alpha: 0.60)),
             )
           else
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: _photos.map((photo) {
-                final url = (photo['url'] ?? '').trim();
-                return Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: Container(
-                        width: 120,
-                        height: 120,
-                        color: Colors.black.withOpacity(0.05),
-                        child: url.isEmpty
-                            ? const SizedBox.shrink()
-                            : Image.network(
-                                url,
-                                fit: BoxFit.cover,
-                                gaplessPlayback: true,
-                              ),
-                      ),
+            SizedBox(
+              height: 132,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _photos.length + 1,
+                separatorBuilder: (context, index) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  if (index == _photos.length) return _emptyPhotoTile();
+                  final photo = _photos[index];
+                  final url = (photo['url'] ?? '').trim();
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onLongPress: () => _deletePhoto(photo),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: url.isEmpty
+                          ? Container(
+                              width: 104,
+                              height: 132,
+                              color: Colors.black.withValues(alpha: 0.05),
+                            )
+                          : Image.network(
+                              url,
+                              width: 104,
+                              height: 132,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                            ),
                     ),
-                    Positioned(
-                      top: 6,
-                      right: 6,
-                      child: InkWell(
-                        onTap: () => _deletePhoto(photo),
-                        child: CircleAvatar(
-                          radius: 14,
-                          backgroundColor: Colors.black.withOpacity(0.55),
-                          child: const Icon(
-                            Icons.delete_outline,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                );
-              }).toList(),
+                  );
+                },
+              ),
             ),
         ],
       ),
@@ -1413,20 +1700,16 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         children: [
           const Text('Profile', style: TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 10),
-          TextField(
+          _legacyTextField(
             controller: _nameController,
-            decoration: const InputDecoration(
-              labelText: 'Name *',
-              border: OutlineInputBorder(),
-            ),
+            label: 'Name *',
+            icon: Icons.person_outline,
           ),
           const SizedBox(height: 12),
-          TextField(
+          _legacyTextField(
             controller: _displayNameController,
-            decoration: const InputDecoration(
-              labelText: 'Display name',
-              border: OutlineInputBorder(),
-            ),
+            label: 'Display name',
+            icon: Icons.alternate_email,
           ),
         ],
       ),
@@ -1449,7 +1732,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             _detailsLabel(_row),
             style: TextStyle(
               fontSize: 12,
-              color: Colors.black.withOpacity(0.55),
+              color: Colors.black.withValues(alpha: 0.55),
             ),
           ),
           childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
@@ -1457,24 +1740,20 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
+                  child: _legacyTextField(
                     controller: _birthYearController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Birth year',
-                      border: OutlineInputBorder(),
-                    ),
+                    label: 'Birth year',
+                    icon: Icons.cake_outlined,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: TextField(
+                  child: _legacyTextField(
                     controller: _deathYearController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Death year',
-                      border: OutlineInputBorder(),
-                    ),
+                    label: 'Death year',
+                    icon: Icons.favorite_border,
                   ),
                 ),
               ],
@@ -1494,7 +1773,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         padding: const EdgeInsets.only(top: 8),
         child: Text(
           'Loading photos…',
-          style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.black.withValues(alpha: 0.55),
+          ),
         ),
       );
     }
@@ -1504,7 +1786,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         padding: const EdgeInsets.only(top: 8),
         child: Text(
           'Photo load issue: $_memoryPhotoError',
-          style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.black.withValues(alpha: 0.55),
+          ),
         ),
       );
     }
@@ -1530,7 +1815,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           itemCount: preview.length + 1,
-          separatorBuilder: (_, __) => const SizedBox(width: 10),
+          separatorBuilder: (context, index) => const SizedBox(width: 10),
           itemBuilder: (context, i) {
             if (i == 0) {
               return InkWell(
@@ -1541,10 +1826,15 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                   height: 66,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.black.withOpacity(0.10)),
-                    color: Colors.white.withOpacity(0.35),
+                    border: Border.all(
+                      color: Colors.black.withValues(alpha: 0.10),
+                    ),
+                    color: Colors.white.withValues(alpha: 0.35),
                   ),
-                  child: Icon(Icons.add, color: Colors.black.withOpacity(0.65)),
+                  child: Icon(
+                    Icons.add,
+                    color: Colors.black.withValues(alpha: 0.65),
+                  ),
                 ),
               );
             }
@@ -1569,7 +1859,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                       right: 6,
                       child: CircleAvatar(
                         radius: 12,
-                        backgroundColor: Colors.black.withOpacity(0.55),
+                        backgroundColor: Colors.black.withValues(alpha: 0.55),
                         child: const Icon(
                           Icons.delete_outline,
                           size: 14,
@@ -1592,101 +1882,165 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final stage = (m['life_stage'] ?? '').toString();
     final prompt = (m['prompt_text'] ?? '').toString();
     final body = (m['body'] ?? '').toString();
+    final title = _titleFromRow(_row);
+    final hasPhoto = (_profilePhotoUrl ?? '').trim().isNotEmpty;
 
-    return Container(
+    return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
-        color: Colors.white.withOpacity(0.38),
+      elevation: 0,
+      color: Colors.white.withValues(alpha: 0.72),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: BorderSide(color: Colors.black.withValues(alpha: 0.07)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Chip(label: Text(_prettyStage(stage))),
-                const SizedBox(height: 8),
-                Text(
-                  prompt.isEmpty ? '(No title)' : prompt,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
+                CircleAvatar(
+                  radius: 20,
+                  backgroundImage: hasPhoto
+                      ? NetworkImage(_profilePhotoUrl!)
+                      : null,
+                  child: hasPhoto ? null : const Icon(Icons.person_outline),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        '${_prettyStage(stage)} - Legacy memory',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.black.withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(body, maxLines: 4, overflow: TextOverflow.ellipsis),
-                _memoryPhotoStrip(memoryId),
+                PopupMenuButton<String>(
+                  tooltip: 'Memory options',
+                  onSelected: (value) {
+                    if (value == 'edit') _editMemory(m);
+                    if (value == 'delete') _deleteMemory(m);
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Edit memory')),
+                    PopupMenuDivider(),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete memory'),
+                    ),
+                  ],
+                ),
               ],
             ),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: 'Edit',
-                icon: const Icon(Icons.edit_outlined),
-                onPressed: () => _editMemory(m),
+            const SizedBox(height: 14),
+            if (prompt.isNotEmpty)
+              Text(
+                prompt,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-              IconButton(
-                tooltip: 'Delete',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => _deleteMemory(m),
-              ),
-            ],
-          ),
-        ],
+            if (prompt.isNotEmpty && body.isNotEmpty) const SizedBox(height: 7),
+            if (body.isNotEmpty)
+              Text(body, style: const TextStyle(fontSize: 15, height: 1.42)),
+            _memoryPhotoStrip(memoryId),
+            const Divider(height: 24),
+            Row(
+              children: [
+                TextButton.icon(
+                  onPressed: () => _uploadMemoryPhoto(memoryId),
+                  icon: const Icon(Icons.photo_outlined),
+                  label: const Text('Photo'),
+                ),
+                const Spacer(),
+                Icon(
+                  Icons.family_restroom,
+                  size: 18,
+                  color: Colors.black.withValues(alpha: 0.46),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _memoriesCard() {
-    return _fieldCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
                 'Memories',
-                style: TextStyle(fontWeight: FontWeight.w800),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
               ),
-              const Spacer(),
-              SizedBox(
-                height: 40,
-                child: OutlinedButton.icon(
-                  onPressed: _openAddMemory,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add memory'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (_loadingMemories)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(10),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_memoryError != null)
-            Text(
+            ),
+            TextButton.icon(
+              onPressed: _openAddMemory,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_loadingMemories)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(10),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (_memoryError != null)
+          _fieldCard(
+            child: Text(
               'Memory load issue: $_memoryError',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
-            )
-          else if (_memories.isEmpty)
-            Text(
+              style: TextStyle(color: Colors.black.withValues(alpha: 0.60)),
+            ),
+          )
+        else if (_memories.isEmpty)
+          _fieldCard(
+            child: Text(
               'No memories yet. Add a story, family memory, or important moment.',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
-            )
-          else
-            Column(children: _memories.map(_memoryCard).toList()),
-        ],
+              style: TextStyle(color: Colors.black.withValues(alpha: 0.60)),
+            ),
+          )
+        else
+          Column(children: _memories.map(_memoryCard).toList()),
+      ],
+    );
+  }
+
+  Widget _legacyPageContent() {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 980),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _headerCard(),
+            _legacyComposerCard(),
+            const SizedBox(height: 14),
+            _photosCard(),
+            const SizedBox(height: 14),
+            _sectionPicker(),
+            _activeSection(),
+          ],
+        ),
       ),
     );
   }
@@ -1727,54 +2081,11 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                ? Center(child: Text(_error!))
-                : ListView(
-                    children: [
-                      _headerCard(),
-                      const SizedBox(height: 12),
-                      _aboutCard(),
-                      const SizedBox(height: 12),
-                      _photosCard(),
-                      const SizedBox(height: 12),
-                      _memoriesCard(),
-                      const SizedBox(height: 12),
-                      _identityCard(),
-                      const SizedBox(height: 12),
-                      _extraDetailsCard(),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: (_savingProfile || _deletingProfile)
-                                  ? null
-                                  : _deleteProfile,
-                              icon: const Icon(Icons.delete_outline),
-                              label: Text(
-                                _deletingProfile ? 'Deleting…' : 'Delete',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: (_savingProfile || _deletingProfile)
-                                  ? null
-                                  : _saveProfile,
-                              icon: const Icon(Icons.save_outlined),
-                              label: Text(_savingProfile ? 'Saving…' : 'Save'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-          ),
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? Center(child: Text(_error!))
+              : _legacyPageContent(),
         ],
       ),
     );
