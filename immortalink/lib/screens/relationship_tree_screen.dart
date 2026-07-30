@@ -1232,7 +1232,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     String? lineageRelativeLabel,
   }) async {
     final nameController = TextEditingController();
-    final displayNameController = TextEditingController();
     final birthYearController = TextEditingController();
     final deathYearController = TextEditingController();
     final aboutController = TextEditingController();
@@ -1340,43 +1339,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                   ),
                   const SizedBox(height: 12),
                   TextField(
-                    controller: displayNameController,
-                    decoration: legacyFieldDecoration(
-                      'Display name',
-                      icon: Icons.alternate_email,
-                      hintText: 'What family calls them',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: birthYearController,
-                          keyboardType: TextInputType.number,
-                          decoration: legacyFieldDecoration(
-                            'Born',
-                            icon: Icons.cake_outlined,
-                            hintText: 'Year',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: deathYearController,
-                          keyboardType: TextInputType.number,
-                          decoration: legacyFieldDecoration(
-                            'Passed',
-                            icon: Icons.favorite_border,
-                            hintText: 'Year',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
                     controller: aboutController,
                     minLines: 3,
                     maxLines: 6,
@@ -1384,6 +1346,65 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                       'About them',
                       icon: Icons.auto_stories_outlined,
                       hintText: 'A memory, nickname, or quick note',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Theme(
+                    data: Theme.of(
+                      context,
+                    ).copyWith(dividerColor: Colors.transparent),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.62),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: Colors.black.withValues(alpha: 0.08),
+                        ),
+                      ),
+                      child: ExpansionTile(
+                        tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          14,
+                          0,
+                          14,
+                          14,
+                        ),
+                        leading: const Icon(Icons.tune_outlined),
+                        title: const Text(
+                          'Extra details',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: const Text('Born and passed years'),
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: birthYearController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: legacyFieldDecoration(
+                                    'Born',
+                                    icon: Icons.cake_outlined,
+                                    hintText: 'Year',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextField(
+                                  controller: deathYearController,
+                                  keyboardType: TextInputType.number,
+                                  decoration: legacyFieldDecoration(
+                                    'Passed',
+                                    icon: Icons.favorite_border,
+                                    hintText: 'Year',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   if (error != null) ...[
@@ -1452,10 +1473,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
 
                       List<_TreePerson>? siblingParents;
                       if (kind == _RelativeKind.sibling) {
-                        final displayName = displayNameController.text.trim();
                         siblingParents = await _chooseParentsForSibling(
                           focus: focus,
-                          siblingName: displayName.isEmpty ? name : displayName,
+                          siblingName: name,
                         );
                         if (siblingParents == null) {
                           return;
@@ -1467,10 +1487,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                       final isGapLineage = lineagePlaceholderCount > 0;
 
                       if (kind == _RelativeKind.parent && !isGapLineage) {
-                        final displayName = displayNameController.text.trim();
                         parentPartners = await _choosePartnersForParent(
                           focus: focus,
-                          parentName: displayName.isEmpty ? name : displayName,
+                          parentName: name,
                         );
                         if (parentPartners == null) return;
                         if (!dialogContext.mounted) return;
@@ -1509,10 +1528,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                             'p_anchor_id': anchor.id,
                             'p_relation': _kindLabel(createKind),
                             'p_name': name,
-                            'p_display_name':
-                                displayNameController.text.trim().isEmpty
-                                ? null
-                                : displayNameController.text.trim(),
+                            'p_display_name': null,
                             'p_birth_year': birthYear,
                             'p_death_year': deathYear,
                             'p_about_me_text':
@@ -1562,10 +1578,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                         if (!dialogContext.mounted) return;
                         Navigator.pop(dialogContext);
                         await Future<void>.delayed(Duration.zero);
-                        final createdName =
-                            displayNameController.text.trim().isEmpty
-                            ? name
-                            : displayNameController.text.trim();
+                        final createdName = name;
                         if (kind == _RelativeKind.spouse) {
                           await _chooseChildrenForSpouse(
                             focus: focus,

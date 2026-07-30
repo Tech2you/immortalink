@@ -63,7 +63,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   final Map<String, List<_LegacyVoiceNote>> _memoryVoiceById = {};
 
   final _nameController = TextEditingController();
-  final _displayNameController = TextEditingController();
   final _birthYearController = TextEditingController();
   final _deathYearController = TextEditingController();
   final _aboutController = TextEditingController();
@@ -83,7 +82,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     _recorder.dispose();
     _voicePlayer.dispose();
     _nameController.dispose();
-    _displayNameController.dispose();
     _birthYearController.dispose();
     _deathYearController.dispose();
     _aboutController.dispose();
@@ -225,10 +223,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   }
 
   String _titleFromRow(Map<String, dynamic>? row) {
-    final display = (row?['display_name'] ?? '').toString().trim();
     final name = (row?['name'] ?? '').toString().trim();
-    if (display.isNotEmpty) return display;
     if (name.isNotEmpty) return name;
+    final display = (row?['display_name'] ?? '').toString().trim();
+    if (display.isNotEmpty) return display;
     return 'Legacy predecessor';
   }
 
@@ -354,7 +352,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       _row = row;
 
       _nameController.text = (row['name'] ?? '').toString();
-      _displayNameController.text = (row['display_name'] ?? '').toString();
       _birthYearController.text = row['birth_year'] == null
           ? ''
           : row['birth_year'].toString();
@@ -1014,7 +1011,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
   Future<void> _saveProfile() async {
     final name = _nameController.text.trim();
-    final displayName = _displayNameController.text.trim();
     final birthYear = _parseYear(_birthYearController.text);
     final deathYear = _parseYear(_deathYearController.text);
     final about = _aboutController.text.trim();
@@ -1041,7 +1037,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           .from('legacy_family_members')
           .update({
             'name': name,
-            'display_name': displayName.isEmpty ? null : displayName,
             'birth_year': birthYear,
             'death_year': deathYear,
             'about_me_text': about.isEmpty ? null : about,
@@ -2638,12 +2633,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             controller: _nameController,
             label: 'Name *',
             icon: Icons.person_outline,
-          ),
-          const SizedBox(height: 12),
-          _legacyTextField(
-            controller: _displayNameController,
-            label: 'Display name',
-            icon: Icons.alternate_email,
           ),
         ],
       ),
