@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/sign_in_screen.dart';
 import 'screens/vaults_screen.dart';
+
+const _staySignedInPreferenceKey = 'auth_stay_signed_in';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -76,11 +79,42 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class AuthGate extends StatelessWidget {
+class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
   @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool _checkedSessionPreference = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _enforceSessionPreference();
+  }
+
+  Future<void> _enforceSessionPreference() async {
+    final auth = Supabase.instance.client.auth;
+    final prefs = await SharedPreferences.getInstance();
+    final staySignedIn = prefs.getBool(_staySignedInPreferenceKey) ?? true;
+
+    if (!staySignedIn && auth.currentSession != null) {
+      await auth.signOut(scope: SignOutScope.local);
+    }
+
+    if (mounted) {
+      setState(() => _checkedSessionPreference = true);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (!_checkedSessionPreference) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     final auth = Supabase.instance.client.auth;
 
     return StreamBuilder<AuthState>(
