@@ -216,342 +216,363 @@ class _SignInScreenState extends State<SignInScreen> {
           builder: (context, constraints) {
             final compact =
                 constraints.maxHeight < 760 || constraints.maxWidth < 390;
+            final tight = constraints.maxHeight < 680;
             final cardPadding = compact
-                ? const EdgeInsets.fromLTRB(18, 16, 18, 18)
+                ? (tight
+                      ? const EdgeInsets.fromLTRB(16, 14, 16, 16)
+                      : const EdgeInsets.fromLTRB(18, 16, 18, 18))
                 : const EdgeInsets.fromLTRB(24, 20, 24, 22);
-            final logoHeight = compact ? 156.0 : 214.0;
-            final logoScale = compact ? 1.9 : 2.32;
-            final verticalGap = compact ? 12.0 : 16.0;
+            final logoHeight = tight ? 122.0 : (compact ? 156.0 : 214.0);
+            final logoScale = tight ? 1.62 : (compact ? 1.9 : 2.32);
+            final verticalGap = tight ? 8.0 : (compact ? 12.0 : 16.0);
+            final outerPadding = tight ? 12.0 : 22.0;
+            final switchTextStyle = TextStyle(
+              color: muted,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            );
+            final switchButtonStyle = OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF70539A),
+              backgroundColor: const Color(0xFFF4EDF8),
+              side: BorderSide(
+                color: const Color(0xFF70539A).withValues(alpha: 0.26),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              minimumSize: const Size(0, 42),
+              textStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(999),
+              ),
+            );
 
             return SingleChildScrollView(
               // This padding is what prevents keyboard overlap.
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
+              padding: EdgeInsets.fromLTRB(
+                outerPadding,
+                outerPadding,
+                outerPadding,
+                MediaQuery.of(context).viewInsets.bottom + outerPadding,
               ),
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                child: IntrinsicHeight(
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Color(0xFFFFF8FE),
-                          Color(0xFFF6F9FF),
-                          Color(0xFFFFFBF7),
-                        ],
-                      ),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Color(0xFFFFF8FE),
+                        Color(0xFFF6F9FF),
+                        Color(0xFFFFFBF7),
+                      ],
                     ),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 540),
-                        child: Padding(
-                          padding: const EdgeInsets.all(22),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.72),
-                              borderRadius: BorderRadius.circular(30),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.78),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(
-                                    0xFF70539A,
-                                  ).withValues(alpha: 0.10),
-                                  blurRadius: 28,
-                                  offset: const Offset(0, 18),
-                                ),
-                              ],
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 540),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.78),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(
+                                0xFF70539A,
+                              ).withValues(alpha: 0.10),
+                              blurRadius: 28,
+                              offset: const Offset(0, 18),
                             ),
-                            child: Padding(
-                              padding: cardPadding,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
+                          ],
+                        ),
+                        child: Padding(
+                          padding: cardPadding,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                height: logoHeight,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Container(
+                                      width: logoHeight * 1.55,
+                                      height: logoHeight * 0.86,
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                        gradient: RadialGradient(
+                                          colors: [
+                                            const Color(
+                                              0xFF0F7C82,
+                                            ).withValues(alpha: 0.16),
+                                            const Color(
+                                              0xFF70539A,
+                                            ).withValues(alpha: 0.07),
+                                            Colors.transparent,
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    Transform.scale(
+                                      scale: logoScale,
+                                      child: Image.asset(
+                                        'assets/images/immortalink_logo.png',
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              SizedBox(height: verticalGap),
+
+                              Text(
+                                'Keep your family connected — now and always.',
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  color: const Color(0xFF26212D),
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+
+                              SizedBox(
+                                height: tight ? 12 : (compact ? 18 : 24),
+                              ),
+
+                              Row(
                                 children: [
-                                  SizedBox(
-                                    height: logoHeight,
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        Container(
-                                          width: logoHeight * 1.55,
-                                          height: logoHeight * 0.86,
-                                          decoration: BoxDecoration(
-                                            borderRadius: BorderRadius.circular(
-                                              999,
-                                            ),
-                                            gradient: RadialGradient(
-                                              colors: [
-                                                const Color(
-                                                  0xFF0F7C82,
-                                                ).withValues(alpha: 0.16),
-                                                const Color(
-                                                  0xFF70539A,
-                                                ).withValues(alpha: 0.07),
-                                                Colors.transparent,
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                        Transform.scale(
-                                          scale: logoScale,
-                                          child: Image.asset(
-                                            'assets/images/immortalink_logo.png',
-                                            fit: BoxFit.contain,
-                                          ),
-                                        ),
-                                      ],
+                                  Expanded(
+                                    child: Text(
+                                      title,
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w900,
+                                      ),
                                     ),
                                   ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
 
-                                  SizedBox(height: verticalGap),
+                              TextField(
+                                controller: _email,
+                                focusNode: _emailFocus,
+                                keyboardType: TextInputType.emailAddress,
+                                textInputAction: TextInputAction.next,
+                                autofillHints: const [AutofillHints.email],
+                                decoration: authDecoration(
+                                  'Email',
+                                  icon: Icons.mail_outline,
+                                ),
+                                onSubmitted: (_) =>
+                                    _passwordFocus.requestFocus(),
+                              ),
+                              const SizedBox(height: 12),
 
-                                  Text(
-                                    'Keep your family connected — now and always.',
-                                    style: theme.textTheme.titleLarge?.copyWith(
-                                      color: const Color(0xFF26212D),
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0,
+                              TextField(
+                                controller: _password,
+                                focusNode: _passwordFocus,
+                                obscureText: _hidePassword,
+                                textInputAction: isSignIn
+                                    ? TextInputAction.done
+                                    : TextInputAction.next,
+                                autofillHints: isSignIn
+                                    ? const [AutofillHints.password]
+                                    : const [AutofillHints.newPassword],
+                                decoration: authDecoration(
+                                  'Password',
+                                  icon: Icons.lock_outline,
+                                  suffixIcon: IconButton(
+                                    tooltip: _hidePassword
+                                        ? 'Show password'
+                                        : 'Hide password',
+                                    onPressed: () => setState(
+                                      () => _hidePassword = !_hidePassword,
+                                    ),
+                                    icon: Icon(
+                                      _hidePassword
+                                          ? Icons.visibility
+                                          : Icons.visibility_off,
+                                    ),
+                                  ),
+                                ),
+                                onSubmitted: (_) {
+                                  if (isSignIn) {
+                                    _submit();
+                                  } else {
+                                    _confirmFocus.requestFocus();
+                                  }
+                                },
+                              ),
+
+                              if (!isSignIn) ...[
+                                const SizedBox(height: 12),
+                                TextField(
+                                  controller: _confirm,
+                                  focusNode: _confirmFocus,
+                                  obscureText: _hideConfirm,
+                                  textInputAction: TextInputAction.done,
+                                  autofillHints: const [
+                                    AutofillHints.newPassword,
+                                  ],
+                                  decoration: authDecoration(
+                                    'Confirm password',
+                                    icon: Icons.verified_user_outlined,
+                                    suffixIcon: IconButton(
+                                      tooltip: _hideConfirm
+                                          ? 'Show password'
+                                          : 'Hide password',
+                                      onPressed: () => setState(
+                                        () => _hideConfirm = !_hideConfirm,
+                                      ),
+                                      icon: Icon(
+                                        _hideConfirm
+                                            ? Icons.visibility
+                                            : Icons.visibility_off,
+                                      ),
+                                    ),
+                                  ),
+                                  onSubmitted: (_) => _submit(),
+                                ),
+                              ],
+
+                              if (isSignIn) ...[
+                                SizedBox(height: tight ? 8 : 10),
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: const Color(
+                                      0xFFF4EDF8,
+                                    ).withValues(alpha: 0.70),
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  child: CheckboxListTile(
+                                    dense: tight,
+                                    visualDensity: tight
+                                        ? VisualDensity.compact
+                                        : VisualDensity.standard,
+                                    value: _staySignedIn,
+                                    onChanged: _loading
+                                        ? null
+                                        : (value) => setState(
+                                            () => _staySignedIn = value ?? true,
+                                          ),
+                                    controlAffinity:
+                                        ListTileControlAffinity.leading,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                    ),
+                                    title: const Text(
+                                      'Stay signed in',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    subtitle: const Text(
+                                      'Keep this account open on this device.',
+                                    ),
+                                  ),
+                                ),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: _loading
+                                        ? null
+                                        : _forgotPassword,
+                                    child: const Text('Forgot password?'),
+                                  ),
+                                ),
+                              ],
+
+                              if (_error != null) ...[
+                                const SizedBox(height: 6),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFE9E9),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Text(
+                                    _error!,
+                                    style: const TextStyle(
+                                      color: Color(0xFF9E2A2A),
                                     ),
                                     textAlign: TextAlign.center,
                                   ),
+                                ),
+                              ],
 
-                                  SizedBox(height: compact ? 18 : 24),
+                              SizedBox(height: tight ? 8 : 10),
 
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          title,
-                                          style: const TextStyle(
-                                            fontSize: 20,
-                                            fontWeight: FontWeight.w900,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 12),
-
-                                  TextField(
-                                    controller: _email,
-                                    focusNode: _emailFocus,
-                                    keyboardType: TextInputType.emailAddress,
-                                    textInputAction: TextInputAction.next,
-                                    autofillHints: const [AutofillHints.email],
-                                    decoration: authDecoration(
-                                      'Email',
-                                      icon: Icons.mail_outline,
-                                    ),
-                                    onSubmitted: (_) =>
-                                        _passwordFocus.requestFocus(),
-                                  ),
-                                  const SizedBox(height: 12),
-
-                                  TextField(
-                                    controller: _password,
-                                    focusNode: _passwordFocus,
-                                    obscureText: _hidePassword,
-                                    textInputAction: isSignIn
-                                        ? TextInputAction.done
-                                        : TextInputAction.next,
-                                    autofillHints: isSignIn
-                                        ? const [AutofillHints.password]
-                                        : const [AutofillHints.newPassword],
-                                    decoration: authDecoration(
-                                      'Password',
-                                      icon: Icons.lock_outline,
-                                      suffixIcon: IconButton(
-                                        tooltip: _hidePassword
-                                            ? 'Show password'
-                                            : 'Hide password',
-                                        onPressed: () => setState(
-                                          () => _hidePassword = !_hidePassword,
-                                        ),
-                                        icon: Icon(
-                                          _hidePassword
-                                              ? Icons.visibility
-                                              : Icons.visibility_off,
-                                        ),
-                                      ),
-                                    ),
-                                    onSubmitted: (_) {
-                                      if (isSignIn) {
-                                        _submit();
-                                      } else {
-                                        _confirmFocus.requestFocus();
-                                      }
-                                    },
-                                  ),
-
-                                  if (!isSignIn) ...[
-                                    const SizedBox(height: 12),
-                                    TextField(
-                                      controller: _confirm,
-                                      focusNode: _confirmFocus,
-                                      obscureText: _hideConfirm,
-                                      textInputAction: TextInputAction.done,
-                                      autofillHints: const [
-                                        AutofillHints.newPassword,
-                                      ],
-                                      decoration: authDecoration(
-                                        'Confirm password',
-                                        icon: Icons.verified_user_outlined,
-                                        suffixIcon: IconButton(
-                                          tooltip: _hideConfirm
-                                              ? 'Show password'
-                                              : 'Hide password',
-                                          onPressed: () => setState(
-                                            () => _hideConfirm = !_hideConfirm,
-                                          ),
-                                          icon: Icon(
-                                            _hideConfirm
-                                                ? Icons.visibility
-                                                : Icons.visibility_off,
-                                          ),
-                                        ),
-                                      ),
-                                      onSubmitted: (_) => _submit(),
-                                    ),
-                                  ],
-
-                                  if (isSignIn) ...[
-                                    const SizedBox(height: 10),
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        color: const Color(
-                                          0xFFF4EDF8,
-                                        ).withValues(alpha: 0.70),
-                                        borderRadius: BorderRadius.circular(18),
-                                      ),
-                                      child: CheckboxListTile(
-                                        value: _staySignedIn,
-                                        onChanged: _loading
-                                            ? null
-                                            : (value) => setState(
-                                                () => _staySignedIn =
-                                                    value ?? true,
-                                              ),
-                                        controlAffinity:
-                                            ListTileControlAffinity.leading,
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                            ),
-                                        title: const Text(
-                                          'Stay signed in',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                        subtitle: const Text(
-                                          'Keep this account open on this device.',
-                                        ),
-                                      ),
-                                    ),
-                                    Align(
-                                      alignment: Alignment.centerRight,
-                                      child: TextButton(
-                                        onPressed: _loading
-                                            ? null
-                                            : _forgotPassword,
-                                        child: const Text('Forgot password?'),
-                                      ),
-                                    ),
-                                  ],
-
-                                  if (_error != null) ...[
-                                    const SizedBox(height: 6),
-                                    Container(
-                                      width: double.infinity,
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFFFE9E9),
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      child: Text(
-                                        _error!,
-                                        style: const TextStyle(
-                                          color: Color(0xFF9E2A2A),
-                                        ),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                  ],
-
-                                  const SizedBox(height: 10),
-
-                                  SizedBox(
-                                    width: double.infinity,
-                                    height: 50,
-                                    child: FilledButton(
-                                      style: FilledButton.styleFrom(
-                                        backgroundColor: const Color(
-                                          0xFF70539A,
-                                        ),
-                                        foregroundColor: Colors.white,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            18,
-                                          ),
-                                        ),
-                                      ),
-                                      onPressed: _loading ? null : _submit,
-                                      child: Text(
-                                        _loading
-                                            ? 'Please wait...'
-                                            : (isSignIn
-                                                  ? 'Sign in'
-                                                  : 'Create account'),
-                                      ),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 50,
+                                child: FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFF70539A),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(18),
                                     ),
                                   ),
-
-                                  SizedBox(height: compact ? 10 : 14),
-
-                                  if (isSignIn)
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          'No account? ',
-                                          style: TextStyle(color: muted),
-                                        ),
-                                        TextButton(
-                                          onPressed: _loading
-                                              ? null
-                                              : () => _switchMode(
-                                                  _AuthMode.signUp,
-                                                ),
-                                          child: const Text('Create one'),
-                                        ),
-                                      ],
-                                    )
-                                  else
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          'Account created? ',
-                                          style: TextStyle(color: muted),
-                                        ),
-                                        TextButton(
-                                          onPressed: _loading
-                                              ? null
-                                              : () => _switchMode(
-                                                  _AuthMode.signIn,
-                                                ),
-                                          child: const Text('Sign in now'),
-                                        ),
-                                      ],
-                                    ),
-                                ],
+                                  onPressed: _loading ? null : _submit,
+                                  child: Text(
+                                    _loading
+                                        ? 'Please wait...'
+                                        : (isSignIn
+                                              ? 'Sign in'
+                                              : 'Create account'),
+                                  ),
+                                ),
                               ),
-                            ),
+
+                              SizedBox(height: tight ? 6 : (compact ? 10 : 14)),
+
+                              if (isSignIn)
+                                Wrap(
+                                  alignment: WrapAlignment.center,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Text(
+                                      'No account? ',
+                                      style: switchTextStyle,
+                                    ),
+                                    OutlinedButton(
+                                      style: switchButtonStyle,
+                                      onPressed: _loading
+                                          ? null
+                                          : () => _switchMode(_AuthMode.signUp),
+                                      child: const Text('Create one'),
+                                    ),
+                                  ],
+                                )
+                              else
+                                Wrap(
+                                  alignment: WrapAlignment.center,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Text(
+                                      'Account created? ',
+                                      style: switchTextStyle,
+                                    ),
+                                    OutlinedButton(
+                                      style: switchButtonStyle,
+                                      onPressed: _loading
+                                          ? null
+                                          : () => _switchMode(_AuthMode.signIn),
+                                      child: const Text('Sign in now'),
+                                    ),
+                                  ],
+                                ),
+                            ],
                           ),
                         ),
                       ),
