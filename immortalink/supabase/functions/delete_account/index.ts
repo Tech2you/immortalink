@@ -1,0 +1,199 @@
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function json(status: number, body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function clean(value: unknown) {
+  return (value ?? "").toString().trim();
+}
+
+function missingRelation(error: any) {
+  return error?.code === "42P01" ||
+    `${error?.message ?? ""}`.includes("does not exist");
+}
+
+function optionalSchemaError(error: any) {
+  return missingRelation(error) || error?.code === "42703";
+}
+
+async function optionalDelete(query: PromiseLike<{ error: any }>) {
+  const { error } = await query;
+  if (error && !missingRelation(error)) throw error;
+}
+
+async function optionalProfileDelete(query: PromiseLike<{ error: any }>) {
+  const { error } = await query;
+  if (error && !optionalSchemaError(error)) throw error;
+}
+
+async function removeStoragePrefix(admin: any, bucket: string, prefix: string) {
+  const files: string[] = [];
+
+  async function walk(path: string) {
+    const { data, error } = await admin.storage
+      .from(bucket)
+      .list(path, { limit: 1000 });
+    if (error || !data) return;
+
+    for (const item of data) {
+      const itemPath = `${path}/${item.name}`.replace(/^\/+/, "");
+      if (item.id) {
+        files.push(itemPath);
+      } else {
+        await walk(itemPath);
+      }
+    }
+  }
+
+  await walk(prefix.replace(/\/+$/, ""));
+
+  for (let i = 0; i < files.length; i += 100) {
+    await admin.storage.from(bucket).remove(files.slice(i, i + 100));
+  }
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") return json(405, { error: "Use POST" });
+
+  try {
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
+    const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SERVICE_ROLE_KEY) {
+      return json(500, { error: "Delete account function is not configured." });
+    }
+
+    const authHeader =
+      req.headers.get("authorization") || req.headers.get("Authorization") || "";
+
+    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+    const { data: authData, error: authError } = await userClient.auth.getUser();
+    if (authError || !authData?.user) {
+      return json(401, { error: "Invalid or missing session." });
+    }
+
+    const userId = authData.user.id;
+
+    const { data: vaultRows, error: vaultError } = await admin
+      .from("vaults")
+      .select("id")
+      .eq("owner_id", userId);
+    if (vaultError && !missingRelation(vaultError)) throw vaultError;
+
+    const vaultIds = (vaultRows || [])
+      .map((row: any) => clean(row.id))
+      .filter(Boolean);
+
+    let memoryIds: string[] = [];
+    if (vaultIds.length) {
+      const { data: memoryRows, error: memoryError } = await admin
+        .from("memories")
+        .select("id")
+        .in("vault_id", vaultIds);
+      if (memoryError && !missingRelation(memoryError)) throw memoryError;
+      memoryIds = (memoryRows || [])
+        .map((row: any) => clean(row.id))
+        .filter(Boolean);
+    }
+
+    for (const vaultId of vaultIds) {
+      await optionalDelete(
+        admin
+          .from("family_relationships")
+          .delete()
+          .eq("parent_type", "vault")
+          .eq("parent_id", vaultId),
+      );
+      await optionalDelete(
+        admin
+          .from("family_relationships")
+          .delete()
+          .eq("child_type", "vault")
+          .eq("child_id", vaultId),
+      );
+    }
+
+    if (memoryIds.length) {
+      await optionalDelete(
+        admin.from("memory_voice_notes").delete().in("memory_id", memoryIds),
+      );
+      await optionalDelete(
+        admin.from("memory_photos").delete().in("memory_id", memoryIds),
+      );
+      await optionalDelete(
+        admin.from("memory_chunks").delete().in("memory_id", memoryIds),
+      );
+    }
+
+    if (vaultIds.length) {
+      await optionalDelete(
+        admin.from("vault_highlight_photos").delete().in("vault_id", vaultIds),
+      );
+      await optionalDelete(
+        admin.from("vault_about_photos").delete().in("vault_id", vaultIds),
+      );
+      await optionalDelete(
+        admin.from("vault_core_voice_note").delete().in("vault_id", vaultIds),
+      );
+      await optionalDelete(
+        admin
+          .from("family_feed_hidden_vaults")
+          .delete()
+          .in("hidden_vault_id", vaultIds),
+      );
+      await optionalDelete(admin.from("memories").delete().in("vault_id", vaultIds));
+      await optionalDelete(admin.from("vaults").delete().in("id", vaultIds));
+    }
+
+    await optionalDelete(
+      admin.from("family_feed_hidden_vaults").delete().eq("user_id", userId),
+    );
+    await optionalDelete(admin.from("family_members").delete().eq("user_id", userId));
+    await optionalProfileDelete(admin.from("profiles").delete().eq("id", userId));
+    await optionalProfileDelete(
+      admin.from("profiles").delete().eq("user_id", userId),
+    );
+
+    await optionalDelete(
+      admin.from("legacy_member_photos").delete().like("path", `${userId}/%`),
+    );
+    await optionalDelete(
+      admin.from("legacy_memory_photos").delete().like("path", `${userId}/%`),
+    );
+    await optionalDelete(
+      admin.from("legacy_memory_voice_notes").delete().like("path", `${userId}/%`),
+    );
+
+    await Promise.all([
+      removeStoragePrefix(admin, "avatars", userId),
+      removeStoragePrefix(admin, "vault_photos", userId),
+      removeStoragePrefix(admin, "memory_photos", userId),
+      removeStoragePrefix(admin, "memory_voice", userId),
+    ]);
+
+    const { error: deleteUserError } = await admin.auth.admin.deleteUser(userId);
+    if (deleteUserError) throw deleteUserError;
+
+    return json(200, { ok: true });
+  } catch (_error) {
+    return json(500, { error: "Could not delete account." });
+  }
+});

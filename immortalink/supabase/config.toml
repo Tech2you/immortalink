@@ -6,6 +6,9 @@ verify_jwt = true
 [functions.vault_ai_chat]
 verify_jwt = true
 
+[functions.delete_account]
+verify_jwt = true
+
 [functions.index_voice_note]
 enabled = true
 verify_jwt = true

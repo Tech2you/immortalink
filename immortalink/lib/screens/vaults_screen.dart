@@ -8,6 +8,14 @@ import 'vault_home_screen.dart';
 import 'relationship_tree_screen.dart';
 import 'join_family_screen.dart';
 
+enum _VaultSettingsAction {
+  refresh,
+  joinFamily,
+  manageSubscription,
+  deleteAccount,
+  signOut,
+}
+
 class VaultsScreen extends StatefulWidget {
   const VaultsScreen({super.key});
 
@@ -76,6 +84,52 @@ class _VaultsScreenState extends State<VaultsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  Map<String, String> _authHeadersOrThrow() {
+    final token = _supabase.auth.currentSession?.accessToken.trim();
+    if (token == null || token.isEmpty) {
+      throw Exception('Missing session. Please sign in again.');
+    }
+    return {'Authorization': 'Bearer $token', 'authorization': 'Bearer $token'};
+  }
+
+  Future<void> _handleSettingsAction(_VaultSettingsAction action) async {
+    switch (action) {
+      case _VaultSettingsAction.refresh:
+        await _loadVault();
+        return;
+      case _VaultSettingsAction.joinFamily:
+        _openJoinFamilyScreen();
+        return;
+      case _VaultSettingsAction.manageSubscription:
+        await _showSubscriptionSettings();
+        return;
+      case _VaultSettingsAction.deleteAccount:
+        await _deleteAccount();
+        return;
+      case _VaultSettingsAction.signOut:
+        await _signOut();
+        return;
+    }
+  }
+
+  Future<void> _showSubscriptionSettings() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Subscription'),
+        content: const Text(
+          'Your subscription controls will appear here once billing is connected.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _signOut() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -111,6 +165,100 @@ class _VaultsScreenState extends State<VaultsScreen> {
       });
     } catch (e) {
       _toast('Sign out failed: $e');
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    final passwordController = TextEditingController();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete account permanently?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This permanently deletes your account, vault, memories, media, and family-tree links. This cannot be undone.',
+            ),
+            const SizedBox(height: 12),
+            const Text('Enter your password to confirm this is you.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passwordController,
+              autofocus: true,
+              obscureText: true,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(labelText: 'Password'),
+              onSubmitted: (_) => Navigator.pop(ctx, true),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFB3261E),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete account'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) {
+      passwordController.dispose();
+      return;
+    }
+    final password = passwordController.text;
+    passwordController.dispose();
+    if (password.isEmpty) {
+      _toast('Enter your password to confirm account deletion.');
+      return;
+    }
+
+    try {
+      final email = _supabase.auth.currentUser?.email?.trim();
+      if (email == null || email.isEmpty) {
+        throw Exception('Missing account email. Please sign in again.');
+      }
+
+      await _supabase.auth
+          .signInWithPassword(email: email, password: password)
+          .timeout(const Duration(seconds: 20));
+
+      final res = await _supabase.functions
+          .invoke('delete_account', headers: _authHeadersOrThrow())
+          .timeout(const Duration(seconds: 45));
+
+      if (res.status < 200 || res.status >= 300) {
+        throw Exception(res.data?.toString() ?? 'Delete account failed.');
+      }
+
+      await _supabase.auth.signOut();
+      if (!mounted) return;
+      setState(() {
+        _vault = null;
+        _vaultAvatarUrl = null;
+        _error = null;
+        _familyFeed = [];
+        _feedError = null;
+        _familyMemberships = [];
+        _activeFamilyId = null;
+      });
+      _toast('Account deleted.');
+    } on AuthException {
+      _toast('Password confirmation failed.');
+    } on TimeoutException {
+      _toast('Account deletion timed out. Try again.');
+    } catch (e) {
+      _toast('Account deletion failed: $e');
     }
   }
 
@@ -233,6 +381,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         _vaultAvatarUrl = signedUrl;
       });
 
+      await _cleanupStaleMembershipsForFreshVault(data, user.id);
       await _loadFamilyMemberships(user.id);
       await _loadFamilyFeed();
     } on TimeoutException {
@@ -254,6 +403,49 @@ class _VaultsScreenState extends State<VaultsScreen> {
     } finally {
       if (!mounted) return;
       setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _cleanupStaleMembershipsForFreshVault(
+    Map<String, dynamic>? vault,
+    String userId,
+  ) async {
+    final vaultFamilyId = (vault?['family_id'] ?? '').toString().trim();
+    final vaultCreatedAt = DateTime.tryParse(
+      (vault?['created_at'] ?? '').toString().trim(),
+    )?.toUtc();
+
+    if (vault == null || vaultFamilyId.isNotEmpty || vaultCreatedAt == null) {
+      return;
+    }
+
+    try {
+      final rawRows = await _supabase
+          .from('family_members')
+          .select('family_id, joined_at')
+          .eq('user_id', userId)
+          .timeout(const Duration(seconds: 12));
+
+      final staleFamilyIds = List<Map<String, dynamic>>.from(rawRows)
+          .where((row) {
+            final familyId = (row['family_id'] ?? '').toString().trim();
+            final joinedAt = DateTime.tryParse(
+              (row['joined_at'] ?? '').toString().trim(),
+            )?.toUtc();
+            return familyId.isNotEmpty &&
+                joinedAt != null &&
+                joinedAt.isBefore(vaultCreatedAt);
+          })
+          .map((row) => (row['family_id'] ?? '').toString().trim())
+          .toSet();
+
+      for (final familyId in staleFamilyIds) {
+        await _supabase
+            .rpc('leave_family', params: {'p_family_id': familyId})
+            .timeout(const Duration(seconds: 12));
+      }
+    } catch (_) {
+      // A failed cleanup should not block loading the user's vault.
     }
   }
 
@@ -627,6 +819,35 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (ok != true) return;
 
     try {
+      final userId = _supabase.auth.currentUser?.id;
+      final familyIds = _familyMemberships
+          .map((row) => (row['family_id'] ?? '').toString().trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+
+      if (userId != null && familyIds.isEmpty) {
+        final rawRows = await _supabase
+            .from('family_members')
+            .select('family_id')
+            .eq('user_id', userId)
+            .timeout(const Duration(seconds: 12));
+        familyIds.addAll(
+          List<Map<String, dynamic>>.from(rawRows)
+              .map((row) => (row['family_id'] ?? '').toString().trim())
+              .where((id) => id.isNotEmpty),
+        );
+      }
+
+      for (final familyId in familyIds) {
+        try {
+          await _supabase
+              .rpc('leave_family', params: {'p_family_id': familyId})
+              .timeout(const Duration(seconds: 12));
+        } catch (_) {
+          // Deleting the vault should not be blocked by an old family row.
+        }
+      }
+
       await _supabase
           .from('vaults')
           .delete()
@@ -645,16 +866,36 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   Future<void> _createVault() async {
-    final controller = TextEditingController(text: 'My Vault');
+    final controller = TextEditingController();
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Create your vault'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Vault name'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter your name as it should display on your family tree.',
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'You can edit this later.',
+              style: TextStyle(color: Colors.black.withValues(alpha: 0.62)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                labelText: 'Your name',
+                hintText: 'Example: Frank',
+              ),
+              onSubmitted: (_) => Navigator.pop(ctx, true),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -674,10 +915,39 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (name.isEmpty) return;
 
     try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) throw Exception('Not signed in.');
+
+      final staleFamilyIds = <String>{};
+      try {
+        final rawMemberships = await _supabase
+            .from('family_members')
+            .select('family_id')
+            .eq('user_id', user.id)
+            .timeout(const Duration(seconds: 12));
+        staleFamilyIds.addAll(
+          List<Map<String, dynamic>>.from(rawMemberships)
+              .map((row) => (row['family_id'] ?? '').toString().trim())
+              .where((id) => id.isNotEmpty),
+        );
+      } catch (_) {
+        // Vault creation should still work if old membership cleanup is stale.
+      }
+
       await _supabase
           .from('vaults')
-          .insert({'name': name})
+          .insert({'name': name, 'display_name': name})
           .timeout(const Duration(seconds: 12));
+
+      for (final familyId in staleFamilyIds) {
+        try {
+          await _supabase
+              .rpc('leave_family', params: {'p_family_id': familyId})
+              .timeout(const Duration(seconds: 12));
+        } catch (_) {
+          // Keep creation successful even if a stale old membership is gone.
+        }
+      }
 
       await _loadVault();
       _toast('Vault created.');
@@ -1535,20 +1805,51 @@ class _VaultsScreenState extends State<VaultsScreen> {
         backgroundColor: const Color(0xFFF7F0F7),
         elevation: 0,
         actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _loadVault,
-            icon: const Icon(Icons.refresh),
-          ),
-          IconButton(
-            tooltip: 'Join family',
-            onPressed: _openJoinFamilyScreen,
-            icon: const Icon(Icons.group_add),
-          ),
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: _signOut,
-            icon: const Icon(Icons.logout),
+          PopupMenuButton<_VaultSettingsAction>(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onSelected: _handleSettingsAction,
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(
+                value: _VaultSettingsAction.refresh,
+                child: ListTile(
+                  leading: Icon(Icons.refresh),
+                  title: Text('Refresh'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _VaultSettingsAction.joinFamily,
+                child: ListTile(
+                  leading: Icon(Icons.group_add),
+                  title: Text('Join family'),
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: _VaultSettingsAction.manageSubscription,
+                child: ListTile(
+                  leading: Icon(Icons.credit_card_outlined),
+                  title: Text('Subscription'),
+                  subtitle: Text('Manage or cancel'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _VaultSettingsAction.deleteAccount,
+                child: ListTile(
+                  leading: Icon(Icons.delete_forever_outlined),
+                  title: Text('Delete account'),
+                  subtitle: Text('Permanent'),
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: _VaultSettingsAction.signOut,
+                child: ListTile(
+                  leading: Icon(Icons.logout),
+                  title: Text('Sign out'),
+                ),
+              ),
+            ],
           ),
         ],
       ),
