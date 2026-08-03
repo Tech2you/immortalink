@@ -8,6 +8,7 @@ WebAudioRecorder createWebAudioRecorderImpl() => _DeviceAudioRecorder();
 
 class _DeviceAudioRecorder implements WebAudioRecorder {
   final AudioRecorder _recorder = AudioRecorder();
+  final List<String> _savedPaths = [];
   String? _path;
   bool _recording = false;
 
@@ -42,11 +43,14 @@ class _DeviceAudioRecorder implements WebAudioRecorder {
     }
     final file = File(savedPath);
     final bytes = await file.readAsBytes();
-    try {
-      await file.delete();
-    } catch (_) {}
+    _savedPaths.add(savedPath);
     _path = null;
-    return RecordedAudio(bytes: bytes, mimeType: 'audio/mp4', extension: 'm4a');
+    return RecordedAudio(
+      bytes: bytes,
+      mimeType: 'audio/mp4',
+      extension: 'm4a',
+      localPath: savedPath,
+    );
   }
 
   @override
@@ -65,5 +69,11 @@ class _DeviceAudioRecorder implements WebAudioRecorder {
   @override
   void dispose() {
     _recorder.dispose();
+    for (final path in _savedPaths) {
+      try {
+        File(path).deleteSync();
+      } catch (_) {}
+    }
+    _savedPaths.clear();
   }
 }

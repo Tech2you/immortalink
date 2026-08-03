@@ -296,8 +296,12 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         return;
       }
       await _previewPlayer.stop();
+      final audio = _voices[index].audio;
+      final localPath = audio.localPath;
       await _previewPlayer.play(
-        BytesSource(Uint8List.fromList(_voices[index].audio.bytes)),
+        localPath == null
+            ? BytesSource(Uint8List.fromList(audio.bytes))
+            : DeviceFileSource(localPath),
       );
       if (mounted) setState(() => _playingVoiceIndex = index);
     } catch (e) {

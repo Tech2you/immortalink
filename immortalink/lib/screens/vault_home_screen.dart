@@ -2056,13 +2056,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               const Text(
                 'About me (Voice)',
                 style: TextStyle(fontWeight: FontWeight.w800),
               ),
-              const Spacer(),
               SizedBox(
                 height: 40,
                 child: OutlinedButton.icon(
@@ -2071,7 +2073,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   label: Text(_savingCoreVoice ? 'Saving…' : 'Upload VN'),
                 ),
               ),
-              const SizedBox(width: 10),
               SizedBox(
                 height: 40,
                 child: OutlinedButton.icon(
