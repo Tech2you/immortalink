@@ -169,56 +169,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   Future<void> _deleteAccount() async {
-    final passwordController = TextEditingController();
-
-    final ok = await showDialog<bool>(
+    final password = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete account permanently?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'This permanently deletes your account, vault, memories, media, and family-tree links. This cannot be undone.',
-            ),
-            const SizedBox(height: 12),
-            const Text('Enter your password to confirm this is you.'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: passwordController,
-              autofocus: true,
-              obscureText: true,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(labelText: 'Password'),
-              onSubmitted: (_) => Navigator.pop(ctx, true),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFB3261E),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete account'),
-          ),
-        ],
-      ),
+      builder: (ctx) => const _DeleteAccountConfirmationDialog(),
     );
 
-    if (ok != true) {
-      passwordController.dispose();
-      return;
-    }
-    final password = passwordController.text;
-    passwordController.dispose();
-    if (password.isEmpty) {
+    if (password == null) return;
+    if (password.trim().isEmpty) {
       _toast('Enter your password to confirm account deletion.');
       return;
     }
@@ -230,7 +187,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       }
 
       await _supabase.auth
-          .signInWithPassword(email: email, password: password)
+          .signInWithPassword(email: email, password: password.trim())
           .timeout(const Duration(seconds: 20));
 
       final res = await _supabase.functions
@@ -1959,6 +1916,70 @@ class _VaultsScreenState extends State<VaultsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _DeleteAccountConfirmationDialog extends StatefulWidget {
+  const _DeleteAccountConfirmationDialog();
+
+  @override
+  State<_DeleteAccountConfirmationDialog> createState() =>
+      _DeleteAccountConfirmationDialogState();
+}
+
+class _DeleteAccountConfirmationDialogState
+    extends State<_DeleteAccountConfirmationDialog> {
+  final _passwordController = TextEditingController();
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  void _confirm() {
+    Navigator.pop(context, _passwordController.text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Delete account permanently?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'This permanently deletes your account, vault, memories, media, and family-tree links. This cannot be undone.',
+          ),
+          const SizedBox(height: 12),
+          const Text('Enter your password to confirm this is you.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _passwordController,
+            autofocus: true,
+            obscureText: true,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(labelText: 'Password'),
+            onSubmitted: (_) => _confirm(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFB3261E),
+            foregroundColor: Colors.white,
+          ),
+          onPressed: _confirm,
+          child: const Text('Delete account'),
+        ),
+      ],
     );
   }
 }
