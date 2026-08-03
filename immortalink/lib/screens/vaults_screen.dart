@@ -340,7 +340,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
       await _cleanupStaleMembershipsForFreshVault(data, user.id);
       await _loadFamilyMemberships(user.id);
-      await _loadFamilyFeed();
+      if (!mounted) return;
+      setState(() => _loading = false);
+      unawaited(_loadFamilyFeed());
     } on TimeoutException {
       if (!mounted) return;
       setState(() {
@@ -491,26 +493,29 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
     try {
       final currentUserId = _supabase.auth.currentUser?.id;
-      final hiddenRows = currentUserId == null
-          ? <Map<String, dynamic>>[]
-          : List<Map<String, dynamic>>.from(
-              await _supabase
-                  .from('family_feed_hidden_vaults')
-                  .select('hidden_vault_id')
-                  .eq('user_id', currentUserId)
-                  .timeout(const Duration(seconds: 12)),
-            );
+      final hiddenRowsFuture = currentUserId == null
+          ? Future<List<Map<String, dynamic>>>.value(<Map<String, dynamic>>[])
+          : _supabase
+                .from('family_feed_hidden_vaults')
+                .select('hidden_vault_id')
+                .eq('user_id', currentUserId)
+                .timeout(const Duration(seconds: 12))
+                .then((rows) => List<Map<String, dynamic>>.from(rows));
+      final memberRowsFuture = _supabase
+          .from('family_members')
+          .select('user_id')
+          .eq('family_id', familyId)
+          .timeout(const Duration(seconds: 12))
+          .then((rows) => List<Map<String, dynamic>>.from(rows));
+
+      final hiddenRows = await hiddenRowsFuture;
       final hiddenVaultIds = hiddenRows
           .map((row) => (row['hidden_vault_id'] ?? '').toString().trim())
           .where((id) => id.isNotEmpty)
           .toSet();
 
-      final rawMembers = await _supabase
-          .from('family_members')
-          .select('user_id')
-          .eq('family_id', familyId)
-          .timeout(const Duration(seconds: 12));
-      final memberUserIds = List<Map<String, dynamic>>.from(rawMembers)
+      final memberRows = await memberRowsFuture;
+      final memberUserIds = memberRows
           .map((row) => (row['user_id'] ?? '').toString().trim())
           .where((id) => id.isNotEmpty)
           .toList();
@@ -537,6 +542,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
       final vaultMap = <String, Map<String, dynamic>>{};
       final vaultIds = <String>[];
+      final visibleVaults = <Map<String, dynamic>>[];
 
       for (final v in vaultList) {
         final id = (v['id'] ?? '').toString();
@@ -545,13 +551,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         }
         vaultMap[id] = v;
         vaultIds.add(id);
-
-        final avatarPath = (v['avatar_path'] ?? '').toString().trim();
-        if (avatarPath.isNotEmpty) {
-          _avatarUrlCache[id] = await _signedAvatarUrl(avatarPath);
-        } else {
-          _avatarUrlCache[id] = null;
-        }
+        visibleVaults.add(v);
       }
 
       if (vaultIds.isEmpty) {
@@ -561,6 +561,22 @@ class _VaultsScreenState extends State<VaultsScreen> {
           _loadingFeed = false;
         });
         return;
+      }
+
+      final nextAvatarUrlCache = <String, String?>{};
+      final avatarEntries = await Future.wait(
+        visibleVaults.map((v) async {
+          final id = (v['id'] ?? '').toString();
+          final avatarPath = (v['avatar_path'] ?? '').toString().trim();
+          if (avatarPath.isEmpty) return MapEntry<String, String?>(id, null);
+          return MapEntry<String, String?>(
+            id,
+            await _signedAvatarUrl(avatarPath),
+          );
+        }),
+      );
+      for (final entry in avatarEntries) {
+        nextAvatarUrlCache[entry.key] = entry.value;
       }
 
       final memoryRows = await _supabase
@@ -588,57 +604,71 @@ class _VaultsScreenState extends State<VaultsScreen> {
           .toList();
 
       if (memoryIds.isNotEmpty) {
-        final photoRows = await _supabase
+        final photoRowsFuture = _supabase
             .from('memory_photos')
             .select('id, memory_id, path, created_at')
             .inFilter('memory_id', memoryIds)
             .order('created_at', ascending: false)
             .timeout(const Duration(seconds: 12));
-
-        for (final row in List<Map<String, dynamic>>.from(photoRows)) {
-          final id = (row['id'] ?? '').toString();
-          final memoryId = (row['memory_id'] ?? '').toString();
-          final path = (row['path'] ?? '').toString().trim();
-          if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
-
-          final url = await _signedUrl('memory_photos', path);
-          if (url == null || url.trim().isEmpty) continue;
-
-          _feedPhotosByMemoryId
-              .putIfAbsent(memoryId, () => [])
-              .add(_MemPhoto(id: id, memoryId: memoryId, path: path, url: url));
-        }
-
-        final voiceRows = await _supabase
+        final voiceRowsFuture = _supabase
             .from('memory_voice_notes')
             .select('id, memory_id, path, title, created_at')
             .inFilter('memory_id', memoryIds)
             .order('created_at', ascending: false)
             .timeout(const Duration(seconds: 12));
 
-        for (final row in List<Map<String, dynamic>>.from(voiceRows)) {
-          final id = (row['id'] ?? '').toString();
-          final memoryId = (row['memory_id'] ?? '').toString();
-          final path = (row['path'] ?? '').toString().trim();
-          final title = (row['title'] ?? '').toString().trim();
-          final createdAt = (row['created_at'] ?? '').toString();
+        final photoRows = await photoRowsFuture;
+        final photoEntries = await Future.wait(
+          List<Map<String, dynamic>>.from(photoRows).map((row) async {
+            final id = (row['id'] ?? '').toString();
+            final memoryId = (row['memory_id'] ?? '').toString();
+            final path = (row['path'] ?? '').toString().trim();
+            if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
 
-          if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
+            final url = await _signedUrl('memory_photos', path);
+            if (url == null || url.trim().isEmpty) return null;
 
-          final url = await _signedUrl('memory_voice', path);
-          if (url == null || url.trim().isEmpty) continue;
+            return _MemPhoto(id: id, memoryId: memoryId, path: path, url: url);
+          }),
+        );
+        for (final photo in photoEntries) {
+          if (photo == null) continue;
+          _feedPhotosByMemoryId
+              .putIfAbsent(photo.memoryId, () => [])
+              .add(photo);
+        }
 
+        final voiceRows = await voiceRowsFuture;
+        final voiceEntries = await Future.wait(
+          List<Map<String, dynamic>>.from(voiceRows).map((row) async {
+            final id = (row['id'] ?? '').toString();
+            final memoryId = (row['memory_id'] ?? '').toString();
+            final path = (row['path'] ?? '').toString().trim();
+            final title = (row['title'] ?? '').toString().trim();
+            final createdAt = (row['created_at'] ?? '').toString();
+
+            if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
+
+            final url = await _signedUrl('memory_voice', path);
+            if (url == null || url.trim().isEmpty) return null;
+
+            return MapEntry(
+              memoryId,
+              _VoiceNote(
+                id: id,
+                path: path,
+                title: title.isEmpty ? 'Voice note' : title,
+                url: url,
+                createdAt: createdAt,
+              ),
+            );
+          }),
+        );
+        for (final entry in voiceEntries) {
+          if (entry == null) continue;
           _feedVoiceByMemoryId
-              .putIfAbsent(memoryId, () => [])
-              .add(
-                _VoiceNote(
-                  id: id,
-                  path: path,
-                  title: title.isEmpty ? 'Voice note' : title,
-                  url: url,
-                  createdAt: createdAt,
-                ),
-              );
+              .putIfAbsent(entry.key, () => [])
+              .add(entry.value);
         }
       }
 
@@ -664,7 +694,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
             vaultId: vaultId,
             vaultName: (vaultMeta['name'] ?? '').toString(),
             displayName: displayName,
-            avatarUrl: _avatarUrlCache[vaultId],
+            avatarUrl: nextAvatarUrlCache[vaultId],
             photos: photos,
             voiceNotes: voices,
           ),
@@ -673,6 +703,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
       if (!mounted) return;
       setState(() {
+        _avatarUrlCache
+          ..clear()
+          ..addAll(nextAvatarUrlCache);
         _familyFeed = items;
         _loadingFeed = false;
       });
