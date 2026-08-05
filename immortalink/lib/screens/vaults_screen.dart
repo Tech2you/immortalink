@@ -963,53 +963,27 @@ class _VaultsScreenState extends State<VaultsScreen> {
       return;
     }
 
-    final controller = TextEditingController(text: 'My Family');
-
-    final ok = await showDialog<bool>(
+    final familyName = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          createAnother ? 'Create another family' : 'Invite your family',
+      builder: (ctx) => MediaQuery(
+        data: MediaQuery.of(ctx).copyWith(viewInsets: EdgeInsets.zero),
+        child: _CreateFamilyDialog(
+          title: createAnother ? 'Create another family' : 'Invite your family',
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Choose a name for this family. You can invite relatives after it is created.',
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: 'Family name'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Create'),
-          ),
-        ],
       ),
     );
 
-    if (ok != true) return;
+    if (familyName == null) return;
     if (_vault == null) return;
-
-    final familyName = controller.text.trim().isEmpty
+    final trimmedFamilyName = familyName.trim().isEmpty
         ? 'My Family'
-        : controller.text.trim();
+        : familyName.trim();
 
     try {
       final newFamilyId = await _supabase
           .rpc(
             'create_family_group_and_link_vault',
-            params: {'p_family_name': familyName},
+            params: {'p_family_name': trimmedFamilyName},
           )
           .timeout(const Duration(seconds: 12));
 
@@ -1949,6 +1923,70 @@ class _VaultsScreenState extends State<VaultsScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CreateFamilyDialog extends StatefulWidget {
+  final String title;
+
+  const _CreateFamilyDialog({required this.title});
+
+  @override
+  State<_CreateFamilyDialog> createState() => _CreateFamilyDialogState();
+}
+
+class _CreateFamilyDialogState extends State<_CreateFamilyDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: 'My Family');
+    _controller.selection = TextSelection.collapsed(
+      offset: _controller.text.length,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _create() {
+    Navigator.pop(context, _controller.text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Choose a name for this family. You can invite relatives after it is created.',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            enableInteractiveSelection: true,
+            keyboardType: TextInputType.text,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(labelText: 'Family name'),
+            onSubmitted: (_) => _create(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(onPressed: _create, child: const Text('Create')),
+      ],
     );
   }
 }
