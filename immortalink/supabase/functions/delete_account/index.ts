@@ -269,6 +269,7 @@ serve(async (req) => {
       await Promise.all([
         removeStoragePrefix(admin, "avatars", userId),
         removeStoragePrefix(admin, "vault_photos", userId),
+        removeStoragePrefix(admin, "vault_voice", userId),
         removeStoragePrefix(admin, "memory_photos", userId),
         removeStoragePrefix(admin, "memory_voice", userId),
       ]);

@@ -376,10 +376,16 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
 
       final voiceId = (inserted?['id'] ?? '').toString();
       if (voiceId.isEmpty) continue;
+      final token = _client.auth.currentSession?.accessToken.trim();
+      if (token == null || token.isEmpty) continue;
       unawaited(() async {
         try {
           await _client.functions.invoke(
             'index_voice_note',
+            headers: {
+              'Authorization': 'Bearer $token',
+              'authorization': 'Bearer $token',
+            },
             body: {'vault_id': widget.vaultId, 'memory_voice_note_id': voiceId},
           );
         } catch (_) {}

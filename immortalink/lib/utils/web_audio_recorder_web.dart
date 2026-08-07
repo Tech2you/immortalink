@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:html' as html;
-import 'dart:js';
-import 'dart:js_util' as js_util;
 
 import 'web_audio_recorder_types.dart';
 
@@ -26,7 +24,15 @@ class _WebAudioRecorder implements WebAudioRecorder {
   @override
   bool get isSupported {
     final hasMediaDevices = html.window.navigator.mediaDevices != null;
-    final hasMediaRecorder = js_util.hasProperty(html.window, 'MediaRecorder');
+    var hasMediaRecorder = false;
+    try {
+      hasMediaRecorder =
+          html.MediaRecorder.isTypeSupported(_pickMimeType()) ||
+          html.MediaRecorder.isTypeSupported('audio/webm') ||
+          html.MediaRecorder.isTypeSupported('audio/mp4');
+    } catch (_) {
+      hasMediaRecorder = false;
+    }
     return hasMediaDevices && hasMediaRecorder;
   }
 
@@ -52,28 +58,31 @@ class _WebAudioRecorder implements WebAudioRecorder {
     _recorder = _createRecorder(_stream!, mime);
 
     // dataavailable event
-    _dataHandler = allowInterop((dynamic event) {
+    _dataHandler = (html.Event event) {
       try {
-        final blob = event?.data as html.Blob?;
+        final blob = event is html.BlobEvent ? event.data : null;
         if (blob != null) {
           // ignore empty chunks
-          final size = js_util.getProperty(blob, 'size') as int?;
-          if (size != null && size > 0) _chunks.add(blob);
+          final size = blob.size;
+          if (size > 0) _chunks.add(blob);
         }
       } catch (_) {
         // ignore
       }
-    });
+    };
 
     // stop event
-    _stopHandler = allowInterop((dynamic _) {
+    _stopHandler = (html.Event _) {
       if (_stopCompleter != null && !_stopCompleter!.isCompleted) {
         _stopCompleter!.complete();
       }
-    });
+    };
 
-    _recorder!.addEventListener('dataavailable', _dataHandler as dynamic);
-    _recorder!.addEventListener('stop', _stopHandler as dynamic);
+    _recorder!.addEventListener(
+      'dataavailable',
+      _dataHandler as html.EventListener,
+    );
+    _recorder!.addEventListener('stop', _stopHandler as html.EventListener);
 
     // timeslice helps ensure we get dataavailable chunks
     _recorder!.start(200);
@@ -138,13 +147,18 @@ class _WebAudioRecorder implements WebAudioRecorder {
     // remove listeners
     try {
       if (_recorder != null) {
-        if (_dataHandler != null)
+        if (_dataHandler != null) {
           _recorder!.removeEventListener(
             'dataavailable',
-            _dataHandler as dynamic,
+            _dataHandler as html.EventListener,
           );
-        if (_stopHandler != null)
-          _recorder!.removeEventListener('stop', _stopHandler as dynamic);
+        }
+        if (_stopHandler != null) {
+          _recorder!.removeEventListener(
+            'stop',
+            _stopHandler as html.EventListener,
+          );
+        }
       }
     } catch (_) {}
 
@@ -184,7 +198,7 @@ class _WebAudioRecorder implements WebAudioRecorder {
 
   String _getRecorderMimeType(html.MediaRecorder r) {
     try {
-      final mt = js_util.getProperty(r, 'mimeType');
+      final mt = r.mimeType;
       if (mt is String && mt.trim().isNotEmpty) return mt;
     } catch (_) {}
     // fallback to typical webm
