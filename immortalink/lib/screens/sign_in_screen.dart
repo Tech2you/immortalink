@@ -62,10 +62,10 @@ class _SignInScreenState extends State<SignInScreen> {
       });
       return;
     }
-    if (password.isEmpty || password.length < 6) {
+    if (password.isEmpty || password.length < 8) {
       setState(() {
         _loading = false;
-        _error = 'Password must be at least 6 characters.';
+        _error = 'Password must be at least 8 characters.';
       });
       return;
     }

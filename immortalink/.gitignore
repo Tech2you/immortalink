@@ -32,6 +32,8 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+.firebase/
+supabase/.temp/
 
 # Symbolication related
 app.*.symbols
@@ -44,3 +46,15 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.keystore
+*service-account*.json
+*firebase-adminsdk*.json
+GoogleService-Info.plist
+google-services.json

@@ -19,6 +19,35 @@ function textClean(s: string) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
 
+function quotaMessage(error: any): string | null {
+  const detail = (error?.details || error?.detail || "").toString();
+  const message = (error?.message || "").toString();
+  const combined = `${detail} ${message}`;
+  if (!combined.includes("ERR_EVERROOT_")) return null;
+  if (combined.includes("ERR_EVERROOT_AI_LIMIT")) {
+    return "You've reached this month's EverRoot AI allowance.";
+  }
+  return message || "This EverRoot action needs a higher allowance.";
+}
+
+async function consumeTranscriptionUsage({
+  userClient,
+  familyId,
+  vaultId,
+}: {
+  userClient: any;
+  familyId?: string;
+  vaultId?: string;
+}) {
+  const { error } = await userClient.rpc("everroot_consume_ai_usage", {
+    p_family_id: familyId || null,
+    p_vault_id: vaultId || null,
+    p_units: 1,
+  });
+  if (!error) return null;
+  return quotaMessage(error) || "Could not confirm your EverRoot AI allowance.";
+}
+
 function chunkText(text: string, maxChars = 900) {
   const clean = (text || "").trim();
   if (!clean) return [];
@@ -99,8 +128,8 @@ async function transcribeWithOpenAI({
   });
 
   if (!resp.ok) {
-    const t = await resp.text().catch(() => "");
-    throw new Error(`OpenAI transcription failed ${resp.status}: ${t}`);
+    await resp.text().catch(() => "");
+    throw new Error(`OpenAI transcription failed ${resp.status}`);
   }
 
   const data = await resp.json().catch(() => ({}));
@@ -178,6 +207,12 @@ serve(async (req) => {
       if (!legacyMemoryId) return json(400, { error: "legacy_memory_id is empty on legacy_memory_voice_notes row" });
       if (!storagePath) return json(400, { error: "path is empty on legacy_memory_voice_notes row" });
 
+      const quotaError = await consumeTranscriptionUsage({
+        userClient,
+        familyId: textClean(legacyVn.family_id || familyId || ""),
+      });
+      if (quotaError) return json(429, { error: quotaError });
+
       const audioBytes = await withTimeout(
         downloadVoiceNoteBytes({ admin, storagePath }),
         15000,
@@ -210,7 +245,6 @@ serve(async (req) => {
         legacy_memory_voice_note_id: legacyMemoryVoiceNoteId,
         legacy_memory_id: legacyMemoryId,
         chunk_count: 0,
-        transcript_preview: transcript.slice(0, 240),
       });
     }
 
@@ -238,6 +272,12 @@ serve(async (req) => {
 
     if (!memoryId) return json(400, { error: "memory_id is empty on memory_voice_notes row" });
     if (!storagePath) return json(400, { error: "path is empty on memory_voice_notes row" });
+
+    const quotaError = await consumeTranscriptionUsage({
+      userClient,
+      vaultId,
+    });
+    if (quotaError) return json(429, { error: quotaError });
 
     // 1) Download audio
     const audioBytes = await withTimeout(
@@ -330,9 +370,9 @@ serve(async (req) => {
       memory_voice_note_id: memoryVoiceNoteId,
       memory_id: memoryId,
       chunk_count: payloadChunks.length,
-      transcript_preview: transcript.slice(0, 240),
     });
   } catch (e) {
-    return json(500, { error: String(e) });
+    console.error("index_voice_note failed:", e);
+    return json(500, { error: "Voice note indexing failed." });
   }
 });

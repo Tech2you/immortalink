@@ -33,6 +33,35 @@ function json(data: unknown, status = 200) {
   });
 }
 
+function quotaMessage(error: any): string | null {
+  const detail = (error?.details || error?.detail || "").toString();
+  const message = (error?.message || "").toString();
+  const combined = `${detail} ${message}`;
+  if (!combined.includes("ERR_EVERROOT_")) return null;
+  if (combined.includes("ERR_EVERROOT_AI_LIMIT")) {
+    return "You've reached this month's EverRoot AI allowance.";
+  }
+  return message || "This EverRoot action needs a higher allowance.";
+}
+
+async function consumeAiUsage({
+  supabase,
+  familyId,
+  vaultId,
+}: {
+  supabase: any;
+  familyId?: string;
+  vaultId?: string;
+}) {
+  const { error } = await supabase.rpc("everroot_consume_ai_usage", {
+    p_family_id: familyId || null,
+    p_vault_id: vaultId || null,
+    p_units: 1,
+  });
+  if (!error) return null;
+  return quotaMessage(error) || "Could not confirm your EverRoot AI allowance.";
+}
+
 function textClean(s: string) {
   return (s || "").replace(/\s+/g, " ").trim();
 }
@@ -1109,6 +1138,13 @@ serve(async (req) => {
         legacyMemberId,
         familyId,
       });
+      const quotaError = await consumeAiUsage({
+        supabase,
+        familyId,
+        vaultId,
+      });
+      if (quotaError) return json({ error: quotaError }, 429);
+
       const generated = await openaiIcebreakers({
         memoryContext: sampled.context,
         displayName,
@@ -1270,6 +1306,13 @@ serve(async (req) => {
     contextParts = await rankContextByMeaning(question, contextParts, 14);
     const context = contextParts.join("\n\n").slice(0, 6500);
 
+    const quotaError = await consumeAiUsage({
+      supabase,
+      familyId,
+      vaultId,
+    });
+    if (quotaError) return json({ error: quotaError }, 429);
+
     const ai = await openaiChat({
       question,
       context,
@@ -1282,7 +1325,6 @@ serve(async (req) => {
       return json(
         {
           answer: "Sorry — I couldn’t generate a reply right now. Please try again in a moment.",
-          debug: ai.error,
         },
         200
       );
@@ -1291,6 +1333,6 @@ serve(async (req) => {
     return json({ answer: ai.answer }, 200);
   } catch (e: any) {
     console.error("vault_ai_chat fatal:", e);
-    return json({ error: e?.message ?? String(e) }, 500);
+    return json({ error: "AI chat failed. Please try again." }, 500);
   }
 });

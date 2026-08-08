@@ -13,7 +13,6 @@ dependencies:
 
   cupertino_icons: ^1.0.8
   supabase_flutter: ^2.8.0
-  flutter_dotenv: ^5.2.1
   file_picker: ^8.0.0
   audioplayers: ^6.5.1
   record: ^6.2.1
@@ -29,5 +28,4 @@ flutter:
   uses-material-design: true
 
   assets:
-    - .env
     - assets/images/

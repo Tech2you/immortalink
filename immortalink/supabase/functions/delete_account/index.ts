@@ -245,7 +245,6 @@ serve(async (req) => {
     return json(500, {
       error: "Could not delete account.",
       step,
-      detail: error?.message ?? `${error}`,
     });
   }
 });
