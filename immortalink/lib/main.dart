@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'screens/sign_in_screen.dart';
 import 'screens/vaults_screen.dart';
+import 'widgets/keyboard_dismiss_scope.dart';
 
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
 
@@ -74,6 +75,9 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
+      builder: (context, child) {
+        return KeyboardDismissScope(child: child ?? const SizedBox.shrink());
+      },
       home: const AuthGate(),
     );
   }

@@ -54,6 +54,35 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
     _load();
   }
 
+  EdgeInsets _legacyDialogInsetPadding(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    return EdgeInsets.symmetric(
+      horizontal: width < 600 ? 16 : 32,
+      vertical: width < 600 ? 18 : 24,
+    );
+  }
+
+  Widget _legacyDialogContent(
+    BuildContext context, {
+    required Widget child,
+    double desktopMaxWidth = 560,
+  }) {
+    final size = MediaQuery.sizeOf(context);
+    final horizontalInset = size.width < 600 ? 16.0 : 32.0;
+    final contentPadding = size.width < 600 ? 40.0 : 48.0;
+    final availableWidth = size.width - (horizontalInset * 2) - contentPadding;
+    final width = min(availableWidth, desktopMaxWidth);
+    final maxHeight = size.height * (size.width < 600 ? 0.68 : 0.76);
+
+    return SizedBox(
+      width: width,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: SingleChildScrollView(child: child),
+      ),
+    );
+  }
+
   Future<String?> _signedStorageUrl({
     required String bucket,
     required String path,
@@ -1324,83 +1353,91 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setInner) => AlertDialog(
+          insetPadding: _legacyDialogInsetPadding(ctx),
           title: Text('Add legacy $title'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Create a family-owned predecessor profile and link it as a parent in this branch.',
-                    style: TextStyle(color: Colors.black.withOpacity(0.65)),
+          content: _legacyDialogContent(
+            ctx,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Create a family-owned predecessor profile and link it as a parent in this branch.',
+                  style: TextStyle(color: Colors.black.withOpacity(0.65)),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: const InputDecoration(
+                    labelText: 'Name *',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nameController,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Name *',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: displayNameController,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: const InputDecoration(
+                    labelText: 'Display name (optional)',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: displayNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name (optional)',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: birthYearController,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: const InputDecoration(
+                    labelText: 'Birth year',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: birthYearController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Birth year',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: aboutController,
+                  minLines: 4,
+                  maxLines: 8,
+                  decoration: const InputDecoration(
+                    labelText: 'About me / notes (optional)',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: aboutController,
-                    minLines: 4,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      labelText: 'About me / notes (optional)',
-                      border: OutlineInputBorder(),
-                      alignLabelWithHint: true,
-                    ),
+                ),
+                const SizedBox(height: 10),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Optional extra details',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
-                  const SizedBox(height: 10),
-                  ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: EdgeInsets.zero,
-                    title: const Text(
-                      'Optional extra details',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                  children: [
+                    TextField(
+                      controller: deathYearController,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
+                      decoration: const InputDecoration(
+                        labelText: 'Death year (optional)',
+                        border: OutlineInputBorder(),
                       ),
                     ),
-                    children: [
-                      TextField(
-                        controller: deathYearController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Death year (optional)',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 10),
-                    Text(errorText!, style: const TextStyle(color: Colors.red)),
                   ],
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: 10),
+                  Text(errorText!, style: const TextStyle(color: Colors.red)),
                 ],
-              ),
+              ],
             ),
           ),
           actions: [
@@ -1564,83 +1601,91 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setInner) => AlertDialog(
+          insetPadding: _legacyDialogInsetPadding(ctx),
           title: Text('Add legacy $title'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Create a family-owned descendant profile and link it as a child in this branch.',
-                    style: TextStyle(color: Colors.black.withOpacity(0.65)),
+          content: _legacyDialogContent(
+            ctx,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Create a family-owned descendant profile and link it as a child in this branch.',
+                  style: TextStyle(color: Colors.black.withOpacity(0.65)),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: const InputDecoration(
+                    labelText: 'Name *',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nameController,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Name *',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: displayNameController,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: const InputDecoration(
+                    labelText: 'Display name (optional)',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: displayNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display name (optional)',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: birthYearController,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: const InputDecoration(
+                    labelText: 'Birth year',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: birthYearController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Birth year',
-                      border: OutlineInputBorder(),
-                    ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: aboutController,
+                  minLines: 4,
+                  maxLines: 8,
+                  decoration: const InputDecoration(
+                    labelText: 'About me / notes (optional)',
+                    border: OutlineInputBorder(),
+                    alignLabelWithHint: true,
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: aboutController,
-                    minLines: 4,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      labelText: 'About me / notes (optional)',
-                      border: OutlineInputBorder(),
-                      alignLabelWithHint: true,
-                    ),
+                ),
+                const SizedBox(height: 10),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Optional extra details',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
-                  const SizedBox(height: 10),
-                  ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    childrenPadding: EdgeInsets.zero,
-                    title: const Text(
-                      'Optional extra details',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                  children: [
+                    TextField(
+                      controller: deathYearController,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
+                      decoration: const InputDecoration(
+                        labelText: 'Death year (optional)',
+                        border: OutlineInputBorder(),
                       ),
                     ),
-                    children: [
-                      TextField(
-                        controller: deathYearController,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Death year (optional)',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 10),
-                    Text(errorText!, style: const TextStyle(color: Colors.red)),
                   ],
+                ),
+                if (errorText != null) ...[
+                  const SizedBox(height: 10),
+                  Text(errorText!, style: const TextStyle(color: Colors.red)),
                 ],
-              ),
+              ],
             ),
           ),
           actions: [

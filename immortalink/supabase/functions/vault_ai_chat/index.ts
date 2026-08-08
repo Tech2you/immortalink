@@ -211,6 +211,83 @@ function prettyRel(r: string): string {
   return x;
 }
 
+function truncateText(value: string, maximum = 900): string {
+  const cleaned = textClean(value);
+  if (cleaned.length <= maximum) return cleaned;
+  return `${cleaned.slice(0, maximum - 1).trim()}…`;
+}
+
+function shuffled<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function icebreakerRelationshipLine({
+  isOwnerAsking,
+  displayName,
+  viewerToOwner,
+  ownerToViewer,
+}: {
+  isOwnerAsking: boolean;
+  displayName: string;
+  viewerToOwner: string;
+  ownerToViewer: string;
+}): string {
+  if (isOwnerAsking) return "The viewer is looking at their own vault.";
+  if (viewerToOwner === "unknown") {
+    return `The viewer is allowed to access ${displayName}'s vault, but the exact relationship is unknown.`;
+  }
+  return `The viewer is ${prettyRel(viewerToOwner)} to ${displayName}. From ${displayName}'s perspective, the viewer is their ${prettyRel(ownerToViewer)}.`;
+}
+
+function fallbackIcebreakers(displayName: string, relationshipLine: string): string[] {
+  const subject = displayName || "this person";
+  const relationshipHint = relationshipLine.toLowerCase().includes("unknown")
+    ? "as a family member"
+    : "through your family connection";
+  return [
+    `What story about ${subject}'s life would you most like to hear ${relationshipHint}?`,
+    `What tradition or family habit would help you understand ${subject} better?`,
+    `What childhood, school, work, or travel memory should we ask ${subject} about first?`,
+  ];
+}
+
+function parseIcebreakers(raw: string, displayName: string, relationshipLine: string): string[] {
+  const fallback = fallbackIcebreakers(displayName, relationshipLine);
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed?.icebreakers)) {
+      const items = parsed.icebreakers
+        .map((item: unknown) => textClean(String(item || "")))
+        .filter(Boolean)
+        .slice(0, 4);
+      if (items.length > 0) return items;
+    }
+  } catch (_) {
+    // Fall back to line parsing below.
+  }
+
+  const items = trimmed
+    .split(/\n+/)
+    .map((line) => textClean(line.replace(/^[-*\d.)\s]+/, "")))
+    .filter((line) => line.endsWith("?"))
+    .slice(0, 4);
+  return items.length > 0 ? items : fallback;
+}
+
+type IcebreakerResult = {
+  ok: boolean;
+  icebreakers: string[];
+  error?: string;
+};
+
 type RelationshipRow = {
   parent_type?: string;
   parent_id?: string;
@@ -524,6 +601,250 @@ ${viewerContextLine}
   }
 }
 
+async function openaiIcebreakers({
+  memoryContext,
+  displayName,
+  relationshipLine,
+}: {
+  memoryContext: string;
+  displayName: string;
+  relationshipLine: string;
+}): Promise<IcebreakerResult> {
+  if (!OPENAI_API_KEY) {
+    return {
+      ok: false,
+      icebreakers: fallbackIcebreakers(displayName, relationshipLine),
+      error:
+        "OPENAI_API_KEY is not set in Edge Function secrets (Supabase Dashboard → Edge Functions → Secrets).",
+    };
+  }
+
+  const system = `
+You write ImmortaLink AI companion icebreakers.
+
+GOAL:
+- Generate warm, thoughtful family conversation starters for someone viewing ${displayName}'s memories.
+- The questions should help the viewer learn more about ${displayName}'s real experiences.
+
+GROUNDING:
+- Use only the authorized memory excerpts provided.
+- You may reference a memory topic, but do not reveal unsupported details or combine details from unrelated memories.
+- Do not invent facts, dates, names, locations, emotions, or relationships.
+- If memory context is sparse, ask more general family-history questions.
+
+STYLE:
+- Return JSON only: {"icebreakers":["question 1","question 2","question 3"]}
+- Return 3 short questions.
+- Keep each question natural, specific when supported, and under 22 words.
+- Vary the wording so refreshes do not feel identical.
+- Do not answer the questions.
+`;
+
+  const user = `
+Relationship context:
+${relationshipLine}
+
+Random authorized memory excerpts:
+${memoryContext || "(No saved memory excerpts were available.)"}
+`;
+
+  const body = {
+    model: "gpt-4o-mini",
+    temperature: 0.78,
+    max_tokens: 260,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12_000);
+
+  try {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const errTxt = await resp.text().catch(() => "");
+      return {
+        ok: false,
+        icebreakers: fallbackIcebreakers(displayName, relationshipLine),
+        error: `OpenAI error ${resp.status}: ${errTxt}`,
+      };
+    }
+
+    const data = await resp.json();
+    const raw = data?.choices?.[0]?.message?.content?.toString() ?? "";
+    return {
+      ok: true,
+      icebreakers: parseIcebreakers(raw, displayName, relationshipLine),
+    };
+  } catch (e: any) {
+    return {
+      ok: false,
+      icebreakers: fallbackIcebreakers(displayName, relationshipLine),
+      error: `OpenAI request failed: ${e?.message ?? String(e)}`,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function formatIcebreakerMemory(memory: any, voiceNotes: string[], legacy = false) {
+  const prompt = textClean(memory?.prompt_text || "");
+  const body = textClean(memory?.body || "");
+  const when = textClean(memory?.memory_date_label || "");
+  const people = textClean(memory?.people || "");
+  const location = textClean(memory?.location || "");
+  const mood = textClean(memory?.mood || "");
+  const voiceContext = voiceNotes
+    .map((voice, index) => `Voice note ${index + 1}: ${truncateText(voice, 700)}`)
+    .filter(Boolean);
+
+  return [
+    legacy ? "--- Legacy memory source ---" : "--- Memory source ---",
+    prompt ? `Title: ${truncateText(prompt, 180)}` : "",
+    body ? `Memory: ${truncateText(body, 900)}` : "",
+    when ? `When: ${truncateText(when, 120)}` : "",
+    people ? `People: ${truncateText(people, 160)}` : "",
+    location ? `Location: ${truncateText(location, 160)}` : "",
+    mood ? `Mood: ${truncateText(mood, 80)}` : "",
+    ...voiceContext,
+    legacy ? "--- End legacy memory source ---" : "--- End memory source ---",
+  ].filter(Boolean).join("\n");
+}
+
+async function buildIcebreakerContext({
+  supabase,
+  isLegacyChat,
+  vaultId,
+  legacyMemberId,
+  familyId,
+}: {
+  supabase: any;
+  isLegacyChat: boolean;
+  vaultId: string;
+  legacyMemberId: string;
+  familyId: string;
+}) {
+  if (isLegacyChat) {
+    const { data: memories, error: memErr } = await withTimeout(
+      supabase
+        .from("legacy_memories")
+        .select("id, prompt_text, body, memory_date_label, people, location, mood, created_at")
+        .eq("legacy_member_id", legacyMemberId)
+        .eq("family_id", familyId)
+        .order("created_at", { ascending: false })
+        .limit(80),
+      4_000,
+      "DB(legacy icebreaker memories)",
+    );
+    if (memErr) throw new Error(`DB error: ${memErr.message}`);
+
+    const selected = shuffled((memories as any[]) || []).slice(0, 5);
+    const selectedIds = selected.map((m) => textClean(m?.id || "")).filter(Boolean);
+
+    const voicesByMemory = new Map<string, string[]>();
+    if (selectedIds.length > 0) {
+      const { data: voiceNotes, error: voiceErr } = await withTimeout(
+        supabase
+          .from("legacy_memory_voice_notes")
+          .select("legacy_memory_id, title, transcript")
+          .in("legacy_memory_id", selectedIds)
+          .eq("legacy_member_id", legacyMemberId)
+          .eq("family_id", familyId),
+        4_000,
+        "DB(legacy icebreaker voice notes)",
+      );
+      if (voiceErr) throw new Error(`DB error: ${voiceErr.message}`);
+
+      for (const note of ((voiceNotes as any[]) || [])) {
+        const memoryId = textClean(note?.legacy_memory_id || "");
+        const transcript = textClean(note?.transcript || "");
+        if (!memoryId || !transcript) continue;
+        const title = textClean(note?.title || "Voice note") || "Voice note";
+        const list = voicesByMemory.get(memoryId) || [];
+        list.push(`${title}: ${transcript}`);
+        voicesByMemory.set(memoryId, list);
+      }
+    }
+
+    return {
+      memoryCount: selected.length,
+      context: selected
+        .map((memory) =>
+          formatIcebreakerMemory(
+            memory,
+            voicesByMemory.get(textClean(memory?.id || "")) || [],
+            true,
+          )
+        )
+        .join("\n\n")
+        .slice(0, 5200),
+    };
+  }
+
+  const { data: memories, error: memErr } = await withTimeout(
+    supabase
+      .from("memories")
+      .select("id, prompt_text, body, memory_date_label, people, location, mood, created_at")
+      .eq("vault_id", vaultId)
+      .order("created_at", { ascending: false })
+      .limit(80),
+    4_000,
+    "DB(icebreaker memories)",
+  );
+  if (memErr) throw new Error(`DB error: ${memErr.message}`);
+
+  const selected = shuffled((memories as any[]) || []).slice(0, 5);
+  const selectedIds = selected.map((m) => textClean(m?.id || "")).filter(Boolean);
+
+  const voicesByMemory = new Map<string, string[]>();
+  if (selectedIds.length > 0) {
+    const { data: voiceNotes, error: voiceErr } = await withTimeout(
+      supabase
+        .from("memory_voice_notes")
+        .select("memory_id, title, transcript")
+        .in("memory_id", selectedIds)
+        .eq("vault_id", vaultId),
+      4_000,
+      "DB(icebreaker voice notes)",
+    );
+    if (voiceErr) throw new Error(`DB error: ${voiceErr.message}`);
+
+    for (const note of ((voiceNotes as any[]) || [])) {
+      const memoryId = textClean(note?.memory_id || "");
+      const transcript = textClean(note?.transcript || "");
+      if (!memoryId || !transcript) continue;
+      const title = textClean(note?.title || "Voice note") || "Voice note";
+      const list = voicesByMemory.get(memoryId) || [];
+      list.push(`${title}: ${transcript}`);
+      voicesByMemory.set(memoryId, list);
+    }
+  }
+
+  return {
+    memoryCount: selected.length,
+    context: selected
+      .map((memory) =>
+        formatIcebreakerMemory(
+          memory,
+          voicesByMemory.get(textClean(memory?.id || "")) || [],
+        )
+      )
+      .join("\n\n")
+      .slice(0, 5200),
+  };
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Use POST" }, 405);
@@ -546,6 +867,8 @@ serve(async (req) => {
       payload?.legacyMemberId || payload?.legacy_member_id || "",
     );
     const question = textClean(payload?.question || payload?.prompt || payload?.message || "");
+    const mode = textClean(payload?.mode || payload?.intent || "").toLowerCase();
+    const wantsIcebreakers = mode === "icebreaker" || mode === "icebreakers";
     const displayNameFromClient = textClean(payload?.displayName || payload?.display_name || "");
     const requestedFamilyId = textClean(payload?.familyId || payload?.family_id || "");
 
@@ -556,7 +879,9 @@ serve(async (req) => {
     if (!vaultId && !legacyMemberId) {
       return json({ error: "vaultId or legacyMemberId is required" }, 400);
     }
-    if (!question) return json({ error: "question is required" }, 400);
+    if (!question && !wantsIcebreakers) {
+      return json({ error: "question is required" }, 400);
+    }
 
     let familyId = requestedFamilyId;
     let vaultOwnerUserId = "";
@@ -769,6 +1094,39 @@ serve(async (req) => {
     const viewerContextLine = isOwnerAsking
       ? `The person asking is the VAULT OWNER.\n${whoLine}`
       : `The person asking is the viewer/visitor.\nRelationship (viewer → owner): ${prettyRel(viewerToOwner)}\nRelationship (owner → viewer): ${prettyRel(ownerToViewer)}\nSlot key (viewer): ${viewerSlotKey || "(null)"}\nSlot key (owner): ${ownerSlotKey || "(null)"}\nRole (viewer): ${viewerRole}\n${whoLine}`;
+
+    if (wantsIcebreakers) {
+      const relationshipLine = icebreakerRelationshipLine({
+        isOwnerAsking,
+        displayName,
+        viewerToOwner,
+        ownerToViewer,
+      });
+      const sampled = await buildIcebreakerContext({
+        supabase,
+        isLegacyChat,
+        vaultId,
+        legacyMemberId,
+        familyId,
+      });
+      const generated = await openaiIcebreakers({
+        memoryContext: sampled.context,
+        displayName,
+        relationshipLine,
+      });
+
+      if (!generated.ok) {
+        console.error("vault_ai_chat icebreaker failure:", generated.error);
+      }
+
+      return json(
+        {
+          icebreakers: generated.icebreakers,
+          memory_count: sampled.memoryCount,
+        },
+        200,
+      );
+    }
 
     // ✅ Deterministic relationship answer
     if (isRelationshipQuestion(question)) {

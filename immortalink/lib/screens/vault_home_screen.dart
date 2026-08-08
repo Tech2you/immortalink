@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
+import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
 import 'create_memory_screen.dart';
@@ -166,6 +167,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         content: TextField(
           controller: c,
           autofocus: true,
+          textInputAction: TextInputAction.done,
+          onEditingComplete: () =>
+              FocusManager.instance.primaryFocus?.unfocus(),
           decoration: InputDecoration(
             labelText: hint,
             border: const OutlineInputBorder(),
@@ -186,35 +190,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   String _extFromName(String name) {
-    final lower = name.toLowerCase();
-    if (lower.endsWith('.png')) return 'png';
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'jpg';
-    if (lower.endsWith('.webp')) return 'webp';
-
-    if (lower.endsWith('.m4a')) return 'm4a';
-    if (lower.endsWith('.mp3')) return 'mp3';
-    if (lower.endsWith('.wav')) return 'wav';
-    if (lower.endsWith('.aac')) return 'aac';
-    if (lower.endsWith('.ogg')) return 'ogg';
-    if (lower.endsWith('.webm')) return 'webm';
-
-    return 'bin';
+    return MediaUploadPolicy.extensionForName(name);
   }
 
   String _contentTypeFromExt(String ext) {
-    final e = ext.toLowerCase();
-    if (e == 'jpg' || e == 'jpeg') return 'image/jpeg';
-    if (e == 'webp') return 'image/webp';
-    if (e == 'png') return 'image/png';
-
-    if (e == 'mp3') return 'audio/mpeg';
-    if (e == 'm4a') return 'audio/mp4';
-    if (e == 'wav') return 'audio/wav';
-    if (e == 'aac') return 'audio/aac';
-    if (e == 'ogg') return 'audio/ogg';
-    if (e == 'webm') return 'audio/webm';
-
-    return 'application/octet-stream';
+    return MediaUploadPolicy.contentTypeForExtension(ext);
   }
 
   Future<String?> _signedUrl(String bucket, String path) async {
@@ -326,7 +306,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _indexCoreVoiceNote() async {
-    final token = _client.auth.currentSession?.accessToken?.trim();
+    final token = _client.auth.currentSession?.accessToken.trim();
     if (token == null || token.isEmpty) {
       throw Exception('Missing session token. Please sign in again.');
     }
@@ -578,9 +558,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         _avatarUrl = signedUrl;
         _familyId = familyId;
         _slotKey = slotKey;
-        _displayName = (dn ?? _vaultName).trim().isEmpty
-            ? _vaultName
-            : (dn ?? _vaultName).trim();
+        _displayName = dn.trim().isEmpty ? _vaultName : dn.trim();
       });
     } catch (_) {}
   }
@@ -603,6 +581,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (userId == null) throw Exception('Not signed in');
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.avatarPhoto,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final path = '$userId/${widget.vaultId}/avatar.$ext';
 
       await _client.storage
@@ -870,6 +854,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (bytes == null) throw Exception('No file bytes received.');
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.photo,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_featuredPrefix(userId)}/$ts.$ext';
 
@@ -1279,7 +1269,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     });
 
     try {
-      final token = _client.auth.currentSession?.accessToken?.trim();
+      final token = _client.auth.currentSession?.accessToken.trim();
       if (token == null || token.isEmpty) {
         throw Exception('Missing session token. Please sign in again.');
       }
@@ -1378,6 +1368,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (bytes == null) throw Exception('No file bytes received.');
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.photo,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_aboutPrefix(userId)}/$ts.$ext';
 
@@ -1838,6 +1834,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (bytes == null) throw Exception('No file bytes received');
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.voice,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_voicePrefix(userId)}/core_$ts.$ext';
 
@@ -1882,6 +1884,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
         final ts = DateTime.now().millisecondsSinceEpoch;
         final path = '${_voicePrefix(userId)}/core_$ts.${rec.extension}';
+        MediaUploadPolicy.validateListOrThrow(
+          MediaUploadKind.voice,
+          rec.bytes,
+          fileName: 'voice.${rec.extension}',
+          contentType: rec.mimeType,
+        );
 
         await _client.storage
             .from(_voiceBucket)
@@ -2186,6 +2194,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (bytes == null) throw Exception('No file bytes received');
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.photo,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '$userId/${widget.vaultId}/memories/$memoryId/$ts.$ext';
 
@@ -2440,11 +2454,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 borderRadius: BorderRadius.circular(14),
                 child: Stack(
                   children: [
-                    Image.network(
+                    _memoryPhotoImage(
                       p.url,
                       width: 92,
                       height: 66,
-                      fit: BoxFit.cover,
                       gaplessPlayback: true,
                     ),
                     Positioned(
@@ -2469,6 +2482,26 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _memoryPhotoImage(
+    String url, {
+    required double width,
+    required double height,
+    bool gaplessPlayback = false,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.black.withValues(alpha: 0.04),
+      child: Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: BoxFit.contain,
+        gaplessPlayback: gaplessPlayback,
       ),
     );
   }
@@ -2562,6 +2595,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (bytes == null) throw Exception('No file bytes received');
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.voice,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_memoryVoicePrefix(userId, memoryId)}/$ts.$ext';
 
@@ -2590,7 +2629,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
 
       if (memoryVoiceNoteId.isNotEmpty) {
-        final token = _client.auth.currentSession?.accessToken?.trim();
+        final token = _client.auth.currentSession?.accessToken.trim();
         if (token == null || token.isEmpty) {
           throw Exception('Missing session token. Please sign in again.');
         }
@@ -2633,6 +2672,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           final ts = DateTime.now().millisecondsSinceEpoch;
           final path =
               '${_memoryVoicePrefix(userId, memoryId)}/$ts.${rec.extension}';
+          MediaUploadPolicy.validateListOrThrow(
+            MediaUploadKind.voice,
+            rec.bytes,
+            fileName: 'voice.${rec.extension}',
+            contentType: rec.mimeType,
+          );
 
           await _client.storage
               .from(_memoryVoiceBucket)
@@ -2659,7 +2704,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
 
           if (memoryVoiceNoteId.isNotEmpty) {
-            final token = _client.auth.currentSession?.accessToken?.trim();
+            final token = _client.auth.currentSession?.accessToken.trim();
             if (token == null || token.isEmpty) {
               throw Exception('Missing session token. Please sign in again.');
             }
@@ -3023,8 +3068,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (!mounted) return;
       setState(() => _error = e.toString());
     } finally {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -3399,11 +3445,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     onTap: () => _openMemoryGallery(memoryId),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: Image.network(
+                      child: _memoryPhotoImage(
                         photos[index].url,
                         width: photos.length == 1 ? 520 : 260,
                         height: 230,
-                        fit: BoxFit.cover,
                       ),
                     ),
                   ),
@@ -3513,6 +3558,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          textInputAction: TextInputAction.done,
+          onEditingComplete: () =>
+              FocusManager.instance.primaryFocus?.unfocus(),
           decoration: const InputDecoration(
             labelText: 'Vault name',
             border: OutlineInputBorder(),
@@ -3601,6 +3649,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     TextField(
                       controller: promptController,
                       maxLines: 2,
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () =>
+                          FocusManager.instance.primaryFocus?.unfocus(),
                       decoration: InputDecoration(
                         labelText: isSocialMemory
                             ? 'Title (optional)'
@@ -3689,6 +3740,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                   const SizedBox(height: 14),
                                   TextField(
                                     controller: whenController,
+                                    textInputAction: TextInputAction.done,
+                                    onEditingComplete: () => FocusManager
+                                        .instance
+                                        .primaryFocus
+                                        ?.unfocus(),
                                     decoration: const InputDecoration(
                                       prefixIcon: Icon(
                                         Icons.calendar_today_outlined,
@@ -3701,6 +3757,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                   const SizedBox(height: 10),
                                   TextField(
                                     controller: peopleController,
+                                    textInputAction: TextInputAction.done,
+                                    onEditingComplete: () => FocusManager
+                                        .instance
+                                        .primaryFocus
+                                        ?.unfocus(),
                                     decoration: const InputDecoration(
                                       prefixIcon: Icon(Icons.people_outline),
                                       labelText: 'Who was there?',
@@ -3710,6 +3771,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                   const SizedBox(height: 10),
                                   TextField(
                                     controller: locationController,
+                                    textInputAction: TextInputAction.done,
+                                    onEditingComplete: () => FocusManager
+                                        .instance
+                                        .primaryFocus
+                                        ?.unfocus(),
                                     decoration: const InputDecoration(
                                       prefixIcon: Icon(
                                         Icons.location_on_outlined,
@@ -3763,11 +3829,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(14),
-                                  child: Image.network(
+                                  child: _memoryPhotoImage(
                                     photo.url,
                                     width: 126,
                                     height: 126,
-                                    fit: BoxFit.cover,
                                   ),
                                 ),
                                 Positioned(

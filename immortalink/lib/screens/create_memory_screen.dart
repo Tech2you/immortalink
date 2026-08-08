@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
+import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
 
 class CreateMemoryScreen extends StatefulWidget {
@@ -84,18 +85,11 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   }
 
   String _extension(String name) {
-    final dot = name.lastIndexOf('.');
-    if (dot < 0 || dot == name.length - 1) return 'jpg';
-    return name.substring(dot + 1).toLowerCase();
+    return MediaUploadPolicy.extensionForName(name, fallback: 'jpg');
   }
 
-  String _imageMime(String extension) => switch (extension) {
-    'png' => 'image/png',
-    'gif' => 'image/gif',
-    'webp' => 'image/webp',
-    'heic' || 'heif' => 'image/heic',
-    _ => 'image/jpeg',
-  };
+  String _imageMime(String extension) =>
+      MediaUploadPolicy.contentTypeForExtension(extension);
 
   Future<void> _pickPhotos() async {
     try {
@@ -106,16 +100,30 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
       );
       if (result == null) return;
 
-      final selected = result.files
-          .where((file) => file.bytes != null)
-          .map(
-            (file) => _PendingPhoto(
-              name: file.name,
-              bytes: file.bytes!,
-              extension: _extension(file.name),
-            ),
-          )
-          .toList();
+      final selected = <_PendingPhoto>[];
+      String? rejectedMessage;
+      for (final file in result.files) {
+        final bytes = file.bytes;
+        if (bytes == null) continue;
+
+        final message = MediaUploadPolicy.validateBytes(
+          MediaUploadKind.photo,
+          bytes.length,
+          fileName: file.name,
+        );
+        if (message != null) {
+          rejectedMessage ??= message;
+          continue;
+        }
+
+        selected.add(
+          _PendingPhoto(
+            name: file.name,
+            bytes: bytes,
+            extension: _extension(file.name),
+          ),
+        );
+      }
 
       if (!mounted) return;
       final available = 10 - _photos.length;
@@ -125,6 +133,9 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
       });
       if (selected.length > available) {
         _toast('You can add up to 10 photos to one memory.');
+      }
+      if (rejectedMessage != null) {
+        _toast(rejectedMessage);
       }
     } catch (e) {
       _toast('Could not add photos: $e');
@@ -274,6 +285,16 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
 
     timer?.cancel();
     if (recorded == null || !mounted) return;
+    final voiceError = MediaUploadPolicy.validateBytes(
+      MediaUploadKind.voice,
+      recorded.audio.bytes.length,
+      fileName: 'voice.${recorded.audio.extension}',
+      contentType: recorded.audio.mimeType,
+    );
+    if (voiceError != null) {
+      _toast(voiceError);
+      return;
+    }
     setState(() {
       _voices.add(
         _PendingVoice(audio: recorded.audio, seconds: recorded.seconds),
@@ -326,6 +347,12 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   Future<void> _uploadPhotos(String userId, String memoryId) async {
     for (var index = 0; index < _photos.length; index++) {
       final photo = _photos[index];
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.photo,
+        photo.bytes,
+        fileName: photo.name,
+        contentType: _imageMime(photo.extension),
+      );
       final stamp = DateTime.now().microsecondsSinceEpoch + index;
       final path =
           '$userId/${widget.vaultId}/memories/$memoryId/$stamp.${photo.extension}';
@@ -350,6 +377,12 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   Future<void> _uploadVoice(String userId, String memoryId) async {
     for (var index = 0; index < _voices.length; index++) {
       final audio = _voices[index].audio;
+      MediaUploadPolicy.validateListOrThrow(
+        MediaUploadKind.voice,
+        audio.bytes,
+        fileName: 'voice.${audio.extension}',
+        contentType: audio.mimeType,
+      );
       final stamp = DateTime.now().microsecondsSinceEpoch + index;
       final path =
           '$userId/${widget.vaultId}/memories/$memoryId/voice/$stamp.${audio.extension}';
@@ -565,6 +598,9 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                   controller: _titleController,
                   enabled: !_saving,
                   textCapitalization: TextCapitalization.sentences,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
                   maxLength: 100,
                   decoration: InputDecoration(
                     hintText: 'Title this memory (optional)',
@@ -725,6 +761,11 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                               const SizedBox(height: 14),
                               TextField(
                                 controller: _whenController,
+                                textInputAction: TextInputAction.done,
+                                onEditingComplete: () => FocusManager
+                                    .instance
+                                    .primaryFocus
+                                    ?.unfocus(),
                                 decoration: const InputDecoration(
                                   prefixIcon: Icon(
                                     Icons.calendar_today_outlined,
@@ -737,6 +778,11 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                               const SizedBox(height: 10),
                               TextField(
                                 controller: _peopleController,
+                                textInputAction: TextInputAction.done,
+                                onEditingComplete: () => FocusManager
+                                    .instance
+                                    .primaryFocus
+                                    ?.unfocus(),
                                 decoration: const InputDecoration(
                                   prefixIcon: Icon(Icons.people_outline),
                                   labelText: 'Who was there?',
@@ -746,6 +792,11 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                               const SizedBox(height: 10),
                               TextField(
                                 controller: _locationController,
+                                textInputAction: TextInputAction.done,
+                                onEditingComplete: () => FocusManager
+                                    .instance
+                                    .primaryFocus
+                                    ?.unfocus(),
                                 decoration: const InputDecoration(
                                   prefixIcon: Icon(Icons.location_on_outlined),
                                   labelText: 'Where did it happen?',

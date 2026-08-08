@@ -40,8 +40,11 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
 
   bool _accepted = false;
   bool _sending = false;
+  bool _loadingIcebreakers = false;
+  String? _icebreakerError;
 
   final List<_ChatMsg> _msgs = [];
+  final List<String> _icebreakers = [];
 
   @override
   void initState() {
@@ -70,6 +73,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     if (!force && !shouldShow) {
       if (!mounted) return;
       setState(() => _accepted = true);
+      unawaited(_loadIcebreakers());
       _focus.requestFocus();
       return;
     }
@@ -146,6 +150,7 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
     }
     if (!mounted) return;
     setState(() => _accepted = true);
+    unawaited(_loadIcebreakers());
     _focus.requestFocus();
     await _scrollToBottom();
   }
@@ -168,6 +173,92 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
   }
 
   String _safeExtract(dynamic v) => (v ?? '').toString().trim();
+
+  Future<void> _loadIcebreakers() async {
+    if (!_accepted || _loadingIcebreakers) return;
+
+    final session = _client.auth.currentSession;
+    if (session == null) {
+      if (!mounted) return;
+      setState(() => _icebreakerError = 'Sign in again to load icebreakers.');
+      return;
+    }
+
+    setState(() {
+      _loadingIcebreakers = true;
+      _icebreakerError = null;
+    });
+
+    try {
+      final headers = _authHeadersOrEmpty();
+      final body = widget.isLegacy
+          ? {
+              'mode': 'icebreakers',
+              'intent': 'icebreakers',
+              'legacyMemberId': widget.legacyMemberId,
+              'legacy_member_id': widget.legacyMemberId,
+              'familyId': widget.familyId,
+              'family_id': widget.familyId,
+              'displayName': widget.displayName,
+              'display_name': widget.displayName,
+            }
+          : {
+              'mode': 'icebreakers',
+              'intent': 'icebreakers',
+              'vaultId': widget.vaultId,
+              'vault_id': widget.vaultId,
+              'familyId': widget.familyId,
+              'family_id': widget.familyId,
+              'displayName': widget.displayName,
+              'display_name': widget.displayName,
+            };
+
+      final res = await _client.functions
+          .invoke('vault_ai_chat', headers: headers, body: body)
+          .timeout(const Duration(seconds: 45));
+
+      if (res.status != 200) {
+        final d = res.data;
+        final err = (d is Map)
+            ? _safeExtract(d['error'] ?? d['message'] ?? d['details'])
+            : _safeExtract(d);
+        throw Exception(
+          'Function HTTP ${res.status}${err.isEmpty ? '' : ': $err'}',
+        );
+      }
+
+      final data = res.data;
+      final loaded = <String>[];
+      if (data is Map && data['icebreakers'] is List) {
+        for (final item in data['icebreakers'] as List) {
+          final text = _safeExtract(item);
+          if (text.isNotEmpty) loaded.add(text);
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _icebreakers
+          ..clear()
+          ..addAll(loaded.take(4));
+        _icebreakerError = loaded.isEmpty
+            ? 'Could not load personalised icebreakers yet.'
+            : null;
+      });
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        _icebreakerError = 'Icebreakers took too long to load.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _icebreakerError = 'Could not load personalised icebreakers yet.';
+      });
+    } finally {
+      if (mounted) setState(() => _loadingIcebreakers = false);
+    }
+  }
 
   void _sendQuick(String text) {
     _controller.text = text;
@@ -480,7 +571,15 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
         children: [
           _emptyConversationIntro(),
           const SizedBox(height: 10),
-          _QuickPrompts(onTap: _sending ? null : _sendQuick),
+          _QuickPrompts(
+            prompts: _icebreakers,
+            isLoading: _loadingIcebreakers,
+            errorText: _icebreakerError,
+            onRefresh: (_accepted && !_sending && !_loadingIcebreakers)
+                ? _loadIcebreakers
+                : null,
+            onTap: _sending ? null : _sendQuick,
+          ),
         ],
       );
     }
@@ -663,13 +762,23 @@ class _TypingDotsState extends State<_TypingDots> {
 }
 
 class _QuickPrompts extends StatelessWidget {
+  final List<String> prompts;
+  final bool isLoading;
+  final String? errorText;
+  final Future<void> Function()? onRefresh;
   final void Function(String text)? onTap;
 
-  const _QuickPrompts({required this.onTap});
+  const _QuickPrompts({
+    required this.prompts,
+    required this.isLoading,
+    required this.errorText,
+    required this.onRefresh,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final items = <String>[
+    final fallbackItems = <String>[
       'Where did you grow up?',
       'What should I know about you?',
       'What were you like as a child?',
@@ -677,21 +786,66 @@ class _QuickPrompts extends StatelessWidget {
       'How are we related?',
       'What memory always makes you smile?',
     ];
+    final items = prompts.isEmpty ? fallbackItems : prompts;
 
     return Padding(
       padding: const EdgeInsets.only(top: 10, bottom: 6),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: items.map((t) {
-            return ActionChip(
-              label: Text(t),
-              onPressed: onTap == null ? null : () => onTap!(t),
-            );
-          }).toList(),
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                prompts.isEmpty ? 'Try asking' : 'Personalised starters',
+                style: const TextStyle(
+                  color: Color(0xFF756C79),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 6),
+              SizedBox(
+                width: 32,
+                height: 32,
+                child: IconButton(
+                  tooltip: 'Refresh icebreakers',
+                  onPressed: onRefresh,
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  icon: isLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                ),
+              ),
+            ],
+          ),
+          if (errorText != null && prompts.isEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              errorText!,
+              style: const TextStyle(color: Color(0xFF8A7D8F), fontSize: 12),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: items.map((t) {
+                return ActionChip(
+                  label: Text(t),
+                  onPressed: onTap == null ? null : () => onTap!(t),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
       ),
     );
   }

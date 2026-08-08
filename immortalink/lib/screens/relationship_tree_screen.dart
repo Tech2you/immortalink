@@ -50,6 +50,35 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     super.dispose();
   }
 
+  EdgeInsets _relationshipDialogInsetPadding(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    return EdgeInsets.symmetric(
+      horizontal: width < 600 ? 16 : 32,
+      vertical: width < 600 ? 18 : 24,
+    );
+  }
+
+  Widget _relationshipDialogContent(
+    BuildContext context, {
+    required Widget child,
+    double desktopMaxWidth = 560,
+  }) {
+    final size = MediaQuery.sizeOf(context);
+    final horizontalInset = size.width < 600 ? 16.0 : 32.0;
+    final contentPadding = size.width < 600 ? 40.0 : 48.0;
+    final availableWidth = size.width - (horizontalInset * 2) - contentPadding;
+    final width = min(availableWidth, desktopMaxWidth);
+    final maxHeight = size.height * (size.width < 600 ? 0.68 : 0.76);
+
+    return SizedBox(
+      width: width,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: SingleChildScrollView(child: child),
+      ),
+    );
+  }
+
   Future<String?> _signedUrl(String bucket, String path) async {
     if (path.trim().isEmpty) return null;
     try {
@@ -511,66 +540,65 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
+          insetPadding: _relationshipDialogInsetPadding(dialogContext),
           title: Text('Which parent does $siblingName share?'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Select shared parents for a half- or full sibling, or '
-                    'keep this as a sibling-only connection.',
+          content: _relationshipDialogContent(
+            dialogContext,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Select shared parents for a half- or full sibling, or '
+                  'keep this as a sibling-only connection.',
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1E8F6),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1E8F6),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Text(
-                      'Only selected parents will be linked. A sibling-only '
-                      'connection leaves parent lineage unconnected.',
-                    ),
+                  child: const Text(
+                    'Only selected parents will be linked. A sibling-only '
+                    'connection leaves parent lineage unconnected.',
                   ),
-                  const SizedBox(height: 8),
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  value: siblingOnly,
+                  title: const Text('Sibling only (no parent lineage)'),
+                  subtitle: const Text(
+                    'Keep the sibling connection without linking either '
+                    'person to a parent.',
+                  ),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (checked) {
+                    setDialogState(() {
+                      siblingOnly = checked == true;
+                      if (siblingOnly) selectedParentKeys.clear();
+                    });
+                  },
+                ),
+                for (final parent in parents)
                   CheckboxListTile(
-                    value: siblingOnly,
-                    title: const Text('Sibling only (no parent lineage)'),
-                    subtitle: const Text(
-                      'Keep the sibling connection without linking either '
-                      'person to a parent.',
-                    ),
+                    value: selectedParentKeys.contains(parent.key),
+                    title: Text(parent.name),
                     controlAffinity: ListTileControlAffinity.leading,
                     contentPadding: EdgeInsets.zero,
                     onChanged: (checked) {
                       setDialogState(() {
-                        siblingOnly = checked == true;
-                        if (siblingOnly) selectedParentKeys.clear();
+                        if (checked == true) {
+                          siblingOnly = false;
+                          selectedParentKeys.add(parent.key);
+                        } else {
+                          selectedParentKeys.remove(parent.key);
+                        }
                       });
                     },
                   ),
-                  for (final parent in parents)
-                    CheckboxListTile(
-                      value: selectedParentKeys.contains(parent.key),
-                      title: Text(parent.name),
-                      controlAffinity: ListTileControlAffinity.leading,
-                      contentPadding: EdgeInsets.zero,
-                      onChanged: (checked) {
-                        setDialogState(() {
-                          if (checked == true) {
-                            siblingOnly = false;
-                            selectedParentKeys.add(parent.key);
-                          } else {
-                            selectedParentKeys.remove(parent.key);
-                          }
-                        });
-                      },
-                    ),
-                ],
-              ),
+              ],
             ),
           ),
           actions: [
@@ -641,47 +669,46 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
+          insetPadding: _relationshipDialogInsetPadding(dialogContext),
           title: Text('Who is $parentName partnered with?'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Select any existing parent who is or was this '
-                    'parent’s spouse or partner.',
+          content: _relationshipDialogContent(
+            dialogContext,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Select any existing parent who is or was this '
+                  'parent’s spouse or partner.',
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1E8F6),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1E8F6),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Text(
-                      'Only selected people receive a spouse link. Leave '
-                      'everyone unselected if these parents were not partners.',
-                    ),
+                  child: const Text(
+                    'Only selected people receive a spouse link. Leave '
+                    'everyone unselected if these parents were not partners.',
                   ),
-                  const SizedBox(height: 8),
-                  for (final parent in existingParents)
-                    CheckboxListTile(
-                      value: selected.contains(parent.key),
-                      title: Text(parent.name),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          if (value == true) {
-                            selected.add(parent.key);
-                          } else {
-                            selected.remove(parent.key);
-                          }
-                        });
-                      },
-                    ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                for (final parent in existingParents)
+                  CheckboxListTile(
+                    value: selected.contains(parent.key),
+                    title: Text(parent.name),
+                    onChanged: (value) {
+                      setDialogState(() {
+                        if (value == true) {
+                          selected.add(parent.key);
+                        } else {
+                          selected.remove(parent.key);
+                        }
+                      });
+                    },
+                  ),
+              ],
             ),
           ),
           actions: [
@@ -717,64 +744,61 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
+          insetPadding: _relationshipDialogInsetPadding(dialogContext),
           title: Text('Does $spouseName parent any of these children?'),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$spouseName is now connected as ${focus.name}’s spouse. Select only the children they also parent.',
+          content: _relationshipDialogContent(
+            dialogContext,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$spouseName is now connected as ${focus.name}’s spouse. Select only the children they also parent.',
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1E8F6),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1E8F6),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Text(
-                      'Unselected children keep their existing parentage. The app can still recognise this spouse as their stepparent or parent’s spouse.',
-                    ),
+                  child: const Text(
+                    'Unselected children keep their existing parentage. The app can still recognise this spouse as their stepparent or parent’s spouse.',
                   ),
-                  const SizedBox(height: 8),
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  value:
+                      selected.isNotEmpty && selected.length != children.length
+                      ? null
+                      : selected.length == children.length,
+                  tristate:
+                      selected.isNotEmpty && selected.length != children.length,
+                  title: const Text('Select all current children'),
+                  onChanged: (value) {
+                    setDialogState(() {
+                      selected.clear();
+                      if (value == true) {
+                        selected.addAll(children.map((child) => child.key));
+                      }
+                    });
+                  },
+                ),
+                for (final child in children)
                   CheckboxListTile(
-                    value:
-                        selected.isNotEmpty &&
-                            selected.length != children.length
-                        ? null
-                        : selected.length == children.length,
-                    tristate:
-                        selected.isNotEmpty &&
-                        selected.length != children.length,
-                    title: const Text('Select all current children'),
+                    value: selected.contains(child.key),
+                    title: Text(child.name),
                     onChanged: (value) {
                       setDialogState(() {
-                        selected.clear();
                         if (value == true) {
-                          selected.addAll(children.map((child) => child.key));
+                          selected.add(child.key);
+                        } else {
+                          selected.remove(child.key);
                         }
                       });
                     },
                   ),
-                  for (final child in children)
-                    CheckboxListTile(
-                      value: selected.contains(child.key),
-                      title: Text(child.name),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          if (value == true) {
-                            selected.add(child.key);
-                          } else {
-                            selected.remove(child.key);
-                          }
-                        });
-                      },
-                    ),
-                ],
-              ),
+              ],
             ),
           ),
           actions: [
@@ -825,71 +849,66 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
+          insetPadding: _relationshipDialogInsetPadding(dialogContext),
           title: Text(
             'Does $parentName also parent any of ${focus.name}’s siblings?',
           ),
-          content: SizedBox(
-            width: 460,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$parentName is now connected as ${focus.name}’s parent. '
-                    'Select only the siblings who are also their children.',
+          content: _relationshipDialogContent(
+            dialogContext,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$parentName is now connected as ${focus.name}’s parent. '
+                  'Select only the siblings who are also their children.',
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1E8F6),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1E8F6),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: const Text(
-                      'Unselected siblings keep their existing parentage. '
-                      'This supports half-siblings and different parent '
-                      'combinations.',
-                    ),
+                  child: const Text(
+                    'Unselected siblings keep their existing parentage. '
+                    'This supports half-siblings and different parent '
+                    'combinations.',
                   ),
-                  const SizedBox(height: 8),
+                ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  value:
+                      selected.isNotEmpty && selected.length != siblings.length
+                      ? null
+                      : selected.length == siblings.length,
+                  tristate:
+                      selected.isNotEmpty && selected.length != siblings.length,
+                  title: const Text('Select all current siblings'),
+                  onChanged: (value) {
+                    setDialogState(() {
+                      selected.clear();
+                      if (value == true) {
+                        selected.addAll(siblings.map((sibling) => sibling.key));
+                      }
+                    });
+                  },
+                ),
+                for (final sibling in siblings)
                   CheckboxListTile(
-                    value:
-                        selected.isNotEmpty &&
-                            selected.length != siblings.length
-                        ? null
-                        : selected.length == siblings.length,
-                    tristate:
-                        selected.isNotEmpty &&
-                        selected.length != siblings.length,
-                    title: const Text('Select all current siblings'),
+                    value: selected.contains(sibling.key),
+                    title: Text(sibling.name),
                     onChanged: (value) {
                       setDialogState(() {
-                        selected.clear();
                         if (value == true) {
-                          selected.addAll(
-                            siblings.map((sibling) => sibling.key),
-                          );
+                          selected.add(sibling.key);
+                        } else {
+                          selected.remove(sibling.key);
                         }
                       });
                     },
                   ),
-                  for (final sibling in siblings)
-                    CheckboxListTile(
-                      value: selected.contains(sibling.key),
-                      title: Text(sibling.name),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          if (value == true) {
-                            selected.add(sibling.key);
-                          } else {
-                            selected.remove(sibling.key);
-                          }
-                        });
-                      },
-                    ),
-                ],
-              ),
+              ],
             ),
           ),
           actions: [
@@ -1271,6 +1290,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
+          insetPadding: _relationshipDialogInsetPadding(dialogContext),
           backgroundColor: const Color(0xFFFFF8FE),
           surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(
@@ -1321,108 +1341,115 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
               ),
             ],
           ),
-          content: SizedBox(
-            width: 500,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    autofocus: true,
-                    decoration: legacyFieldDecoration(
-                      'Name *',
-                      icon: Icons.person_outline,
-                      hintText: 'Their full name',
-                    ),
+          content: _relationshipDialogContent(
+            dialogContext,
+            desktopMaxWidth: 600,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: () =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: legacyFieldDecoration(
+                    'Name *',
+                    icon: Icons.person_outline,
+                    hintText: 'Their full name',
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: aboutController,
-                    minLines: 3,
-                    maxLines: 6,
-                    decoration: legacyFieldDecoration(
-                      'About them',
-                      icon: Icons.auto_stories_outlined,
-                      hintText: 'A memory, nickname, or quick note',
-                    ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: aboutController,
+                  minLines: 3,
+                  maxLines: 6,
+                  decoration: legacyFieldDecoration(
+                    'About them',
+                    icon: Icons.auto_stories_outlined,
+                    hintText: 'A memory, nickname, or quick note',
                   ),
-                  const SizedBox(height: 12),
-                  Theme(
-                    data: Theme.of(
-                      context,
-                    ).copyWith(dividerColor: Colors.transparent),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.62),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: Colors.black.withValues(alpha: 0.08),
-                        ),
+                ),
+                const SizedBox(height: 12),
+                Theme(
+                  data: Theme.of(
+                    context,
+                  ).copyWith(dividerColor: Colors.transparent),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: Colors.black.withValues(alpha: 0.08),
                       ),
-                      child: ExpansionTile(
-                        tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-                        childrenPadding: const EdgeInsets.fromLTRB(
-                          14,
-                          0,
-                          14,
-                          14,
-                        ),
-                        leading: const Icon(Icons.tune_outlined),
-                        title: const Text(
-                          'Extra details',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: const Text('Born and passed years'),
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: birthYearController,
-                                  keyboardType: TextInputType.number,
-                                  decoration: legacyFieldDecoration(
-                                    'Born',
-                                    icon: Icons.cake_outlined,
-                                    hintText: 'Year',
-                                  ),
+                    ),
+                    child: ExpansionTile(
+                      tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+                      childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                      leading: const Icon(Icons.tune_outlined),
+                      title: const Text(
+                        'Extra details',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: const Text('Born and passed years'),
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: birthYearController,
+                                keyboardType: TextInputType.number,
+                                textInputAction: TextInputAction.done,
+                                onEditingComplete: () => FocusManager
+                                    .instance
+                                    .primaryFocus
+                                    ?.unfocus(),
+                                decoration: legacyFieldDecoration(
+                                  'Born',
+                                  icon: Icons.cake_outlined,
+                                  hintText: 'Year',
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: TextField(
-                                  controller: deathYearController,
-                                  keyboardType: TextInputType.number,
-                                  decoration: legacyFieldDecoration(
-                                    'Passed',
-                                    icon: Icons.favorite_border,
-                                    hintText: 'Year',
-                                  ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextField(
+                                controller: deathYearController,
+                                keyboardType: TextInputType.number,
+                                textInputAction: TextInputAction.done,
+                                onEditingComplete: () => FocusManager
+                                    .instance
+                                    .primaryFocus
+                                    ?.unfocus(),
+                                decoration: legacyFieldDecoration(
+                                  'Passed',
+                                  icon: Icons.favorite_border,
+                                  hintText: 'Year',
                                 ),
                               ),
-                            ],
-                          ),
-                        ],
-                      ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                  if (error != null) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFE9E9),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Text(
-                        error!,
-                        style: const TextStyle(color: Color(0xFF9E2A2A)),
-                      ),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFE9E9),
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                  ],
+                    child: Text(
+                      error!,
+                      style: const TextStyle(color: Color(0xFF9E2A2A)),
+                    ),
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
           actions: [
@@ -2758,7 +2785,7 @@ class _PersonBubble extends StatelessWidget {
                       const SizedBox(height: 6),
                       Text(
                         person.name,
-                        maxLines: 2,
+                        maxLines: focused ? 1 : 2,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
                         style: TextStyle(
@@ -2768,20 +2795,45 @@ class _PersonBubble extends StatelessWidget {
                               : null,
                         ),
                       ),
+                      if (focused && !person.isPlaceholder) ...[
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 30,
+                          child: FilledButton.icon(
+                            onPressed: onOpen,
+                            icon: const Icon(
+                              Icons.lock_open_outlined,
+                              size: 15,
+                            ),
+                            label: const Text('Open Vault'),
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              textStyle: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ),
-              Positioned(
-                right: 2,
-                top: 2,
-                child: IconButton(
-                  visualDensity: VisualDensity.compact,
-                  tooltip: 'Open ${person.name}\'s vault',
-                  onPressed: onOpen,
-                  icon: const Icon(Icons.lock_open_outlined, size: 18),
+              if (!person.isPlaceholder)
+                Positioned(
+                  right: 2,
+                  top: 2,
+                  child: IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Open ${person.name}\'s vault',
+                    onPressed: onOpen,
+                    icon: const Icon(Icons.lock_open_outlined, size: 18),
+                  ),
                 ),
-              ),
             ],
           ),
         ),

@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'family_branch_screen.dart';
 import 'vault_companion_screen.dart';
+import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
 
 class LegacyVaultScreen extends StatefulWidget {
@@ -264,42 +265,11 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   }
 
   String _extFromName(String name) {
-    final lower = name.toLowerCase();
-    if (lower.endsWith('.png')) return 'png';
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'jpg';
-    if (lower.endsWith('.webp')) return 'webp';
-    if (lower.endsWith('.m4a')) return 'm4a';
-    if (lower.endsWith('.mp3')) return 'mp3';
-    if (lower.endsWith('.wav')) return 'wav';
-    if (lower.endsWith('.aac')) return 'aac';
-    if (lower.endsWith('.ogg')) return 'ogg';
-    if (lower.endsWith('.webm')) return 'webm';
-    return 'jpg';
+    return MediaUploadPolicy.extensionForName(name, fallback: 'jpg');
   }
 
   String _contentTypeFromExt(String ext) {
-    switch (ext.toLowerCase()) {
-      case 'png':
-        return 'image/png';
-      case 'webp':
-        return 'image/webp';
-      case 'm4a':
-        return 'audio/mp4';
-      case 'mp3':
-        return 'audio/mpeg';
-      case 'wav':
-        return 'audio/wav';
-      case 'aac':
-        return 'audio/aac';
-      case 'ogg':
-        return 'audio/ogg';
-      case 'webm':
-        return 'audio/webm';
-      case 'jpg':
-      case 'jpeg':
-      default:
-        return 'image/jpeg';
-    }
+    return MediaUploadPolicy.contentTypeForExtension(ext);
   }
 
   bool _isProfilePhotoPath(String path) {
@@ -684,8 +654,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       }
 
       await _voicePlayer.stop();
+      final audio = voices[index].audio;
+      final localPath = audio.localPath;
       await _voicePlayer.play(
-        BytesSource(Uint8List.fromList(voices[index].audio.bytes)),
+        localPath == null
+            ? BytesSource(Uint8List.fromList(audio.bytes))
+            : DeviceFileSource(localPath),
       );
       _playingVoiceKey = key;
       refresh();
@@ -837,6 +811,16 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
     timer?.cancel();
     if (recorded == null) return null;
+    final voiceError = MediaUploadPolicy.validateBytes(
+      MediaUploadKind.voice,
+      recorded.audio.bytes.length,
+      fileName: 'voice.${recorded.audio.extension}',
+      contentType: recorded.audio.mimeType,
+    );
+    if (voiceError != null) {
+      _toast(voiceError);
+      return null;
+    }
     return _LegacyPendingVoice(
       audio: recorded.audio,
       seconds: recorded.seconds,
@@ -861,6 +845,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       if (bytes == null) throw Exception('No image bytes received.');
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.photo,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/gallery/$ts.$ext';
@@ -912,6 +902,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final oldProfileId = (_profilePhotoId ?? '').trim();
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.avatarPhoto,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final newPath =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/profile_picture/$ts.$ext';
@@ -1302,16 +1298,30 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
               );
               if (picked == null) return;
 
-              final selected = picked.files
-                  .where((file) => file.bytes != null)
-                  .map(
-                    (file) => _LegacyPendingPhoto(
-                      name: file.name,
-                      bytes: file.bytes!,
-                      extension: _extFromName(file.name),
-                    ),
-                  )
-                  .toList();
+              final selected = <_LegacyPendingPhoto>[];
+              String? rejectedMessage;
+              for (final file in picked.files) {
+                final bytes = file.bytes;
+                if (bytes == null) continue;
+
+                final message = MediaUploadPolicy.validateBytes(
+                  MediaUploadKind.photo,
+                  bytes.length,
+                  fileName: file.name,
+                );
+                if (message != null) {
+                  rejectedMessage ??= message;
+                  continue;
+                }
+
+                selected.add(
+                  _LegacyPendingPhoto(
+                    name: file.name,
+                    bytes: bytes,
+                    extension: _extFromName(file.name),
+                  ),
+                );
+              }
 
               final available =
                   10 - existingPhotos.length - pendingPhotos.length;
@@ -1320,6 +1330,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
               if (selected.length > available) {
                 _toast('You can add up to 10 photos to one memory.');
+              }
+              if (rejectedMessage != null) {
+                _toast(rejectedMessage);
               }
             } catch (e) {
               _toast('Could not add photos: $e');
@@ -1886,6 +1899,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       if (bytes == null) throw Exception('No image bytes received.');
 
       final ext = _extFromName(file.name);
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.photo,
+        bytes,
+        fileName: file.name,
+        contentType: _contentTypeFromExt(ext),
+      );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/$ts.$ext';
@@ -1928,6 +1947,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
     for (var index = 0; index < photos.length; index++) {
       final photo = photos[index];
+      MediaUploadPolicy.validateUint8ListOrThrow(
+        MediaUploadKind.photo,
+        photo.bytes,
+        fileName: photo.name,
+        contentType: _contentTypeFromExt(photo.extension),
+      );
       final ts = DateTime.now().microsecondsSinceEpoch + index;
       final path =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/$ts.${photo.extension}';
@@ -1963,6 +1988,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
     for (var index = 0; index < voices.length; index++) {
       final audio = voices[index].audio;
+      MediaUploadPolicy.validateListOrThrow(
+        MediaUploadKind.voice,
+        audio.bytes,
+        fileName: 'voice.${audio.extension}',
+        contentType: audio.mimeType,
+      );
       final ts = DateTime.now().microsecondsSinceEpoch + index;
       final path =
           '${_memoryVoicePrefix(userId, memoryId)}/$ts.${audio.extension}';
@@ -2327,6 +2358,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       minLines: minLines,
       maxLines: maxLines,
       keyboardType: keyboardType,
+      textInputAction: maxLines == 1 ? TextInputAction.done : null,
+      onEditingComplete: maxLines == 1
+          ? () => FocusManager.instance.primaryFocus?.unfocus()
+          : null,
       decoration: InputDecoration(
         labelText: label,
         hintText: hintText,

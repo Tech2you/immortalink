@@ -119,14 +119,6 @@ serve(async (req) => {
     const vaultIds = (vaultRows || [])
       .map((row: any) => clean(row.id))
       .filter(Boolean);
-    const familyRows = await optionalSelect(
-      admin.from("family_members").select("family_id, role").eq("user_id", userId),
-    );
-    const ownerFamilyIds = familyRows
-      .filter((row: any) => clean(row.role).toLowerCase() === "owner")
-      .map((row: any) => clean(row.family_id))
-      .filter(Boolean);
-    const accountFamilyIds = [...new Set(ownerFamilyIds)];
 
     let memoryIds: string[] = [];
     if (vaultIds.length) {
@@ -176,32 +168,6 @@ serve(async (req) => {
       });
     }
 
-    if (accountFamilyIds.length) {
-      await runStep("delete owned family tree rows", async () => {
-        await optionalDelete(
-          admin.from("family_relationships").delete().in("family_id", accountFamilyIds),
-        );
-        await optionalDelete(
-          admin.from("legacy_member_photos").delete().in("family_id", accountFamilyIds),
-        );
-        await optionalDelete(
-          admin.from("legacy_memory_photos").delete().in("family_id", accountFamilyIds),
-        );
-        await optionalDelete(
-          admin
-            .from("legacy_memory_voice_notes")
-            .delete()
-            .in("family_id", accountFamilyIds),
-        );
-        await optionalDelete(
-          admin.from("legacy_memories").delete().in("family_id", accountFamilyIds),
-        );
-        await optionalDelete(
-          admin.from("legacy_family_members").delete().in("family_id", accountFamilyIds),
-        );
-      });
-    }
-
     if (memoryIds.length) {
       await runStep("delete memory media", async () => {
         await optionalDelete(
@@ -243,12 +209,6 @@ serve(async (req) => {
         admin.from("family_feed_hidden_vaults").delete().eq("user_id", userId),
       );
       await optionalDelete(admin.from("family_members").delete().eq("user_id", userId));
-      await optionalProfileDelete(
-        admin.from("family_groups").delete().eq("owner_id", userId),
-      );
-      await optionalProfileDelete(
-        admin.from("family_groups").delete().eq("created_by", userId),
-      );
       await optionalProfileDelete(admin.from("profiles").delete().eq("id", userId));
       await optionalProfileDelete(
         admin.from("profiles").delete().eq("user_id", userId),

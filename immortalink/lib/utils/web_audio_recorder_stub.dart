@@ -27,7 +27,12 @@ class _DeviceAudioRecorder implements WebAudioRecorder {
     _path =
         '${Directory.systemTemp.path}/immortalink_${DateTime.now().millisecondsSinceEpoch}.m4a';
     await _recorder.start(
-      const RecordConfig(encoder: AudioEncoder.aacLc),
+      const RecordConfig(
+        encoder: AudioEncoder.aacLc,
+        bitRate: 128000,
+        sampleRate: 44100,
+        numChannels: 1,
+      ),
       path: _path!,
     );
     _recording = true;

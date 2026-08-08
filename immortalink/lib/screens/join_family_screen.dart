@@ -190,7 +190,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
                 labelText: 'Invite code',
                 border: OutlineInputBorder(),
               ),
-              onSubmitted: (_) => _loading ? null : _join(),
+              onSubmitted: (_) => FocusManager.instance.primaryFocus?.unfocus(),
             ),
             const SizedBox(height: 12),
             SizedBox(

@@ -98,7 +98,7 @@ class _CreateVaultScreenState extends State<CreateVaultScreen> {
           .order('created_at', ascending: false)
           .limit(1);
 
-      if (data is List && data.isNotEmpty) {
+      if (data.isNotEmpty) {
         setState(() {
           _existingVault = Map<String, dynamic>.from(data.first);
           _loading = false;
@@ -218,6 +218,9 @@ class _CreateVaultScreenState extends State<CreateVaultScreen> {
                 children: [
                   TextField(
                     controller: _nameController,
+                    textInputAction: TextInputAction.done,
+                    onEditingComplete: () =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
                     decoration: const InputDecoration(
                       labelText: 'Vault name',
                       border: OutlineInputBorder(),

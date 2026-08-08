@@ -370,7 +370,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
         _slotKey = slotKey;
         _hiddenFromMyFeed = hiddenFromMyFeed;
         _avatarUrl = signed;
-        _displayName = (dn ?? _vaultName).toString();
+        _displayName = dn;
         _memories = List<Map<String, dynamic>>.from(data);
         _loading = false;
       });
@@ -1711,16 +1711,35 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
             onTap: () => _openMemoryGallery(memoryId),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(14),
-              child: Image.network(
+              child: _memoryPhotoImage(
                 p.url,
                 width: 92,
                 height: 66,
-                fit: BoxFit.cover,
                 gaplessPlayback: true,
               ),
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _memoryPhotoImage(
+    String url, {
+    required double width,
+    required double height,
+    bool gaplessPlayback = false,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.black.withValues(alpha: 0.04),
+      child: Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: BoxFit.contain,
+        gaplessPlayback: gaplessPlayback,
       ),
     );
   }
@@ -2081,11 +2100,10 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                     separatorBuilder: (_, __) => const SizedBox(width: 8),
                     itemBuilder: (_, index) => ClipRRect(
                       borderRadius: BorderRadius.circular(16),
-                      child: Image.network(
+                      child: _memoryPhotoImage(
                         photos[index].url,
                         width: photos.length == 1 ? 520 : 260,
                         height: 230,
-                        fit: BoxFit.cover,
                       ),
                     ),
                   ),
@@ -2260,9 +2278,12 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               itemCount: uniquePhotos.length,
               itemBuilder: (_, index) => ClipRRect(
                 borderRadius: BorderRadius.circular(14),
-                child: Image.network(
-                  uniquePhotos[index]['url'] ?? '',
-                  fit: BoxFit.cover,
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  child: Image.network(
+                    uniquePhotos[index]['url'] ?? '',
+                    fit: BoxFit.contain,
+                  ),
                 ),
               ),
             ),

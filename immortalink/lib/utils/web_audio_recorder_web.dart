@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:html' as html;
@@ -7,8 +9,19 @@ import 'web_audio_recorder_types.dart';
 WebAudioRecorder createWebAudioRecorderImpl() => _WebAudioRecorder();
 
 class _WebAudioRecorder implements WebAudioRecorder {
+  static const List<String> _mimeCandidates = [
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+    'audio/aac',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/ogg',
+  ];
+
   html.MediaStream? _stream;
   html.MediaRecorder? _recorder;
+  String? _selectedMimeType;
 
   final List<html.Blob> _chunks = [];
   bool _recording = false;
@@ -26,10 +39,7 @@ class _WebAudioRecorder implements WebAudioRecorder {
     final hasMediaDevices = html.window.navigator.mediaDevices != null;
     var hasMediaRecorder = false;
     try {
-      hasMediaRecorder =
-          html.MediaRecorder.isTypeSupported(_pickMimeType()) ||
-          html.MediaRecorder.isTypeSupported('audio/webm') ||
-          html.MediaRecorder.isTypeSupported('audio/mp4');
+      hasMediaRecorder = _pickMimeType() != null;
     } catch (_) {
       hasMediaRecorder = false;
     }
@@ -46,18 +56,20 @@ class _WebAudioRecorder implements WebAudioRecorder {
     _chunks.clear();
     _stopCompleter = Completer<void>();
 
-    // Request mic
     _stream = await html.window.navigator.mediaDevices!.getUserMedia({
-      'audio': true,
+      'audio': {
+        'channelCount': {'ideal': 1},
+        'sampleRate': {'ideal': 44100},
+        'echoCancellation': true,
+        'noiseSuppression': true,
+        'autoGainControl': true,
+      },
     });
 
-    // Pick a mime type Edge supports
     final mime = _pickMimeType();
 
-    // Create recorder (some browsers throw if mime unsupported)
     _recorder = _createRecorder(_stream!, mime);
 
-    // dataavailable event
     _dataHandler = (html.Event event) {
       try {
         final blob = event is html.BlobEvent ? event.data : null;
@@ -71,7 +83,6 @@ class _WebAudioRecorder implements WebAudioRecorder {
       }
     };
 
-    // stop event
     _stopHandler = (html.Event _) {
       if (_stopCompleter != null && !_stopCompleter!.isCompleted) {
         _stopCompleter!.complete();
@@ -84,7 +95,6 @@ class _WebAudioRecorder implements WebAudioRecorder {
     );
     _recorder!.addEventListener('stop', _stopHandler as html.EventListener);
 
-    // timeslice helps ensure we get dataavailable chunks
     _recorder!.start(200);
 
     _recording = true;
@@ -178,22 +188,59 @@ class _WebAudioRecorder implements WebAudioRecorder {
 
     _recorder = null;
     _stream = null;
+    _selectedMimeType = null;
   }
 
-  String _pickMimeType() {
-    // We can’t rely on isTypeSupported being exposed by dart:html in all versions,
-    // so we choose a common-safe default.
-    // Edge usually supports audio/webm;codecs=opus
-    return 'audio/webm;codecs=opus';
-  }
-
-  html.MediaRecorder _createRecorder(html.MediaStream stream, String mime) {
-    try {
-      return html.MediaRecorder(stream, {'mimeType': mime});
-    } catch (_) {
-      // fallback
-      return html.MediaRecorder(stream);
+  String? _pickMimeType() {
+    for (final mime in _preferredMimeCandidates()) {
+      try {
+        if (html.MediaRecorder.isTypeSupported(mime)) return mime;
+      } catch (_) {}
     }
+    return null;
+  }
+
+  Iterable<String> _preferredMimeCandidates() {
+    if (_isAppleWebKit) return _mimeCandidates;
+    return [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/mp4',
+      'audio/aac',
+    ];
+  }
+
+  bool get _isAppleWebKit {
+    final ua = html.window.navigator.userAgent.toLowerCase();
+    final isIOS = ua.contains('iphone') || ua.contains('ipad');
+    final isSafari =
+        ua.contains('safari') &&
+        !ua.contains('chrome') &&
+        !ua.contains('crios') &&
+        !ua.contains('fxios');
+    return isIOS || isSafari;
+  }
+
+  html.MediaRecorder _createRecorder(html.MediaStream stream, String? mime) {
+    if (mime != null && mime.isNotEmpty) {
+      try {
+        _selectedMimeType = mime;
+        return html.MediaRecorder(stream, {'mimeType': mime});
+      } catch (_) {}
+    }
+
+    for (final candidate in _preferredMimeCandidates()) {
+      try {
+        _selectedMimeType = candidate;
+        return html.MediaRecorder(stream, {'mimeType': candidate});
+      } catch (_) {}
+    }
+
+    _selectedMimeType = null;
+    return html.MediaRecorder(stream);
   }
 
   String _getRecorderMimeType(html.MediaRecorder r) {
@@ -201,8 +248,10 @@ class _WebAudioRecorder implements WebAudioRecorder {
       final mt = r.mimeType;
       if (mt is String && mt.trim().isNotEmpty) return mt;
     } catch (_) {}
-    // fallback to typical webm
-    return 'audio/webm';
+
+    final selected = _selectedMimeType;
+    if (selected != null && selected.trim().isNotEmpty) return selected;
+    return _isAppleWebKit ? 'audio/mp4' : 'audio/webm';
   }
 
   Future<List<int>> _readBlobAsBytes(html.Blob blob) async {
@@ -246,8 +295,13 @@ class _WebAudioRecorder implements WebAudioRecorder {
 
   String _extFromMime(String mime) {
     final m = mime.toLowerCase();
+    if (m.contains('mp4') || m.contains('m4a') || m.contains('mpeg4')) {
+      return 'm4a';
+    }
+    if (m.contains('aac')) return 'aac';
     if (m.contains('ogg')) return 'ogg';
     if (m.contains('webm')) return 'webm';
-    return 'webm';
+    if (m.contains('wav')) return 'wav';
+    return _isAppleWebKit ? 'm4a' : 'webm';
   }
 }

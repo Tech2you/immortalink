@@ -7,7 +7,7 @@ class IndexingService {
 
   static String _accessTokenOrThrow() {
     final session = _client.auth.currentSession;
-    final token = session?.accessToken?.trim();
+    final token = session?.accessToken.trim();
     if (token == null || token.isEmpty) {
       throw Exception('Missing JWT (access token). Please sign in again.');
     }

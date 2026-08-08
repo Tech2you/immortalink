@@ -360,8 +360,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
         _error = e.toString();
       });
     } finally {
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -748,6 +749,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
         content: TextField(
           controller: controller,
           autofocus: true,
+          textInputAction: TextInputAction.done,
+          onEditingComplete: () =>
+              FocusManager.instance.primaryFocus?.unfocus(),
           decoration: const InputDecoration(labelText: 'Vault name'),
         ),
         actions: [
@@ -883,7 +887,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                 labelText: 'Your name',
                 hintText: 'Example: Frank',
               ),
-              onSubmitted: (_) => Navigator.pop(ctx, true),
+              onSubmitted: (_) => FocusManager.instance.primaryFocus?.unfocus(),
             ),
           ],
         ),
@@ -1289,11 +1293,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                   onTap: () => _openPhotoGallery(photos, i),
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(14),
-                                    child: Image.network(
+                                    child: _memoryPhotoImage(
                                       p.url,
                                       width: 110,
                                       height: 80,
-                                      fit: BoxFit.cover,
                                       gaplessPlayback: true,
                                     ),
                                   ),
@@ -1473,6 +1476,26 @@ class _VaultsScreenState extends State<VaultsScreen> {
     );
   }
 
+  Widget _memoryPhotoImage(
+    String url, {
+    required double width,
+    required double height,
+    bool gaplessPlayback = false,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.black.withValues(alpha: 0.04),
+      child: Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: BoxFit.contain,
+        gaplessPlayback: gaplessPlayback,
+      ),
+    );
+  }
+
   Widget _buildFeedSection(bool inFamily) {
     if (!inFamily) {
       return Container(
@@ -1624,11 +1647,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                 if (previewPhoto != null)
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(14),
-                                    child: Image.network(
+                                    child: _memoryPhotoImage(
                                       previewPhoto.url,
                                       width: 96,
                                       height: 76,
-                                      fit: BoxFit.cover,
                                       gaplessPlayback: true,
                                     ),
                                   ),
@@ -1976,7 +1998,7 @@ class _CreateFamilyDialogState extends State<_CreateFamilyDialog> {
             keyboardType: TextInputType.text,
             textInputAction: TextInputAction.done,
             decoration: const InputDecoration(labelText: 'Family name'),
-            onSubmitted: (_) => _create(),
+            onSubmitted: (_) => FocusManager.instance.primaryFocus?.unfocus(),
           ),
         ],
       ),
@@ -2033,7 +2055,7 @@ class _DeleteAccountConfirmationDialogState
             obscureText: true,
             textInputAction: TextInputAction.done,
             decoration: const InputDecoration(labelText: 'Password'),
-            onSubmitted: (_) => _confirm(),
+            onSubmitted: (_) => FocusManager.instance.primaryFocus?.unfocus(),
           ),
         ],
       ),
