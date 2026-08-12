@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -6,6 +7,7 @@ import '../services/ai_chat_reminder_service.dart';
 
 enum _AuthMode { signIn, signUp }
 
+const _passwordResetRedirectUrl = 'com.everroots.app://login-callback';
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
 
 class SignInScreen extends StatefulWidget {
@@ -145,17 +147,22 @@ class _SignInScreenState extends State<SignInScreen> {
     try {
       final client = Supabase.instance.client;
 
-      // NOTE: Make sure you’ve configured your Supabase Auth redirect URL(s) in the dashboard.
-      await client.auth.resetPasswordForEmail(email);
+      // Keep web on the configured Site URL; native builds return through the app.
+      await client.auth.resetPasswordForEmail(
+        email,
+        redirectTo: kIsWeb ? null : _passwordResetRedirectUrl,
+      );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Password reset email sent (if the account exists).'),
+          content: Text(
+            'If that email has an account, a reset link is on its way.',
+          ),
         ),
       );
-    } on AuthException catch (e) {
-      setState(() => _error = e.message);
+    } on AuthException {
+      setState(() => _error = 'Could not send the reset email. Try again.');
     } catch (_) {
       setState(() => _error = 'Could not send reset email. Try again.');
     } finally {
@@ -333,14 +340,25 @@ class _SignInScreenState extends State<SignInScreen> {
 
                               SizedBox(height: verticalGap),
 
-                              Text(
-                                'Keep your family connected — now and always.',
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  color: const Color(0xFF26212D),
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0,
+                              ShaderMask(
+                                shaderCallback: (bounds) =>
+                                    const LinearGradient(
+                                      colors: [
+                                        Color(0xFF23192C),
+                                        Color(0xFF6E5A93),
+                                        Color(0xFF138489),
+                                      ],
+                                    ).createShader(bounds),
+                                child: Text(
+                                  'Keep your family close\nnow and always',
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0,
+                                    height: 1.08,
+                                  ),
+                                  textAlign: TextAlign.center,
                                 ),
-                                textAlign: TextAlign.center,
                               ),
 
                               SizedBox(

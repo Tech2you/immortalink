@@ -1837,112 +1837,134 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Add $relativeLabel across a gap',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final maxHeight = MediaQuery.sizeOf(context).height * 0.82;
+            return ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(
+                  left: 18,
+                  right: 18,
+                  top: 18,
+                  bottom: 18 + MediaQuery.viewInsetsOf(context).bottom,
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'This creates $placeholderText between ${focus.name} and the $relativeLabel so the lineage stays connected. You can replace the placeholders later.',
-              ),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1E8F6),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Row(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline, size: 20),
-                    SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'To continue a lineage that is already connected, close this panel, tap the relevant person’s bubble, and add their parent or child from that branch.',
+                    Text(
+                      'Add $relativeLabel across a gap',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'This creates $placeholderText between ${focus.name} and the $relativeLabel so the lineage stays connected. You can replace the placeholders later.',
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1E8F6),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline, size: 20),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'To continue a connected line, close this panel, tap the right person, then add their parent or child from that branch.',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.person_add_alt_1),
+                      ),
+                      title: Text('Invite $relativeLabel'),
+                      subtitle: const Text(
+                        'Create placeholders and an invite code',
+                      ),
+                      onTap: () async {
+                        Navigator.pop(sheetContext);
+                        await Future<void>.delayed(Duration.zero);
+                        final confirmed = await _confirmGapInvite(
+                          focus: focus,
+                          relativeLabel: relativeLabel,
+                          placeholderText: placeholderText,
+                        );
+                        if (!confirmed) return;
+                        try {
+                          final anchor = await _createLineagePlaceholderChain(
+                            focus,
+                            direction,
+                            placeholderCount,
+                          );
+                          await _createInvite(direction, anchor);
+                        } catch (e) {
+                          if (!context.mounted) return;
+                          if (isEverRootFamilyUpgradeError(e)) {
+                            await showEverRootFamilyUpgradePrompt(
+                              context,
+                              message: e is PostgrestException
+                                  ? e.message
+                                  : null,
+                            );
+                            return;
+                          }
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Could not create invite: $e'),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.history_edu_outlined),
+                      ),
+                      title: Text('Add legacy $relativeLabel'),
+                      subtitle: const Text(
+                        'Create placeholders and a legacy profile',
+                      ),
+                      onTap: () async {
+                        Navigator.pop(sheetContext);
+                        await Future<void>.delayed(Duration.zero);
+                        final confirmed = await _confirmGapInvite(
+                          focus: focus,
+                          relativeLabel: relativeLabel,
+                          placeholderText: placeholderText,
+                          actionLabel: 'Create legacy $relativeLabel',
+                          subjectVerb: 'Creating this legacy',
+                          branchNoun: 'legacy profile',
+                        );
+                        if (!confirmed) return;
+                        _showLegacyDialog(
+                          direction,
+                          focus,
+                          lineagePlaceholderCount: placeholderCount,
+                          lineageRelativeLabel: relativeLabel,
+                        );
+                      },
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
-              ListTile(
-                leading: const CircleAvatar(
-                  child: Icon(Icons.person_add_alt_1),
-                ),
-                title: Text('Invite $relativeLabel'),
-                subtitle: const Text('Create placeholders and an invite code'),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  await Future<void>.delayed(Duration.zero);
-                  final confirmed = await _confirmGapInvite(
-                    focus: focus,
-                    relativeLabel: relativeLabel,
-                    placeholderText: placeholderText,
-                  );
-                  if (!confirmed) return;
-                  try {
-                    final anchor = await _createLineagePlaceholderChain(
-                      focus,
-                      direction,
-                      placeholderCount,
-                    );
-                    await _createInvite(direction, anchor);
-                  } catch (e) {
-                    if (!mounted) return;
-                    if (isEverRootFamilyUpgradeError(e)) {
-                      await showEverRootFamilyUpgradePrompt(
-                        context,
-                        message: e is PostgrestException ? e.message : null,
-                      );
-                      return;
-                    }
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Could not create invite: $e')),
-                    );
-                  }
-                },
-              ),
-              ListTile(
-                leading: const CircleAvatar(
-                  child: Icon(Icons.history_edu_outlined),
-                ),
-                title: Text('Add legacy $relativeLabel'),
-                subtitle: const Text(
-                  'Create placeholders and a legacy profile',
-                ),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  await Future<void>.delayed(Duration.zero);
-                  final confirmed = await _confirmGapInvite(
-                    focus: focus,
-                    relativeLabel: relativeLabel,
-                    placeholderText: placeholderText,
-                    actionLabel: 'Create legacy $relativeLabel',
-                    subjectVerb: 'Creating this legacy',
-                    branchNoun: 'legacy profile',
-                  );
-                  if (!confirmed) return;
-                  _showLegacyDialog(
-                    direction,
-                    focus,
-                    lineagePlaceholderCount: placeholderCount,
-                    lineageRelativeLabel: relativeLabel,
-                  );
-                },
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );

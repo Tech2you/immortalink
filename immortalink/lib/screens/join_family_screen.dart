@@ -14,6 +14,44 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   final _controller = TextEditingController();
   bool _loading = false;
 
+  String _friendlyJoinError(Object error) {
+    final text = error.toString().toLowerCase();
+    if (text.contains('invalid') ||
+        text.contains('invite') ||
+        text.contains('code') ||
+        text.contains('not found') ||
+        text.contains('expired')) {
+      return 'That invite code does not look right. Check it and try again.';
+    }
+    if (text.contains('already')) {
+      return 'You are already part of this family.';
+    }
+    if (text.contains('not signed in')) {
+      return 'Please sign in again before joining a family.';
+    }
+    if (text.contains('network') || text.contains('timeout')) {
+      return 'We could not reach Ever Roots. Check your connection and try again.';
+    }
+    return 'We could not join that family right now. Check the code and try again.';
+  }
+
+  Future<void> _showJoinError(Object error) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Could not join family'),
+        content: Text(_friendlyJoinError(error)),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Ensures the signed-in user has a vault row.
   /// This prevents RPCs like join_family_by_invite from failing with "No vault found".
   Future<void> _ensureVaultExistsForUser(User user) async {
@@ -153,9 +191,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Join failed: $e')));
+      await _showJoinError(e);
     } finally {
       if (mounted) setState(() => _loading = false);
     }

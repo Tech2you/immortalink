@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'env.dart';
+import 'screens/reset_password_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/vaults_screen.dart';
 import 'widgets/keyboard_dismiss_scope.dart';
@@ -87,6 +88,7 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   bool _checkedSessionPreference = false;
+  bool _passwordRecoveryCompleted = false;
 
   @override
   void initState() {
@@ -120,9 +122,22 @@ class _AuthGateState extends State<AuthGate> {
       stream: auth.onAuthStateChange,
       builder: (context, snapshot) {
         final session = auth.currentSession;
+        final event = snapshot.data?.event;
 
         if (session == null) {
+          _passwordRecoveryCompleted = false;
           return const SignInScreen();
+        }
+
+        if (event == AuthChangeEvent.passwordRecovery &&
+            !_passwordRecoveryCompleted) {
+          return ResetPasswordScreen(
+            onPasswordUpdated: () {
+              if (mounted) {
+                setState(() => _passwordRecoveryCompleted = true);
+              }
+            },
+          );
         }
 
         return const VaultsScreen();
