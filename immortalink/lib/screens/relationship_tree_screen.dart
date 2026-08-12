@@ -8,6 +8,8 @@ import 'legacy_vault_screen.dart';
 import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
 import 'vaults_screen.dart';
+import '../services/family_leave_service.dart';
+import '../utils/everroot_upgrade_prompt.dart';
 
 enum _RelativeKind { parent, spouse, sibling, child }
 
@@ -373,31 +375,46 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     final focus = _focus;
     if (viewer == null || focus?.key != viewer.key) return;
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Leave family?'),
-        content: const Text(
-          'This removes your account and vault from this family tree. You can join a family again later with an invite code.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Leave family'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-
     try {
-      await _supabase.rpc(
-        'leave_family',
-        params: {'p_family_id': widget.familyId},
+      final leaveService = FamilyLeaveService(_supabase);
+      final impact = await leaveService.getLeaveImpact(widget.familyId);
+      if (!mounted) return;
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            impact.requiresDestructiveConfirmation
+                ? 'Permanently delete family tree?'
+                : 'Leave family?',
+          ),
+          content: Text(
+            impact.requiresDestructiveConfirmation
+                ? (impact.message ??
+                      'You are the last member of this family. Leaving will permanently delete this family tree, including its legacy profiles and relationships. Do you want to continue?')
+                : 'This removes your account and vault from this family tree. You can join a family again later with an invite code.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(
+                impact.requiresDestructiveConfirmation
+                    ? 'Delete tree'
+                    : 'Leave family',
+              ),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+
+      await leaveService.leaveFamily(
+        widget.familyId,
+        confirmedDestructiveLeave: impact.requiresDestructiveConfirmation,
       );
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
@@ -1237,6 +1254,13 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       await _load(keepFocusKey: focus.key);
     } catch (e) {
       if (!mounted) return;
+      if (isEverRootFamilyUpgradeError(e)) {
+        await showEverRootFamilyUpgradePrompt(
+          context,
+          message: e is PostgrestException ? e.message : null,
+        );
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Could not create invite: $e')));
@@ -1713,6 +1737,13 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                     await _createInvite(_RelativeKind.child, placeholder);
                   } catch (e) {
                     if (!mounted) return;
+                    if (isEverRootFamilyUpgradeError(e)) {
+                      await showEverRootFamilyUpgradePrompt(
+                        context,
+                        message: e is PostgrestException ? e.message : null,
+                      );
+                      return;
+                    }
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Could not create invite: $e')),
                     );
@@ -1869,6 +1900,13 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                     await _createInvite(direction, anchor);
                   } catch (e) {
                     if (!mounted) return;
+                    if (isEverRootFamilyUpgradeError(e)) {
+                      await showEverRootFamilyUpgradePrompt(
+                        context,
+                        message: e is PostgrestException ? e.message : null,
+                      );
+                      return;
+                    }
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Could not create invite: $e')),
                     );
@@ -2431,57 +2469,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
               top: 10,
               child: Center(child: _buildBreadcrumbs()),
             ),
-            Positioned(
-              left: 14,
-              bottom: 14,
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.pan_tool_alt_outlined, size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Drag to explore • Tap a person to follow their branch',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 14,
-              bottom: 14,
-              child: AnimatedBuilder(
-                animation: _transformController,
-                builder: (context, _) => _TreeMiniMap(
-                  model: model,
-                  transform: _transformController.value,
-                  viewportSize: Size(
-                    constraints.maxWidth,
-                    constraints.maxHeight,
-                  ),
-                  onNavigate: (canvasPoint) {
-                    final scale = _transformController.value
-                        .getMaxScaleOnAxis();
-                    final safeScale = scale <= 0 ? 1.0 : scale;
-                    final targetX =
-                        constraints.maxWidth / 2 - canvasPoint.dx * safeScale;
-                    final targetY =
-                        constraints.maxHeight / 2 - canvasPoint.dy * safeScale;
-                    final next = Matrix4.identity()
-                      ..translateByDouble(targetX, targetY, 0, 1)
-                      ..scaleByDouble(safeScale, safeScale, 1, 1);
-                    _transformController.value = next;
-                  },
-                ),
-              ),
-            ),
           ],
         );
       },
@@ -2861,215 +2848,4 @@ class _AddBubble extends StatelessWidget {
       ),
     );
   }
-}
-
-class _TreeMiniMap extends StatelessWidget {
-  final _CanvasModel model;
-  final Matrix4 transform;
-  final Size viewportSize;
-  final ValueChanged<Offset> onNavigate;
-
-  const _TreeMiniMap({
-    required this.model,
-    required this.transform,
-    required this.viewportSize,
-    required this.onNavigate,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    const mapSize = Size(210, 140);
-    return Material(
-      color: Colors.white.withValues(alpha: 0.95),
-      elevation: 5,
-      borderRadius: BorderRadius.circular(16),
-      child: Tooltip(
-        message: 'Family overview — tap to move',
-        child: GestureDetector(
-          onTapDown: (details) {
-            final scale = min(
-              mapSize.width / model.size.width,
-              mapSize.height / model.size.height,
-            );
-            final drawnWidth = model.size.width * scale;
-            final drawnHeight = model.size.height * scale;
-            final offset = Offset(
-              (mapSize.width - drawnWidth) / 2,
-              (mapSize.height - drawnHeight) / 2,
-            );
-            final canvasPoint = Offset(
-              (details.localPosition.dx - offset.dx) / scale,
-              (details.localPosition.dy - offset.dy) / scale,
-            );
-            onNavigate(canvasPoint);
-          },
-          child: SizedBox(
-            width: mapSize.width,
-            height: mapSize.height,
-            child: CustomPaint(
-              painter: _MiniMapPainter(
-                model: model,
-                transform: transform,
-                viewportSize: viewportSize,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MiniMapPainter extends CustomPainter {
-  final _CanvasModel model;
-  final Matrix4 transform;
-  final Size viewportSize;
-
-  const _MiniMapPainter({
-    required this.model,
-    required this.transform,
-    required this.viewportSize,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final mapScale = min(
-      size.width / model.size.width,
-      size.height / model.size.height,
-    );
-    final offset = Offset(
-      (size.width - model.size.width * mapScale) / 2,
-      (size.height - model.size.height * mapScale) / 2,
-    );
-
-    Offset mapPoint(Offset point) => offset + point * mapScale;
-
-    final linePaint = Paint()
-      ..color = const Color(0xFF9A7AAA).withValues(alpha: 0.42)
-      ..strokeWidth = 1;
-    final personPaint = Paint()..color = const Color(0xFF7B5B8E);
-    final addPaint = Paint()..color = const Color(0xFFD8CBDD);
-
-    for (final branch in model.familyBranches) {
-      final parentY =
-          branch.parents.map((point) => point.dy).reduce((a, b) => a + b) /
-          branch.parents.length;
-      final averageParentX =
-          branch.parents.map((point) => point.dx).reduce((a, b) => a + b) /
-          branch.parents.length;
-      final branchOriginX = branch.branchOriginX ?? averageParentX;
-      final childY = branch.children
-          .map((point) => point.dy)
-          .reduce((a, b) => a < b ? a : b);
-      final branchY = (parentY + childY) / 2 + branch.laneOffset;
-      final childXs = branch.children.map((point) => point.dx).toList();
-      final barLeft = min(branchOriginX, childXs.reduce(min));
-      final barRight = max(branchOriginX, childXs.reduce(max));
-
-      for (final partnerLine in branch.partnerLines) {
-        canvas.drawLine(
-          mapPoint(partnerLine.first),
-          mapPoint(partnerLine.second),
-          linePaint,
-        );
-      }
-
-      if (branch.parents.length > 1) {
-        final mergeY = parentY + (branchY - parentY) * 0.45;
-        final parentXs = branch.parents.map((point) => point.dx).toList();
-        for (final parent in branch.parents) {
-          canvas.drawLine(
-            mapPoint(parent),
-            mapPoint(Offset(parent.dx, mergeY)),
-            linePaint,
-          );
-        }
-        canvas.drawLine(
-          mapPoint(Offset(parentXs.reduce(min), mergeY)),
-          mapPoint(Offset(parentXs.reduce(max), mergeY)),
-          linePaint,
-        );
-        canvas.drawLine(
-          mapPoint(Offset(branchOriginX, mergeY)),
-          mapPoint(Offset(branchOriginX, branchY)),
-          linePaint,
-        );
-      } else {
-        canvas.drawLine(
-          mapPoint(Offset(branchOriginX, parentY)),
-          mapPoint(Offset(branchOriginX, branchY)),
-          linePaint,
-        );
-      }
-      canvas.drawLine(
-        mapPoint(Offset(barLeft, branchY)),
-        mapPoint(Offset(barRight, branchY)),
-        linePaint,
-      );
-      for (final child in branch.children) {
-        canvas.drawLine(
-          mapPoint(Offset(child.dx, branchY)),
-          mapPoint(child),
-          linePaint,
-        );
-      }
-    }
-
-    for (final connection in model.connections) {
-      canvas.drawLine(
-        mapPoint(connection.first),
-        mapPoint(connection.second),
-        linePaint,
-      );
-    }
-
-    for (final bubble in model.bubbles) {
-      final target = mapPoint(bubble.center);
-      if (bubble.person != null) {
-        canvas.drawCircle(target, 3.1, personPaint);
-      } else {
-        canvas.drawCircle(target, 2.2, addPaint);
-      }
-    }
-    canvas.drawCircle(
-      mapPoint(model.focusCenter),
-      5,
-      Paint()..color = const Color(0xFF5B2D73),
-    );
-
-    final zoom = transform.getMaxScaleOnAxis();
-    final safeZoom = zoom <= 0 ? 1.0 : zoom;
-    final tx = transform.storage[12];
-    final ty = transform.storage[13];
-    final visibleTopLeft = Offset(-tx / safeZoom, -ty / safeZoom);
-    final visibleSize = Size(
-      viewportSize.width / safeZoom,
-      viewportSize.height / safeZoom,
-    );
-    final visibleRect = Rect.fromLTWH(
-      offset.dx + visibleTopLeft.dx * mapScale,
-      offset.dy + visibleTopLeft.dy * mapScale,
-      visibleSize.width * mapScale,
-      visibleSize.height * mapScale,
-    ).intersect(Offset.zero & size);
-
-    if (!visibleRect.isEmpty) {
-      canvas.drawRect(
-        visibleRect,
-        Paint()
-          ..color = const Color(0xFF5B2D73).withValues(alpha: 0.08)
-          ..style = PaintingStyle.fill,
-      );
-      canvas.drawRect(
-        visibleRect,
-        Paint()
-          ..color = const Color(0xFF5B2D73).withValues(alpha: 0.7)
-          ..strokeWidth = 1.2
-          ..style = PaintingStyle.stroke,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _MiniMapPainter oldDelegate) => true;
 }

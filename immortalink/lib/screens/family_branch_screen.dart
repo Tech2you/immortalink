@@ -8,6 +8,7 @@ import 'family_tree_screen.dart';
 import 'legacy_vault_screen.dart';
 import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
+import '../utils/everroot_upgrade_prompt.dart';
 
 class FamilyBranchScreen extends StatefulWidget {
   final String familyId;
@@ -1202,6 +1203,13 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
+      if (isEverRootFamilyUpgradeError(e)) {
+        await showEverRootFamilyUpgradePrompt(
+          context,
+          message: e is PostgrestException ? e.message : null,
+        );
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));
@@ -1321,6 +1329,13 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
+      if (isEverRootFamilyUpgradeError(e)) {
+        await showEverRootFamilyUpgradePrompt(
+          context,
+          message: e is PostgrestException ? e.message : null,
+        );
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));

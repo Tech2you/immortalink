@@ -4,6 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../utils/everroot_upgrade_prompt.dart';
 import 'vault_home_screen.dart';
 import 'relationship_tree_screen.dart';
 import 'join_family_screen.dart';
@@ -11,6 +12,7 @@ import 'join_family_screen.dart';
 enum _VaultSettingsAction {
   refresh,
   joinFamily,
+  createFamily,
   manageSubscription,
   deleteAccount,
   signOut,
@@ -100,6 +102,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
       case _VaultSettingsAction.joinFamily:
         _openJoinFamilyScreen();
         return;
+      case _VaultSettingsAction.createFamily:
+        await _ensureFamilyAndOpenTree(createAnother: true);
+        return;
       case _VaultSettingsAction.manageSubscription:
         await _showSubscriptionSettings();
         return;
@@ -135,7 +140,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Sign out?'),
-        content: const Text('You will be signed out of ImmortaLink.'),
+        content: const Text('You will be signed out of Ever Roots.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -1013,8 +1018,18 @@ class _VaultsScreenState extends State<VaultsScreen> {
     } on TimeoutException {
       _toast('Family setup timed out. Try again.');
     } on PostgrestException catch (e) {
+      if (isEverRootFamilyUpgradeError(e)) {
+        if (!mounted) return;
+        await showEverRootFamilyUpgradePrompt(context, message: e.message);
+        return;
+      }
       _toast('Family setup failed: ${e.message}');
     } catch (e) {
+      if (isEverRootFamilyUpgradeError(e)) {
+        if (!mounted) return;
+        await showEverRootFamilyUpgradePrompt(context);
+        return;
+      }
       _toast('Family setup failed: $e');
     }
   }
@@ -1082,9 +1097,36 @@ class _VaultsScreenState extends State<VaultsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Your family trees',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Your family trees',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                PopupMenuButton<_VaultSettingsAction>(
+                  tooltip: 'Family tree actions',
+                  icon: const Icon(Icons.more_horiz),
+                  onSelected: _handleSettingsAction,
+                  itemBuilder: (ctx) => const [
+                    PopupMenuItem(
+                      value: _VaultSettingsAction.joinFamily,
+                      child: ListTile(
+                        leading: Icon(Icons.group_add),
+                        title: Text('Join another family'),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _VaultSettingsAction.createFamily,
+                      child: ListTile(
+                        leading: Icon(Icons.add_circle_outline),
+                        title: Text('Create another family'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
             const SizedBox(height: 4),
             Text(
@@ -1117,26 +1159,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
                       ),
               );
             }),
-            const Divider(),
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: _openJoinFamilyScreen,
-                    icon: const Icon(Icons.group_add),
-                    label: const Text('Join another family'),
-                  ),
-                ),
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: () =>
-                        _ensureFamilyAndOpenTree(createAnother: true),
-                    icon: const Icon(Icons.add_circle_outline),
-                    label: const Text('Create another family'),
-                  ),
-                ),
-              ],
-            ),
           ],
         ),
       ),

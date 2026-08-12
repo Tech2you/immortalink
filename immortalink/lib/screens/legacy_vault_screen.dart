@@ -677,6 +677,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     String? error;
     int seconds = 0;
     bool stopping = false;
+    bool startScheduled = false;
+    DateTime? startedAt;
     Timer? timer;
 
     final recorded =
@@ -687,12 +689,22 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           isScrollControlled: true,
           builder: (sheetContext) => StatefulBuilder(
             builder: (sheetContext, setSheetState) {
+              void updateElapsed() {
+                final started = startedAt;
+                if (started == null) return;
+                seconds = DateTime.now().difference(started).inSeconds;
+              }
+
               Future<void> start() async {
                 if (_recorder.isRecording || stopping || error != null) return;
                 try {
                   await _recorder.start();
+                  startedAt = DateTime.now();
+                  seconds = 0;
+                  if (sheetContext.mounted) setSheetState(() {});
+                  timer?.cancel();
                   timer = Timer.periodic(const Duration(seconds: 1), (_) {
-                    seconds += 1;
+                    updateElapsed();
                     if (sheetContext.mounted) setSheetState(() {});
                   });
                 } catch (e) {
@@ -702,7 +714,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 }
               }
 
-              WidgetsBinding.instance.addPostFrameCallback((_) => start());
+              if (!startScheduled) {
+                startScheduled = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) => start());
+              }
               final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
               final remaining = (seconds % 60).toString().padLeft(2, '0');
 
@@ -781,11 +796,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                       setSheetState(() => stopping = true);
                                       timer?.cancel();
                                       try {
+                                        updateElapsed();
                                         final audio = await _recorder.stop();
                                         if (sheetContext.mounted) {
                                           Navigator.pop(sheetContext, (
                                             audio: audio,
-                                            seconds: seconds,
+                                            seconds: seconds <= 0 ? 1 : seconds,
                                           ));
                                         }
                                       } catch (e) {
@@ -1543,11 +1559,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                 children: [
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(16),
-                                    child: Image.network(
+                                    child: _memoryPhotoImage(
                                       photo['url'] ?? '',
                                       width: 116,
                                       height: 116,
-                                      fit: BoxFit.cover,
                                     ),
                                   ),
                                   Positioned(
@@ -1580,11 +1595,16 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                               children: [
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(16),
-                                  child: Image.memory(
-                                    photo.bytes,
+                                  child: Container(
                                     width: 116,
                                     height: 116,
-                                    fit: BoxFit.cover,
+                                    color: Colors.black.withValues(alpha: 0.04),
+                                    child: Image.memory(
+                                      photo.bytes,
+                                      width: 116,
+                                      height: 116,
+                                      fit: BoxFit.contain,
+                                    ),
                                   ),
                                 ),
                                 Positioned(
@@ -2805,11 +2825,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 borderRadius: BorderRadius.circular(14),
                 child: Stack(
                   children: [
-                    Image.network(
+                    _memoryPhotoImage(
                       p['url'] ?? '',
                       width: 92,
                       height: 66,
-                      fit: BoxFit.cover,
                       gaplessPlayback: true,
                     ),
                     Positioned(
@@ -2831,6 +2850,26 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _memoryPhotoImage(
+    String url, {
+    required double width,
+    required double height,
+    bool gaplessPlayback = false,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      color: Colors.black.withValues(alpha: 0.04),
+      child: Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: BoxFit.contain,
+        gaplessPlayback: gaplessPlayback,
       ),
     );
   }

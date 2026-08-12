@@ -10,6 +10,8 @@ import 'legacy_vault_screen.dart';
 import 'family_branch_screen.dart';
 import 'sign_in_screen.dart';
 import 'relationship_tree_screen.dart';
+import '../services/family_leave_service.dart';
+import '../utils/everroot_upgrade_prompt.dart';
 
 class FamilyTreeScreen extends StatefulWidget {
   final String familyId;
@@ -1048,32 +1050,46 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
   }
 
   Future<void> _leaveFamily() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Leave family?'),
-        content: const Text(
-          'This will remove you from the family and detach your vault. You can re-join later with an invite.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Leave'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
     try {
-      await _supabase.rpc(
-        'leave_family',
-        params: {'p_family_id': widget.familyId},
+      final leaveService = FamilyLeaveService(_supabase);
+      final impact = await leaveService.getLeaveImpact(widget.familyId);
+      if (!mounted) return;
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            impact.requiresDestructiveConfirmation
+                ? 'Permanently delete family tree?'
+                : 'Leave family?',
+          ),
+          content: Text(
+            impact.requiresDestructiveConfirmation
+                ? (impact.message ??
+                      'You are the last member of this family. Leaving will permanently delete this family tree, including its legacy profiles and relationships. Do you want to continue?')
+                : 'This will remove you from the family and detach your vault. You can re-join later with an invite.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(
+                impact.requiresDestructiveConfirmation
+                    ? 'Delete tree'
+                    : 'Leave',
+              ),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+
+      await leaveService.leaveFamily(
+        widget.familyId,
+        confirmedDestructiveLeave: impact.requiresDestructiveConfirmation,
       );
 
       if (!mounted) return;
@@ -2485,6 +2501,14 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       _refresh();
     } catch (e) {
       if (!mounted) return;
+
+      if (isEverRootFamilyUpgradeError(e)) {
+        await showEverRootFamilyUpgradePrompt(
+          context,
+          message: e is PostgrestException ? e.message : null,
+        );
+        return;
+      }
 
       var message = 'Invite failed: $e';
       if (e is PostgrestException &&

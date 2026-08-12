@@ -340,7 +340,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     bool saving = false;
     String? err;
     int seconds = 0;
+    bool startScheduled = false;
+    DateTime? startedAt;
     Timer? t;
+
+    void updateElapsed() {
+      final started = startedAt;
+      if (started == null) return;
+      seconds = DateTime.now().difference(started).inSeconds;
+    }
 
     Future<void> stopAndSave(StateSetter setInner) async {
       if (saving) return;
@@ -374,9 +382,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               if (_recorder.isRecording) return;
               try {
                 await _recorder.start();
+                startedAt = DateTime.now();
+                seconds = 0;
+                if (ctx.mounted) setInner(() {});
                 t?.cancel();
                 t = Timer.periodic(const Duration(seconds: 1), (_) {
-                  seconds += 1;
+                  updateElapsed();
                   if (ctx.mounted) setInner(() {});
                 });
               } catch (e) {
@@ -384,9 +395,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               }
             }
 
-            WidgetsBinding.instance.addPostFrameCallback(
-              (_) => startIfNeeded(),
-            );
+            if (!startScheduled) {
+              startScheduled = true;
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => startIfNeeded(),
+              );
+            }
 
             String mmss(int s) {
               final m = (s ~/ 60).toString().padLeft(2, '0');

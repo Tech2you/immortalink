@@ -151,6 +151,8 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
     String? error;
     int seconds = 0;
     bool stopping = false;
+    bool startScheduled = false;
+    DateTime? startedAt;
     Timer? timer;
 
     final recorded =
@@ -161,12 +163,22 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
           isScrollControlled: true,
           builder: (sheetContext) => StatefulBuilder(
             builder: (sheetContext, setSheetState) {
+              void updateElapsed() {
+                final started = startedAt;
+                if (started == null) return;
+                seconds = DateTime.now().difference(started).inSeconds;
+              }
+
               Future<void> start() async {
                 if (_recorder.isRecording || stopping || error != null) return;
                 try {
                   await _recorder.start();
+                  startedAt = DateTime.now();
+                  seconds = 0;
+                  if (sheetContext.mounted) setSheetState(() {});
+                  timer?.cancel();
                   timer = Timer.periodic(const Duration(seconds: 1), (_) {
-                    seconds += 1;
+                    updateElapsed();
                     if (sheetContext.mounted) setSheetState(() {});
                   });
                 } catch (e) {
@@ -176,7 +188,10 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                 }
               }
 
-              WidgetsBinding.instance.addPostFrameCallback((_) => start());
+              if (!startScheduled) {
+                startScheduled = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) => start());
+              }
               final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
               final remaining = (seconds % 60).toString().padLeft(2, '0');
 
@@ -255,11 +270,12 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                                       setSheetState(() => stopping = true);
                                       timer?.cancel();
                                       try {
+                                        updateElapsed();
                                         final audio = await _recorder.stop();
                                         if (sheetContext.mounted) {
                                           Navigator.pop(sheetContext, (
                                             audio: audio,
-                                            seconds: seconds,
+                                            seconds: seconds <= 0 ? 1 : seconds,
                                           ));
                                         }
                                       } catch (e) {
@@ -546,11 +562,16 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
             borderRadius: BorderRadius.circular(16),
             child: Stack(
               children: [
-                Image.memory(
-                  photo.bytes,
+                Container(
                   width: 150,
                   height: 150,
-                  fit: BoxFit.cover,
+                  color: Colors.black.withValues(alpha: 0.04),
+                  child: Image.memory(
+                    photo.bytes,
+                    width: 150,
+                    height: 150,
+                    fit: BoxFit.contain,
+                  ),
                 ),
                 Positioned(
                   top: 6,
