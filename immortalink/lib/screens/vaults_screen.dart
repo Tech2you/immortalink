@@ -14,6 +14,7 @@ enum _VaultSettingsAction {
   joinFamily,
   createFamily,
   manageSubscription,
+  changePassword,
   deleteAccount,
   signOut,
 }
@@ -107,6 +108,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
         return;
       case _VaultSettingsAction.manageSubscription:
         await _showSubscriptionSettings();
+        return;
+      case _VaultSettingsAction.changePassword:
+        await _changePassword();
         return;
       case _VaultSettingsAction.deleteAccount:
         await _deleteAccount();
@@ -221,6 +225,54 @@ class _VaultsScreenState extends State<VaultsScreen> {
       _toast('Account deletion timed out. Try again.');
     } catch (e) {
       _toast('Account deletion failed: $e');
+    }
+  }
+
+  Future<void> _changePassword() async {
+    final values = await showDialog<_ChangePasswordValues>(
+      context: context,
+      builder: (ctx) => const _ChangePasswordDialog(),
+    );
+
+    if (values == null) return;
+
+    final currentPassword = values.currentPassword.trim();
+    final newPassword = values.newPassword.trim();
+    final confirmPassword = values.confirmPassword.trim();
+
+    if (currentPassword.isEmpty) {
+      _toast('Enter your current password first.');
+      return;
+    }
+    if (newPassword.length < 8) {
+      _toast('Use at least 8 characters for your new password.');
+      return;
+    }
+    if (newPassword != confirmPassword) {
+      _toast('The new passwords do not match yet.');
+      return;
+    }
+
+    try {
+      final email = _supabase.auth.currentUser?.email?.trim();
+      if (email == null || email.isEmpty) {
+        throw Exception('Missing account email. Please sign in again.');
+      }
+
+      await _supabase.auth
+          .signInWithPassword(email: email, password: currentPassword)
+          .timeout(const Duration(seconds: 20));
+      await _supabase.auth
+          .updateUser(UserAttributes(password: newPassword))
+          .timeout(const Duration(seconds: 20));
+
+      _toast('Password changed.');
+    } on AuthException {
+      _toast('Current password could not be confirmed.');
+    } on TimeoutException {
+      _toast('Password change timed out. Try again.');
+    } catch (e) {
+      _toast('Password change failed: $e');
     }
   }
 
@@ -1842,6 +1894,14 @@ class _VaultsScreenState extends State<VaultsScreen> {
                 ),
               ),
               PopupMenuItem(
+                value: _VaultSettingsAction.changePassword,
+                child: ListTile(
+                  leading: Icon(Icons.lock_reset),
+                  title: Text('Change password'),
+                  subtitle: Text('Confirm current password'),
+                ),
+              ),
+              PopupMenuItem(
                 value: _VaultSettingsAction.deleteAccount,
                 child: ListTile(
                   leading: Icon(Icons.delete_forever_outlined),
@@ -2094,6 +2154,137 @@ class _DeleteAccountConfirmationDialogState
           onPressed: _confirm,
           child: const Text('Delete account'),
         ),
+      ],
+    );
+  }
+}
+
+class _ChangePasswordValues {
+  const _ChangePasswordValues({
+    required this.currentPassword,
+    required this.newPassword,
+    required this.confirmPassword,
+  });
+
+  final String currentPassword;
+  final String newPassword;
+  final String confirmPassword;
+}
+
+class _ChangePasswordDialog extends StatefulWidget {
+  const _ChangePasswordDialog();
+
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  final _currentPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  bool _hideCurrentPassword = true;
+  bool _hideNewPassword = true;
+  bool _hideConfirmPassword = true;
+
+  @override
+  void dispose() {
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  void _confirm() {
+    Navigator.pop(
+      context,
+      _ChangePasswordValues(
+        currentPassword: _currentPasswordController.text,
+        newPassword: _newPasswordController.text,
+        confirmPassword: _confirmPasswordController.text,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Change password'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Enter your current password to confirm this is you.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _currentPasswordController,
+              autofocus: true,
+              obscureText: _hideCurrentPassword,
+              textInputAction: TextInputAction.next,
+              decoration: InputDecoration(
+                labelText: 'Current password',
+                suffixIcon: IconButton(
+                  tooltip: _hideCurrentPassword ? 'Show' : 'Hide',
+                  onPressed: () => setState(
+                    () => _hideCurrentPassword = !_hideCurrentPassword,
+                  ),
+                  icon: Icon(
+                    _hideCurrentPassword
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _newPasswordController,
+              obscureText: _hideNewPassword,
+              textInputAction: TextInputAction.next,
+              decoration: InputDecoration(
+                labelText: 'New password',
+                suffixIcon: IconButton(
+                  tooltip: _hideNewPassword ? 'Show' : 'Hide',
+                  onPressed: () =>
+                      setState(() => _hideNewPassword = !_hideNewPassword),
+                  icon: Icon(
+                    _hideNewPassword
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _confirmPasswordController,
+              obscureText: _hideConfirmPassword,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: 'Confirm password',
+                suffixIcon: IconButton(
+                  tooltip: _hideConfirmPassword ? 'Show' : 'Hide',
+                  onPressed: () => setState(
+                    () => _hideConfirmPassword = !_hideConfirmPassword,
+                  ),
+                  icon: Icon(
+                    _hideConfirmPassword
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                ),
+              ),
+              onSubmitted: (_) => _confirm(),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(onPressed: _confirm, child: const Text('Change')),
       ],
     );
   }

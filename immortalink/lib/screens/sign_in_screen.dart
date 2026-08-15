@@ -7,7 +7,7 @@ import '../services/ai_chat_reminder_service.dart';
 
 enum _AuthMode { signIn, signUp }
 
-const _passwordResetRedirectUrl = 'com.everroots.app://login-callback';
+const _passwordResetRedirectUrl = 'com.everroots.app://login-callback/';
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
 
 class SignInScreen extends StatefulWidget {
@@ -161,13 +161,29 @@ class _SignInScreenState extends State<SignInScreen> {
           ),
         ),
       );
-    } on AuthException {
-      setState(() => _error = 'Could not send the reset email. Try again.');
-    } catch (_) {
-      setState(() => _error = 'Could not send reset email. Try again.');
+    } on AuthException catch (e) {
+      debugPrint('Forgot password failed: ${e.message}');
+      setState(() => _error = _forgotPasswordErrorMessage(e));
+    } catch (e) {
+      debugPrint('Forgot password failed: $e');
+      setState(
+        () => _error =
+            'Could not send the reset email. Check your connection and try again.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _forgotPasswordErrorMessage(AuthException error) {
+    final message = error.message.toLowerCase();
+    if (message.contains('rate limit') || message.contains('too many')) {
+      return 'Too many reset emails sent. Please wait a while before trying again.';
+    }
+    if (message.contains('redirect')) {
+      return 'The reset link is not ready yet. Please try again in a moment.';
+    }
+    return 'Could not send the reset email. Check your connection and try again.';
   }
 
   void _switchMode(_AuthMode next) {
@@ -229,9 +245,9 @@ class _SignInScreenState extends State<SignInScreen> {
                       ? const EdgeInsets.fromLTRB(16, 14, 16, 16)
                       : const EdgeInsets.fromLTRB(18, 16, 18, 18))
                 : const EdgeInsets.fromLTRB(24, 20, 24, 22);
-            final logoHeight = tight ? 122.0 : (compact ? 156.0 : 214.0);
-            final logoScale = tight ? 1.62 : (compact ? 1.9 : 2.32);
-            final verticalGap = tight ? 8.0 : (compact ? 12.0 : 16.0);
+            final logoHeight = tight ? 104.0 : (compact ? 132.0 : 168.0);
+            final logoScale = tight ? 1.16 : (compact ? 1.24 : 1.34);
+            final verticalGap = tight ? 18.0 : (compact ? 24.0 : 32.0);
             final outerPadding = tight ? 12.0 : 22.0;
             final switchTextStyle = TextStyle(
               color: muted,
@@ -330,7 +346,8 @@ class _SignInScreenState extends State<SignInScreen> {
                                     Transform.scale(
                                       scale: logoScale,
                                       child: Image.asset(
-                                        'assets/images/immortalink_logo.png',
+                                        'assets/images/sign_in_logo.png',
+                                        height: logoHeight,
                                         fit: BoxFit.contain,
                                       ),
                                     ),
@@ -350,7 +367,7 @@ class _SignInScreenState extends State<SignInScreen> {
                                       ],
                                     ).createShader(bounds),
                                 child: Text(
-                                  'Keep your family close\nnow and always',
+                                  'Keep your family connected\nnow and always',
                                   style: theme.textTheme.titleLarge?.copyWith(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,

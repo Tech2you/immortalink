@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,8 +11,13 @@ import 'screens/vaults_screen.dart';
 import 'widgets/keyboard_dismiss_scope.dart';
 
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
+final _passwordRecoveryPending = ValueNotifier<bool>(false);
 
 Future<void> main() async {
+  await runZonedGuarded(_runApp, _handleUncaughtError);
+}
+
+Future<void> _runApp() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // 1) Preferred for hosted web builds (Firebase, Vercel, etc.)
@@ -56,7 +63,40 @@ Future<void> main() async {
     ),
   );
 
+  Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+    if (data.event == AuthChangeEvent.passwordRecovery) {
+      _passwordRecoveryPending.value = true;
+    } else if (data.event == AuthChangeEvent.signedOut) {
+      _passwordRecoveryPending.value = false;
+    }
+  });
+
   runApp(const MyApp());
+}
+
+void _handleUncaughtError(Object error, StackTrace stackTrace) {
+  if (error is AuthException && _isExpiredAuthLink(error)) {
+    debugPrint('Ignored expired auth link: ${error.message}');
+    return;
+  }
+
+  FlutterError.reportError(
+    FlutterErrorDetails(
+      exception: error,
+      stack: stackTrace,
+      library: 'Ever Roots',
+    ),
+  );
+}
+
+bool _isExpiredAuthLink(AuthException error) {
+  final message = error.message.toLowerCase();
+  final code = error.code?.toLowerCase();
+  final statusCode = error.statusCode?.toLowerCase();
+
+  return code == 'access_denied' ||
+      statusCode == 'otp_expired' ||
+      message.contains('invalid or has expired');
 }
 
 class MyApp extends StatelessWidget {
@@ -88,7 +128,6 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   bool _checkedSessionPreference = false;
-  bool _passwordRecoveryCompleted = false;
 
   @override
   void initState() {
@@ -118,29 +157,29 @@ class _AuthGateState extends State<AuthGate> {
 
     final auth = Supabase.instance.client.auth;
 
-    return StreamBuilder<AuthState>(
-      stream: auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        final session = auth.currentSession;
-        final event = snapshot.data?.event;
+    return ValueListenableBuilder<bool>(
+      valueListenable: _passwordRecoveryPending,
+      builder: (context, passwordRecoveryPending, _) {
+        return StreamBuilder<AuthState>(
+          stream: auth.onAuthStateChange,
+          builder: (context, snapshot) {
+            final session = auth.currentSession;
 
-        if (session == null) {
-          _passwordRecoveryCompleted = false;
-          return const SignInScreen();
-        }
+            if (session == null) {
+              return const SignInScreen();
+            }
 
-        if (event == AuthChangeEvent.passwordRecovery &&
-            !_passwordRecoveryCompleted) {
-          return ResetPasswordScreen(
-            onPasswordUpdated: () {
-              if (mounted) {
-                setState(() => _passwordRecoveryCompleted = true);
-              }
-            },
-          );
-        }
+            if (passwordRecoveryPending) {
+              return ResetPasswordScreen(
+                onPasswordUpdated: () {
+                  _passwordRecoveryPending.value = false;
+                },
+              );
+            }
 
-        return const VaultsScreen();
+            return const VaultsScreen();
+          },
+        );
       },
     );
   }
