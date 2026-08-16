@@ -1,11 +1,11 @@
 {
-    "name": "immortalink",
-    "short_name": "immortalink",
+    "name": "Ever Roots",
+    "short_name": "Ever Roots",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Ever Roots helps families preserve memories, voice notes, photos, and family stories.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
