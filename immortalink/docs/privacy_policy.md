@@ -8,7 +8,7 @@ This policy is written for our TestFlight beta and early launch period. It shoul
 
 ## Who We Are
 
-Ever Roots is operated by Ross Strauss. For privacy questions, data requests, or safety concerns, contact us at support@everroots.app.
+Ever Roots is operated by Ross Strauss. For privacy questions, data requests, or safety concerns, contact us at linebreakers@outlook.com.
 
 ## Information We Collect
 
@@ -93,7 +93,7 @@ Backups and logs may persist for a limited period before deletion. Some informat
 
 ## Your Privacy Choices And Rights
 
-Depending on where you live, you may have rights to access, correct, delete, export, object to, restrict, or withdraw consent for certain personal information. You can contact us at support@everroots.app to make a privacy request.
+Depending on where you live, you may have rights to access, correct, delete, export, object to, restrict, or withdraw consent for certain personal information. You can contact us at linebreakers@outlook.com to make a privacy request.
 
 We may need to verify your identity before acting on a request. Some requests may be limited where we need to protect other people's privacy, preserve security, comply with the law, or maintain family content controlled by another user.
 
@@ -101,7 +101,7 @@ We may need to verify your identity before acting on a request. Some requests ma
 
 Ever Roots is not directed to children under 13 and is not intended for use by children without appropriate parent or guardian involvement. Adults may add family tree information, photos, memories, or voice notes that include children or relatives. If you upload information about another person, including a child, you are responsible for having an appropriate right or permission to do so.
 
-If you believe a child's information has been added improperly, contact us at support@everroots.app.
+If you believe a child's information has been added improperly, contact us at linebreakers@outlook.com.
 
 ## International Transfers
 
@@ -124,4 +124,4 @@ We may update this Privacy Policy as Ever Roots changes. If we make important ch
 For questions, requests, or concerns about this Privacy Policy or your information, contact:
 
 Ross Strauss  
-Email: support@everroots.app
+Email: linebreakers@outlook.com

@@ -254,21 +254,18 @@ class _VaultsScreenState extends State<VaultsScreen> {
     }
 
     try {
-      final email = _supabase.auth.currentUser?.email?.trim();
-      if (email == null || email.isEmpty) {
-        throw Exception('Missing account email. Please sign in again.');
-      }
-
       await _supabase.auth
-          .signInWithPassword(email: email, password: currentPassword)
-          .timeout(const Duration(seconds: 20));
-      await _supabase.auth
-          .updateUser(UserAttributes(password: newPassword))
+          .updateUser(
+            _PasswordChangeAttributes(
+              currentPassword: currentPassword,
+              newPassword: newPassword,
+            ),
+          )
           .timeout(const Duration(seconds: 20));
 
       _toast('Password changed.');
-    } on AuthException {
-      _toast('Current password could not be confirmed.');
+    } on AuthException catch (e) {
+      _toast(_changePasswordErrorMessage(e));
     } on TimeoutException {
       _toast('Password change timed out. Try again.');
     } catch (e) {
@@ -2288,6 +2285,47 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
       ],
     );
   }
+}
+
+class _PasswordChangeAttributes extends UserAttributes {
+  _PasswordChangeAttributes({
+    required this.currentPassword,
+    required String newPassword,
+  }) : super(password: newPassword);
+
+  final String currentPassword;
+
+  @override
+  Map<String, dynamic> toJson() {
+    return {...super.toJson(), 'current_password': currentPassword};
+  }
+}
+
+String _changePasswordErrorMessage(AuthException error) {
+  final message = error.message.toLowerCase();
+  final code = error.code?.toLowerCase();
+
+  if (code == 'same_password' || message.contains('same password')) {
+    return 'Choose a new password that is different from the current one.';
+  }
+  if (code == 'weak_password' || message.contains('weak password')) {
+    return 'That new password is too easy to guess. Please make it stronger.';
+  }
+  if (code == 'reauthentication_needed' ||
+      code == 'reauth_nonce_missing' ||
+      code == 'reauthentication_not_valid') {
+    return 'For security, please use Forgot password to reset this account.';
+  }
+  if (message.contains('current') ||
+      message.contains('invalid login') ||
+      message.contains('invalid credentials')) {
+    return 'That current password does not match this account.';
+  }
+
+  debugPrint(
+    'Change password failed: ${error.code ?? error.statusCode ?? error.message}',
+  );
+  return 'Could not change the password. Please try again.';
 }
 
 class _FeedItem {
