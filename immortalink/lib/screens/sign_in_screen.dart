@@ -9,6 +9,7 @@ enum _AuthMode { signIn, signUp }
 
 const _passwordResetRedirectUrl = 'com.everroots.app://login-callback/';
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
+const _authEmailCooldown = Duration(seconds: 60);
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -34,6 +35,7 @@ class _SignInScreenState extends State<SignInScreen> {
   bool _staySignedIn = true;
 
   String? _error;
+  DateTime? _nextAuthEmailAt;
 
   @override
   void dispose() {
@@ -121,7 +123,7 @@ class _SignInScreenState extends State<SignInScreen> {
         });
       }
     } on AuthException catch (e) {
-      setState(() => _error = e.message);
+      setState(() => _error = _authErrorMessage(e));
     } catch (e) {
       setState(() => _error = 'Something went wrong. Please try again.');
     } finally {
@@ -132,6 +134,15 @@ class _SignInScreenState extends State<SignInScreen> {
   Future<void> _forgotPassword() async {
     FocusScope.of(context).unfocus();
     final email = _email.text.trim();
+    final cooldown = _authEmailCooldownRemaining();
+    if (cooldown != null) {
+      setState(
+        () => _error =
+            'Please wait ${cooldown.inSeconds} seconds before requesting another email.',
+      );
+      return;
+    }
+
     if (email.isEmpty || !email.contains('@')) {
       setState(
         () => _error = 'Enter your email first, then tap “Forgot password?”',
@@ -161,6 +172,7 @@ class _SignInScreenState extends State<SignInScreen> {
           ),
         ),
       );
+      setState(() => _nextAuthEmailAt = DateTime.now().add(_authEmailCooldown));
     } on AuthException catch (e) {
       debugPrint('Forgot password failed: ${e.message}');
       setState(() => _error = _forgotPasswordErrorMessage(e));
@@ -178,12 +190,39 @@ class _SignInScreenState extends State<SignInScreen> {
   String _forgotPasswordErrorMessage(AuthException error) {
     final message = error.message.toLowerCase();
     if (message.contains('rate limit') || message.contains('too many')) {
+      _nextAuthEmailAt = DateTime.now().add(_authEmailCooldown);
       return 'Too many reset emails sent. Please wait a while before trying again.';
+    }
+    if (message.contains('email address not authorized')) {
+      return 'Email delivery is not ready for that address yet. Production auth email setup is required before broader testing.';
     }
     if (message.contains('redirect')) {
       return 'The reset link is not ready yet. Please try again in a moment.';
     }
     return 'Could not send the reset email. Check your connection and try again.';
+  }
+
+  String _authErrorMessage(AuthException error) {
+    final message = error.message.toLowerCase();
+    if (message.contains('email address not authorized')) {
+      return 'Email delivery is not ready for that address yet. Production auth email setup is required before broader testing.';
+    }
+    if (message.contains('rate limit') || message.contains('too many')) {
+      _nextAuthEmailAt = DateTime.now().add(_authEmailCooldown);
+      return 'Too many email requests. Please wait a while before trying again.';
+    }
+    return error.message;
+  }
+
+  Duration? _authEmailCooldownRemaining() {
+    final next = _nextAuthEmailAt;
+    if (next == null) return null;
+    final remaining = next.difference(DateTime.now());
+    if (remaining <= Duration.zero) {
+      _nextAuthEmailAt = null;
+      return null;
+    }
+    return remaining;
   }
 
   void _switchMode(_AuthMode next) {

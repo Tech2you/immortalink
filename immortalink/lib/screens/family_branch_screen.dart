@@ -1210,6 +1210,12 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         );
         return;
       }
+      if (isEverRootQuotaError(e)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(everRootQuotaMessageFromError(e))),
+        );
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Invite failed: $e')));
@@ -1333,6 +1339,12 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
         await showEverRootFamilyUpgradePrompt(
           context,
           message: e is PostgrestException ? e.message : null,
+        );
+        return;
+      }
+      if (isEverRootQuotaError(e)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(everRootQuotaMessageFromError(e))),
         );
         return;
       }

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
+import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
 
@@ -106,23 +107,24 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         final bytes = file.bytes;
         if (bytes == null) continue;
 
-        final message = MediaUploadPolicy.validateBytes(
-          MediaUploadKind.photo,
-          bytes.length,
-          fileName: file.name,
-        );
-        if (message != null) {
-          rejectedMessage ??= message;
-          continue;
+        try {
+          final image = await ImageUploadOptimizer.optimize(
+            bytes,
+            kind: MediaUploadKind.photo,
+            fileName: file.name,
+            contentType: _imageMime(_extension(file.name)),
+          );
+          selected.add(
+            _PendingPhoto(
+              name: file.name,
+              bytes: image.bytes,
+              extension: image.extension,
+              contentType: image.contentType,
+            ),
+          );
+        } on MediaUploadException catch (e) {
+          rejectedMessage ??= e.message;
         }
-
-        selected.add(
-          _PendingPhoto(
-            name: file.name,
-            bytes: bytes,
-            extension: _extension(file.name),
-          ),
-        );
       }
 
       if (!mounted) return;
@@ -367,7 +369,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         MediaUploadKind.photo,
         photo.bytes,
         fileName: photo.name,
-        contentType: _imageMime(photo.extension),
+        contentType: photo.contentType,
       );
       final stamp = DateTime.now().microsecondsSinceEpoch + index;
       final path =
@@ -379,7 +381,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
             photo.bytes,
             fileOptions: FileOptions(
               upsert: false,
-              contentType: _imageMime(photo.extension),
+              contentType: photo.contentType,
             ),
           );
       await _client.from('memory_photos').insert({
@@ -419,6 +421,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
             'memory_id': memoryId,
             'path': path,
             'title': 'Voice note',
+            'duration_seconds': _voices[index].seconds,
           })
           .select('id')
           .maybeSingle();
@@ -864,11 +867,13 @@ class _PendingPhoto {
   final String name;
   final Uint8List bytes;
   final String extension;
+  final String contentType;
 
   const _PendingPhoto({
     required this.name,
     required this.bytes,
     required this.extension,
+    required this.contentType,
   });
 }
 

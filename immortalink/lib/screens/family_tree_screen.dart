@@ -2509,6 +2509,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
         );
         return;
       }
+      if (isEverRootQuotaError(e)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(everRootQuotaMessageFromError(e))),
+        );
+        return;
+      }
 
       var message = 'Invite failed: $e';
       if (e is PostgrestException &&

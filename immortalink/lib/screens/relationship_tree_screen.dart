@@ -1261,6 +1261,12 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         );
         return;
       }
+      if (isEverRootQuotaError(e)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(everRootQuotaMessageFromError(e))),
+        );
+        return;
+      }
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Could not create invite: $e')));
@@ -1744,6 +1750,14 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                       );
                       return;
                     }
+                    if (isEverRootQuotaError(e)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(everRootQuotaMessageFromError(e)),
+                        ),
+                      );
+                      return;
+                    }
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Could not create invite: $e')),
                     );
@@ -1920,6 +1934,14 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                               message: e is PostgrestException
                                   ? e.message
                                   : null,
+                            );
+                            return;
+                          }
+                          if (isEverRootQuotaError(e)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(everRootQuotaMessageFromError(e)),
+                              ),
                             );
                             return;
                           }

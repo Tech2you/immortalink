@@ -27,25 +27,30 @@ function quotaMessage(error: any): string | null {
   if (combined.includes("ERR_EVERROOT_AI_LIMIT")) {
     return "You've reached this month's EverRoot AI allowance.";
   }
+  if (combined.includes("ERR_EVERROOT_TRANSCRIPTION_LIMIT")) {
+    return "You've reached this month's EverRoot voice transcription allowance.";
+  }
   return message || "This EverRoot action needs a higher allowance.";
 }
 
-async function consumeTranscriptionUsage({
+async function consumeVoiceTranscriptionUsage({
   userClient,
   familyId,
   vaultId,
+  seconds,
 }: {
   userClient: any;
   familyId?: string;
   vaultId?: string;
+  seconds?: number;
 }) {
-  const { error } = await userClient.rpc("everroot_consume_ai_usage", {
+  const { error } = await userClient.rpc("everroot_consume_transcription_usage", {
     p_family_id: familyId || null,
     p_vault_id: vaultId || null,
-    p_units: 1,
+    p_seconds: seconds || 120,
   });
   if (!error) return null;
-  return quotaMessage(error) || "Could not confirm your EverRoot AI allowance.";
+  return quotaMessage(error) || "Could not confirm your EverRoot voice transcription allowance.";
 }
 
 function chunkText(text: string, maxChars = 900) {
@@ -187,7 +192,7 @@ serve(async (req) => {
     if (legacyMemoryVoiceNoteId) {
       let legacyQuery = userClient
         .from("legacy_memory_voice_notes")
-        .select("id, legacy_memory_id, legacy_member_id, family_id, title, path, created_at")
+        .select("id, legacy_memory_id, legacy_member_id, family_id, title, path, duration_seconds, created_at")
         .eq("id", legacyMemoryVoiceNoteId);
       if (legacyMemberId) legacyQuery = legacyQuery.eq("legacy_member_id", legacyMemberId);
       if (familyId) legacyQuery = legacyQuery.eq("family_id", familyId);
@@ -207,9 +212,10 @@ serve(async (req) => {
       if (!legacyMemoryId) return json(400, { error: "legacy_memory_id is empty on legacy_memory_voice_notes row" });
       if (!storagePath) return json(400, { error: "path is empty on legacy_memory_voice_notes row" });
 
-      const quotaError = await consumeTranscriptionUsage({
+      const quotaError = await consumeVoiceTranscriptionUsage({
         userClient,
         familyId: textClean(legacyVn.family_id || familyId || ""),
+        seconds: Number(legacyVn.duration_seconds || 120),
       });
       if (quotaError) return json(429, { error: quotaError });
 
@@ -255,7 +261,7 @@ serve(async (req) => {
     const { data: vn, error: vnErr } = await withTimeout(
       userClient
         .from("memory_voice_notes")
-        .select("id, vault_id, memory_id, title, path, created_at")
+        .select("id, vault_id, memory_id, title, path, duration_seconds, created_at")
         .eq("id", memoryVoiceNoteId)
         .eq("vault_id", vaultId)
         .maybeSingle(),
@@ -273,9 +279,10 @@ serve(async (req) => {
     if (!memoryId) return json(400, { error: "memory_id is empty on memory_voice_notes row" });
     if (!storagePath) return json(400, { error: "path is empty on memory_voice_notes row" });
 
-    const quotaError = await consumeTranscriptionUsage({
+    const quotaError = await consumeVoiceTranscriptionUsage({
       userClient,
       vaultId,
+      seconds: Number(vn.duration_seconds || 120),
     });
     if (quotaError) return json(429, { error: quotaError });
 

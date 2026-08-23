@@ -15,6 +15,10 @@ class MediaUploadPolicy {
   static const int avatarPhotoMaxBytes = 5 * 1024 * 1024;
   static const int photoMaxBytes = 12 * 1024 * 1024;
   static const int voiceMaxBytes = 25 * 1024 * 1024;
+  static const int avatarPhotoMaxDimension = 768;
+  static const int photoMaxDimension = 2048;
+  static const int avatarPhotoJpegQuality = 82;
+  static const int photoJpegQuality = 84;
 
   static const Set<String> imageMimeTypes = {
     'image/jpeg',
@@ -45,6 +49,18 @@ class MediaUploadPolicy {
     MediaUploadKind.avatarPhoto => 'profile photo',
     MediaUploadKind.photo => 'photo',
     MediaUploadKind.voice => 'voice note',
+  };
+
+  static int imageMaxDimensionFor(MediaUploadKind kind) => switch (kind) {
+    MediaUploadKind.avatarPhoto => avatarPhotoMaxDimension,
+    MediaUploadKind.photo => photoMaxDimension,
+    MediaUploadKind.voice => 0,
+  };
+
+  static int imageQualityFor(MediaUploadKind kind) => switch (kind) {
+    MediaUploadKind.avatarPhoto => avatarPhotoJpegQuality,
+    MediaUploadKind.photo => photoJpegQuality,
+    MediaUploadKind.voice => 0,
   };
 
   static String extensionForName(String name, {String fallback = 'bin'}) {

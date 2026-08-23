@@ -29,8 +29,8 @@ class _DeviceAudioRecorder implements WebAudioRecorder {
     await _recorder.start(
       const RecordConfig(
         encoder: AudioEncoder.aacLc,
-        bitRate: 128000,
-        sampleRate: 44100,
+        bitRate: 64000,
+        sampleRate: 32000,
         numChannels: 1,
       ),
       path: _path!,

@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'family_branch_screen.dart';
 import 'vault_companion_screen.dart';
+import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
 
@@ -860,25 +861,24 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final Uint8List? bytes = file.bytes;
       if (bytes == null) throw Exception('No image bytes received.');
 
-      final ext = _extFromName(file.name);
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.photo,
+      final image = await ImageUploadOptimizer.optimize(
         bytes,
+        kind: MediaUploadKind.photo,
         fileName: file.name,
-        contentType: _contentTypeFromExt(ext),
+        contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path =
-          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/gallery/$ts.$ext';
+          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/gallery/$ts.${image.extension}';
 
       await _supabase.storage
           .from(_photosBucket)
           .uploadBinary(
             path,
-            bytes,
+            image.bytes,
             fileOptions: FileOptions(
               upsert: false,
-              contentType: _contentTypeFromExt(ext),
+              contentType: image.contentType,
             ),
           );
 
@@ -917,25 +917,24 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final oldProfilePath = (_profilePhotoPath ?? '').trim();
       final oldProfileId = (_profilePhotoId ?? '').trim();
 
-      final ext = _extFromName(file.name);
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.avatarPhoto,
+      final image = await ImageUploadOptimizer.optimize(
         bytes,
+        kind: MediaUploadKind.avatarPhoto,
         fileName: file.name,
-        contentType: _contentTypeFromExt(ext),
+        contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final newPath =
-          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/profile_picture/$ts.$ext';
+          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/profile_picture/$ts.${image.extension}';
 
       await _supabase.storage
           .from(_photosBucket)
           .uploadBinary(
             newPath,
-            bytes,
+            image.bytes,
             fileOptions: FileOptions(
               upsert: false,
-              contentType: _contentTypeFromExt(ext),
+              contentType: image.contentType,
             ),
           );
 
@@ -1320,23 +1319,24 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 final bytes = file.bytes;
                 if (bytes == null) continue;
 
-                final message = MediaUploadPolicy.validateBytes(
-                  MediaUploadKind.photo,
-                  bytes.length,
-                  fileName: file.name,
-                );
-                if (message != null) {
-                  rejectedMessage ??= message;
-                  continue;
+                try {
+                  final image = await ImageUploadOptimizer.optimize(
+                    bytes,
+                    kind: MediaUploadKind.photo,
+                    fileName: file.name,
+                    contentType: _contentTypeFromExt(_extFromName(file.name)),
+                  );
+                  selected.add(
+                    _LegacyPendingPhoto(
+                      name: file.name,
+                      bytes: image.bytes,
+                      extension: image.extension,
+                      contentType: image.contentType,
+                    ),
+                  );
+                } on MediaUploadException catch (e) {
+                  rejectedMessage ??= e.message;
                 }
-
-                selected.add(
-                  _LegacyPendingPhoto(
-                    name: file.name,
-                    bytes: bytes,
-                    extension: _extFromName(file.name),
-                  ),
-                );
               }
 
               final available =
@@ -1918,25 +1918,24 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final Uint8List? bytes = file.bytes;
       if (bytes == null) throw Exception('No image bytes received.');
 
-      final ext = _extFromName(file.name);
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.photo,
+      final image = await ImageUploadOptimizer.optimize(
         bytes,
+        kind: MediaUploadKind.photo,
         fileName: file.name,
-        contentType: _contentTypeFromExt(ext),
+        contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path =
-          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/$ts.$ext';
+          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/$ts.${image.extension}';
 
       await _supabase.storage
           .from(_photosBucket)
           .uploadBinary(
             path,
-            bytes,
+            image.bytes,
             fileOptions: FileOptions(
               upsert: false,
-              contentType: _contentTypeFromExt(ext),
+              contentType: image.contentType,
             ),
           );
 
@@ -1971,7 +1970,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         MediaUploadKind.photo,
         photo.bytes,
         fileName: photo.name,
-        contentType: _contentTypeFromExt(photo.extension),
+        contentType: photo.contentType,
       );
       final ts = DateTime.now().microsecondsSinceEpoch + index;
       final path =
@@ -1984,7 +1983,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             photo.bytes,
             fileOptions: FileOptions(
               upsert: false,
-              contentType: _contentTypeFromExt(photo.extension),
+              contentType: photo.contentType,
             ),
           );
 
@@ -2037,6 +2036,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             'family_id': widget.familyId,
             'path': path,
             'title': 'Voice note',
+            'duration_seconds': voices[index].seconds,
           })
           .select('id')
           .maybeSingle();
@@ -3214,11 +3214,13 @@ class _LegacyPendingPhoto {
   final String name;
   final Uint8List bytes;
   final String extension;
+  final String contentType;
 
   const _LegacyPendingPhoto({
     required this.name,
     required this.bytes,
     required this.extension,
+    required this.contentType,
   });
 }
 

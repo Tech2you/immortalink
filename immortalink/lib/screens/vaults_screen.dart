@@ -1072,11 +1072,19 @@ class _VaultsScreenState extends State<VaultsScreen> {
         await showEverRootFamilyUpgradePrompt(context, message: e.message);
         return;
       }
+      if (isEverRootQuotaError(e)) {
+        _toast(everRootQuotaMessageFromError(e));
+        return;
+      }
       _toast('Family setup failed: ${e.message}');
     } catch (e) {
       if (isEverRootFamilyUpgradeError(e)) {
         if (!mounted) return;
         await showEverRootFamilyUpgradePrompt(context);
+        return;
+      }
+      if (isEverRootQuotaError(e)) {
+        _toast(everRootQuotaMessageFromError(e));
         return;
       }
       _toast('Family setup failed: $e');

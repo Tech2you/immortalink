@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
+import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
@@ -330,7 +331,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   Future<void> _openRecordDialog({
     required String title,
     required String subtitle,
-    required Future<void> Function(RecordedAudio rec) onSave,
+    required Future<void> Function(RecordedAudio rec, int seconds) onSave,
   }) async {
     if (!_recorder.isSupported) {
       _toast('Recording not supported in this browser (use Upload for now).');
@@ -359,7 +360,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       try {
         final rec = await _recorder.stop();
-        await onSave(rec);
+        updateElapsed();
+        await onSave(rec, seconds <= 0 ? 1 : seconds);
         if (!mounted) return;
         Navigator.pop(context);
       } catch (e) {
@@ -594,23 +596,22 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final ext = _extFromName(file.name);
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.avatarPhoto,
+      final image = await ImageUploadOptimizer.optimize(
         bytes,
+        kind: MediaUploadKind.avatarPhoto,
         fileName: file.name,
-        contentType: _contentTypeFromExt(ext),
+        contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
-      final path = '$userId/${widget.vaultId}/avatar.$ext';
+      final path = '$userId/${widget.vaultId}/avatar.${image.extension}';
 
       await _client.storage
           .from(_avatarBucket)
           .uploadBinary(
             path,
-            bytes,
+            image.bytes,
             fileOptions: FileOptions(
               upsert: true,
-              contentType: _contentTypeFromExt(ext),
+              contentType: image.contentType,
             ),
           );
 
@@ -867,24 +868,23 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final bytes = file.bytes;
       if (bytes == null) throw Exception('No file bytes received.');
 
-      final ext = _extFromName(file.name);
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.photo,
+      final image = await ImageUploadOptimizer.optimize(
         bytes,
+        kind: MediaUploadKind.photo,
         fileName: file.name,
-        contentType: _contentTypeFromExt(ext),
+        contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final path = '${_featuredPrefix(userId)}/$ts.$ext';
+      final path = '${_featuredPrefix(userId)}/$ts.${image.extension}';
 
       await _client.storage
           .from(_featuredPhotosBucket)
           .uploadBinary(
             path,
-            bytes,
+            image.bytes,
             fileOptions: FileOptions(
               upsert: false,
-              contentType: _contentTypeFromExt(ext),
+              contentType: image.contentType,
             ),
           );
 
@@ -1381,24 +1381,23 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final bytes = file.bytes;
       if (bytes == null) throw Exception('No file bytes received.');
 
-      final ext = _extFromName(file.name);
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.photo,
+      final image = await ImageUploadOptimizer.optimize(
         bytes,
+        kind: MediaUploadKind.photo,
         fileName: file.name,
-        contentType: _contentTypeFromExt(ext),
+        contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final path = '${_aboutPrefix(userId)}/$ts.$ext';
+      final path = '${_aboutPrefix(userId)}/$ts.${image.extension}';
 
       await _client.storage
           .from(_aboutPhotosBucket)
           .uploadBinary(
             path,
-            bytes,
+            image.bytes,
             fileOptions: FileOptions(
               upsert: false,
-              contentType: _contentTypeFromExt(ext),
+              contentType: image.contentType,
             ),
           );
 
@@ -1890,7 +1889,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       title: 'Record “About me” voice',
       subtitle:
           'Optional: share a quick intro, fun fact, moral code, or biggest achievement.',
-      onSave: (rec) async {
+      onSave: (rec, _) async {
         setState(() => _savingCoreVoice = true);
 
         final userId = _client.auth.currentUser?.id;
@@ -2207,24 +2206,24 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final bytes = file.bytes;
       if (bytes == null) throw Exception('No file bytes received');
 
-      final ext = _extFromName(file.name);
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.photo,
+      final image = await ImageUploadOptimizer.optimize(
         bytes,
+        kind: MediaUploadKind.photo,
         fileName: file.name,
-        contentType: _contentTypeFromExt(ext),
+        contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final path = '$userId/${widget.vaultId}/memories/$memoryId/$ts.$ext';
+      final path =
+          '$userId/${widget.vaultId}/memories/$memoryId/$ts.${image.extension}';
 
       await _client.storage
           .from(_memoryPhotosBucket)
           .uploadBinary(
             path,
-            bytes,
+            image.bytes,
             fileOptions: FileOptions(
               upsert: false,
-              contentType: _contentTypeFromExt(ext),
+              contentType: image.contentType,
             ),
           );
 
@@ -2678,7 +2677,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     await _openRecordDialog(
       title: 'Record memory voice',
       subtitle: 'Add a voice note that belongs to this memory.',
-      onSave: (rec) async {
+      onSave: (rec, seconds) async {
         try {
           final userId = _client.auth.currentUser?.id;
           if (userId == null) throw Exception('Not signed in');
@@ -2711,6 +2710,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 'memory_id': memoryId,
                 'path': path,
                 'title': 'Voice note',
+                'duration_seconds': seconds,
               })
               .select('id')
               .maybeSingle();

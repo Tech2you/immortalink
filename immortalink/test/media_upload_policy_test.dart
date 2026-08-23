@@ -136,5 +136,21 @@ void main() {
         );
       },
     );
+
+    test('defines client-side image optimization targets', () {
+      expect(
+        MediaUploadPolicy.imageMaxDimensionFor(MediaUploadKind.avatarPhoto),
+        768,
+      );
+      expect(
+        MediaUploadPolicy.imageMaxDimensionFor(MediaUploadKind.photo),
+        2048,
+      );
+      expect(
+        MediaUploadPolicy.imageQualityFor(MediaUploadKind.avatarPhoto),
+        82,
+      );
+      expect(MediaUploadPolicy.imageQualityFor(MediaUploadKind.photo), 84);
+    });
   });
 }

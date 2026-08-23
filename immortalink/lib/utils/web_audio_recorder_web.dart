@@ -9,6 +9,8 @@ import 'web_audio_recorder_types.dart';
 WebAudioRecorder createWebAudioRecorderImpl() => _WebAudioRecorder();
 
 class _WebAudioRecorder implements WebAudioRecorder {
+  static const int _targetAudioBitsPerSecond = 64000;
+
   static const List<String> _mimeCandidates = [
     'audio/mp4;codecs=mp4a.40.2',
     'audio/mp4',
@@ -228,14 +230,20 @@ class _WebAudioRecorder implements WebAudioRecorder {
     if (mime != null && mime.isNotEmpty) {
       try {
         _selectedMimeType = mime;
-        return html.MediaRecorder(stream, {'mimeType': mime});
+        return html.MediaRecorder(stream, {
+          'mimeType': mime,
+          'audioBitsPerSecond': _targetAudioBitsPerSecond,
+        });
       } catch (_) {}
     }
 
     for (final candidate in _preferredMimeCandidates()) {
       try {
         _selectedMimeType = candidate;
-        return html.MediaRecorder(stream, {'mimeType': candidate});
+        return html.MediaRecorder(stream, {
+          'mimeType': candidate,
+          'audioBitsPerSecond': _targetAudioBitsPerSecond,
+        });
       } catch (_) {}
     }
 
