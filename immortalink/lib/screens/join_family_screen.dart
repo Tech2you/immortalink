@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/onboarding_invite_state.dart';
+import '../services/push_notification_service.dart';
 import 'relationship_tree_screen.dart';
 
 class JoinFamilyScreen extends StatefulWidget {
@@ -191,6 +194,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
       // ✅ Critical: ensure THIS viewer gets the invite slot_key + correct role
       await _finalizeMemberSlot(familyId: familyId, userId: user.id);
       await clearPendingFamilyInviteCode();
+      unawaited(PushNotificationService.notifyFamilyJoined(familyId));
 
       if (!mounted) return;
 

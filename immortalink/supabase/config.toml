@@ -25,3 +25,12 @@ verify_jwt = true
 
 [functions.legacy_vault_ai_chat]
 verify_jwt = true
+
+[functions.send_family_notification]
+verify_jwt = true
+
+[functions.validate_apple_subscription]
+verify_jwt = true
+
+[functions.apple_subscription_notifications]
+verify_jwt = false

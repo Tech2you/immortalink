@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'env.dart';
+import 'services/push_notification_service.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/vaults_screen.dart';
@@ -63,11 +64,14 @@ Future<void> _runApp() async {
     ),
   );
 
+  await PushNotificationService.configureMessageHandlers();
+
   Supabase.instance.client.auth.onAuthStateChange.listen((data) {
     if (data.event == AuthChangeEvent.passwordRecovery) {
       _passwordRecoveryPending.value = true;
     } else if (data.event == AuthChangeEvent.signedOut) {
       _passwordRecoveryPending.value = false;
+      unawaited(PushNotificationService.clearLocalTokenRegistration());
     }
   });
 

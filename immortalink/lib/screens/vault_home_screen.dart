@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
+import '../utils/everroot_upgrade_prompt.dart';
 import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
@@ -152,6 +153,18 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _handleUploadError(Object error, String fallback) async {
+    if (!mounted) return;
+    if (isEverRootFamilyUpgradeError(error)) {
+      await showEverRootFamilyUpgradePrompt(
+        context,
+        message: everRootUploadErrorMessage(error, fallback: fallback),
+      );
+      return;
+    }
+    _toast('$fallback: $error');
   }
 
   Future<String?> _promptRename({
@@ -631,7 +644,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       _toast('Vault photo updated.');
     } catch (e) {
-      _toast('Upload failed: $e');
+      await _handleUploadError(e, 'Upload failed');
     } finally {
       if (mounted) setState(() => _savingAvatar = false);
     }
@@ -896,7 +909,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _loadFeaturedPhotos();
       _toast('Added to highlights.');
     } catch (e) {
-      _toast('Photo upload failed: $e');
+      await _handleUploadError(e, 'Photo upload failed');
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
     }
@@ -1409,7 +1422,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _loadAboutPhotos();
       _toast('Added to About me.');
     } catch (e) {
-      _toast('Upload failed: $e');
+      await _handleUploadError(e, 'Upload failed');
     } finally {
       if (mounted) setState(() => _uploadingAboutPhoto = false);
     }
@@ -1878,7 +1891,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _loadCoreVoice();
       _toast('Saved.');
     } catch (e) {
-      _toast('Save failed: $e');
+      await _handleUploadError(e, 'Save failed');
     } finally {
       if (mounted) setState(() => _savingCoreVoice = false);
     }
@@ -2236,7 +2249,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _loadMemoryPhotosForVault();
       _toast('Photo added to memory.');
     } catch (e) {
-      _toast('Add photo failed: $e');
+      await _handleUploadError(e, 'Add photo failed');
     }
   }
 
@@ -2669,7 +2682,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _loadMemoryVoiceForVault();
       _toast('Voice added to memory.');
     } catch (e) {
-      _toast('Add voice failed: $e');
+      await _handleUploadError(e, 'Add voice failed');
     }
   }
 
@@ -2745,7 +2758,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           await _loadMemoryVoiceForVault();
           _toast('Voice added to memory.');
         } catch (e) {
-          _toast('Add voice failed: $e');
+          await _handleUploadError(e, 'Add voice failed');
         }
       },
     );

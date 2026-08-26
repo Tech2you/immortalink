@@ -40,5 +40,27 @@ void main() {
         contains('real family member allowance'),
       );
     });
+
+    test('returns family storage upgrade copy for storage upload failures', () {
+      expect(
+        everRootUploadErrorMessage('ERR_EVERROOT_STORAGE_LIMIT'),
+        contains('family organizer'),
+      );
+      expect(
+        everRootUploadErrorMessage('ERR_EVERROOT_STORAGE_LIMIT'),
+        contains('storage allowance'),
+      );
+    });
+
+    test('formats storage usage for plan dialogs', () {
+      expect(formatEverRootStorageBytes(524288000), '500 MB');
+      expect(
+        everRootStorageUsageMessage(
+          usedBytes: 419430400,
+          limitBytes: 524288000,
+        ),
+        '400 MB of 500 MB used (80%)',
+      );
+    });
   });
 }

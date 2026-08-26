@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'family_branch_screen.dart';
 import 'vault_companion_screen.dart';
+import '../utils/everroot_upgrade_prompt.dart';
 import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
@@ -93,6 +94,18 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _handleUploadError(Object error, String fallback) async {
+    if (!mounted) return;
+    if (isEverRootFamilyUpgradeError(error)) {
+      await showEverRootFamilyUpgradePrompt(
+        context,
+        message: everRootUploadErrorMessage(error, fallback: fallback),
+      );
+      return;
+    }
+    _toast('$fallback: $error');
   }
 
   Future<void> _openLegacyAi() async {
@@ -891,7 +904,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _loadPhotos();
       _toast('Photo added.');
     } catch (e) {
-      _toast('Photo upload failed: $e');
+      await _handleUploadError(e, 'Photo upload failed');
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
     }
@@ -969,7 +982,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _load();
       _toast('Profile picture updated.');
     } catch (e) {
-      _toast('Profile picture upload failed: $e');
+      await _handleUploadError(e, 'Profile picture upload failed');
     } finally {
       if (mounted) setState(() => _uploadingProfilePhoto = false);
     }
@@ -1174,9 +1187,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _loadMemoryVoice();
       _toast('Memory added.');
     } on PostgrestException catch (e) {
-      _toast('Add memory failed: ${e.message}');
+      await _handleUploadError(e, 'Add memory failed');
     } catch (e) {
-      _toast('Add memory failed: $e');
+      await _handleUploadError(e, 'Add memory failed');
     }
   }
 
@@ -1243,9 +1256,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _loadMemoryVoice();
       _toast('Memory updated.');
     } on PostgrestException catch (e) {
-      _toast('Update failed: ${e.message}');
+      await _handleUploadError(e, 'Update failed');
     } catch (e) {
-      _toast('Update failed: $e');
+      await _handleUploadError(e, 'Update failed');
     }
   }
 
@@ -1949,9 +1962,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _loadMemoryPhotos();
       _toast('Photo added to memory.');
     } on PostgrestException catch (e) {
-      _toast('Add photo failed: ${e.message}');
+      await _handleUploadError(e, 'Add photo failed');
     } catch (e) {
-      _toast('Add photo failed: $e');
+      await _handleUploadError(e, 'Add photo failed');
     }
   }
 

@@ -3,10 +3,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 const String _defaultEverRootFamilyUpgradeMessage =
-    'Ever Roots Family unlocks relatives in your family tree, family invites, '
-    'Family Feed sharing, and higher memory, photo, voice, storage, and AI '
-    'limits. Subscriptions will be available after App Store billing is '
-    'connected.';
+    'Ever Roots Family increases storage for photos, voice notes, memories, '
+    'AI, transcription, and larger family capacity. Subscriptions will be '
+    'available after App Store billing is connected.';
+
+const String _storageLimitUpgradeMessage =
+    'This family has reached its storage allowance. A family organizer can '
+    'upgrade the family plan once App Store billing is connected, or free up '
+    'space by deleting older media.';
 
 bool isEverRootFamilyUpgradeError(Object error) {
   final text = error.toString();
@@ -27,6 +31,9 @@ String everRootQuotaMessageFromError(Object error) {
   final text = error.toString();
   final message = _friendlyQuotaMessage(text);
 
+  if (text.contains('ERR_EVERROOT_STORAGE_LIMIT')) {
+    return message ?? _storageLimitUpgradeMessage;
+  }
   if (text.contains('ERR_EVERROOT_INVITE_COOLDOWN')) {
     return 'Please wait a moment before creating another invite.';
   }
@@ -73,7 +80,7 @@ Future<void> showEverRootFamilyUpgradePrompt(
   return showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Ever Roots Family'),
+      title: const Text('Ever Roots plans'),
       content: Text(body),
       actions: [
         TextButton(
@@ -92,6 +99,42 @@ Future<void> showEverRootFamilyUpgradePrompt(
 String everRootUpgradeMessageFromError(Object error) {
   return cleanEverRootUpgradeMessage(error.toString()) ??
       _defaultEverRootFamilyUpgradeMessage;
+}
+
+String everRootUploadErrorMessage(
+  Object error, {
+  String fallback = 'Upload failed. Please try again.',
+}) {
+  if (isEverRootQuotaError(error)) return everRootQuotaMessageFromError(error);
+
+  return fallback;
+}
+
+String formatEverRootStorageBytes(num bytes) {
+  final value = bytes.toDouble();
+  if (value >= 1024 * 1024 * 1024) {
+    return '${(value / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+  if (value >= 1024 * 1024) {
+    return '${(value / (1024 * 1024)).toStringAsFixed(0)} MB';
+  }
+  if (value >= 1024) {
+    return '${(value / 1024).toStringAsFixed(0)} KB';
+  }
+  return '${value.toStringAsFixed(0)} B';
+}
+
+String everRootStorageUsageMessage({
+  required num usedBytes,
+  required num limitBytes,
+}) {
+  if (limitBytes <= 0) return 'Storage usage is unavailable.';
+
+  final used = formatEverRootStorageBytes(usedBytes);
+  final limit = formatEverRootStorageBytes(limitBytes);
+  final percent = ((usedBytes / limitBytes) * 100).clamp(0, 999).round();
+
+  return '$used of $limit used ($percent%)';
 }
 
 String? cleanEverRootUpgradeMessage(String? rawMessage) {

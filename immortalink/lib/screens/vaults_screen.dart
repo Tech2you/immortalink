@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/onboarding_invite_state.dart';
+import '../services/apple_subscription_config.dart';
+import '../services/apple_subscription_service.dart';
+import '../services/push_notification_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import 'vault_home_screen.dart';
 import 'relationship_tree_screen.dart';
@@ -29,6 +32,7 @@ class VaultsScreen extends StatefulWidget {
 
 class _VaultsScreenState extends State<VaultsScreen> {
   bool _checkedPendingInvite = false;
+  bool _pushRegistrationStarted = false;
 
   void _openJoinFamilyScreen() {
     Navigator.push(
@@ -58,6 +62,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
   RealtimeChannel? _familyFeedChannel;
   Timer? _familyFeedRefreshDebounce;
   String? _familyFeedRealtimeFamilyId;
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _familyFeedKey = GlobalKey();
 
   String? _playingKey;
   bool _isPlaying = false;
@@ -79,6 +85,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       });
     });
 
+    PushNotificationService.intent.addListener(_handlePushNotificationIntent);
     _loadVault();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _openPendingInviteIfNeeded();
@@ -104,13 +111,63 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   @override
   void dispose() {
+    PushNotificationService.intent.removeListener(
+      _handlePushNotificationIntent,
+    );
     _familyFeedRefreshDebounce?.cancel();
     final channel = _familyFeedChannel;
     if (channel != null) {
       unawaited(_supabase.removeChannel(channel));
     }
+    _scrollController.dispose();
     _player.dispose();
     super.dispose();
+  }
+
+  void _handlePushNotificationIntent() {
+    final intent = PushNotificationService.intent.value;
+    if (intent == null || intent.target != PushNotificationTarget.familyFeed) {
+      return;
+    }
+
+    PushNotificationService.intent.value = null;
+    _openFamilyFeedFromNotification(intent.familyId);
+  }
+
+  Future<void> _openFamilyFeedFromNotification(String? familyId) async {
+    final requestedFamilyId = familyId?.trim();
+    if (requestedFamilyId != null && requestedFamilyId.isNotEmpty) {
+      final isMember = _familyMemberships.any(
+        (row) =>
+            (row['family_id'] ?? '').toString().trim() == requestedFamilyId,
+      );
+      if (isMember && requestedFamilyId != _activeFamilyId) {
+        setState(() => _activeFamilyId = requestedFamilyId);
+        _syncFamilyFeedRealtime();
+      }
+    }
+
+    await _loadFamilyFeed();
+    if (!mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final context = _familyFeedKey.currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(
+          context,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+          alignment: 0.08,
+        );
+      } else if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    });
   }
 
   void _toast(String msg) {
@@ -153,12 +210,35 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   Future<void> _showSubscriptionSettings() async {
+    Map<String, dynamic>? usage;
+    Object? usageError;
+    final familyId = _activeFamilyId?.trim();
+
+    if (familyId != null && familyId.isNotEmpty) {
+      try {
+        final result = await _supabase.rpc(
+          'get_family_entitlements_and_usage',
+          params: {'p_family_id': familyId},
+        );
+        if (result is Map) {
+          usage = Map<String, dynamic>.from(result);
+        }
+      } catch (e) {
+        usageError = e;
+      }
+    }
+
+    if (!mounted) return;
+
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Subscription'),
-        content: const Text(
-          'Your subscription controls will appear here once billing is connected.',
+        title: const Text('Family plan'),
+        content: _FamilyPlanStatusContent(
+          usage: usage,
+          usageError: usageError,
+          hasFamily: familyId != null && familyId.isNotEmpty,
+          familyId: familyId ?? '',
         ),
         actions: [
           TextButton(
@@ -430,6 +510,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       if (!mounted) return;
       setState(() => _loading = false);
       _syncFamilyFeedRealtime();
+      _registerForPushNotificationsOnce();
       unawaited(_loadFamilyFeed());
     } on TimeoutException {
       if (!mounted) return;
@@ -624,6 +705,12 @@ class _VaultsScreenState extends State<VaultsScreen> {
       }
       unawaited(_loadFamilyFeed());
     });
+  }
+
+  void _registerForPushNotificationsOnce() {
+    if (_pushRegistrationStarted) return;
+    _pushRegistrationStarted = true;
+    unawaited(PushNotificationService.registerForCurrentUser());
   }
 
   Future<void> _loadFamilyFeed() async {
@@ -2071,6 +2158,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                           ),
                         )
                       : ListView(
+                          controller: _scrollController,
                           children: [
                             _familyTreesCard(),
                             const SizedBox(height: 12),
@@ -2130,7 +2218,12 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                 ),
                               ),
                             ),
-                            _buildFeedSection(_familyMemberships.isNotEmpty),
+                            KeyedSubtree(
+                              key: _familyFeedKey,
+                              child: _buildFeedSection(
+                                _familyMemberships.isNotEmpty,
+                              ),
+                            ),
                           ],
                         )),
           ),
@@ -2438,6 +2531,332 @@ String _changePasswordErrorMessage(AuthException error) {
     'Change password failed: ${error.code ?? error.statusCode ?? error.message}',
   );
   return 'Could not change the password. Please try again.';
+}
+
+class _FamilyPlanStatusContent extends StatelessWidget {
+  final Map<String, dynamic>? usage;
+  final Object? usageError;
+  final bool hasFamily;
+  final String familyId;
+
+  const _FamilyPlanStatusContent({
+    required this.usage,
+    required this.usageError,
+    required this.hasFamily,
+    required this.familyId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!hasFamily) {
+      return const SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Join or create a family to see shared storage. Subscription '
+              'controls will appear here once App Store billing is connected.',
+            ),
+            SizedBox(height: 16),
+            _TierList(currentPlan: 'free', familyId: ''),
+          ],
+        ),
+      );
+    }
+
+    if (usageError != null || usage == null) {
+      return SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Subscription controls will appear here once App Store billing '
+              'is connected. Storage usage could not be loaded right now.',
+            ),
+            const SizedBox(height: 16),
+            _TierList(currentPlan: 'free', familyId: familyId),
+          ],
+        ),
+      );
+    }
+
+    final limits = Map<String, dynamic>.from(
+      (usage!['limits'] as Map?) ?? const {},
+    );
+    final currentUsage = Map<String, dynamic>.from(
+      (usage!['usage'] as Map?) ?? const {},
+    );
+    final plan = (usage!['plan'] ?? 'free').toString();
+    final usedBytes = (currentUsage['storage_bytes'] as num?) ?? 0;
+    final limitBytes = (limits['storage_bytes'] as num?) ?? 0;
+    final progress = limitBytes <= 0
+        ? 0.0
+        : (usedBytes / limitBytes).clamp(0.0, 1.0).toDouble();
+    final isFull = limitBytes > 0 && usedBytes >= limitBytes;
+    final isNearFull = progress >= 0.8;
+
+    final status = isFull
+        ? 'Storage is full. Uploads may fail until older media is deleted or '
+              'a family organizer upgrades the family plan.'
+        : isNearFull
+        ? 'Storage is almost full. A family organizer can upgrade this family '
+              'plan once App Store billing is connected.'
+        : 'A family organizer will be able to upgrade this family plan once '
+              'App Store billing is connected.';
+
+    return SizedBox(
+      width: double.maxFinite,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Current plan: ${_planTitle(plan)}'),
+            const SizedBox(height: 12),
+            Text(
+              everRootStorageUsageMessage(
+                usedBytes: usedBytes,
+                limitBytes: limitBytes,
+              ),
+            ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: progress),
+            const SizedBox(height: 12),
+            Text(status),
+            const SizedBox(height: 18),
+            _TierList(currentPlan: plan, familyId: familyId),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _planTitle(String plan) {
+    for (final tier in AppleSubscriptionConfig.tiers) {
+      if (tier.plan == plan) return tier.title;
+    }
+    return plan.replaceAll('_', ' ');
+  }
+}
+
+class _TierList extends StatelessWidget {
+  final String currentPlan;
+  final String familyId;
+
+  const _TierList({required this.currentPlan, required this.familyId});
+
+  @override
+  Widget build(BuildContext context) {
+    return _PurchaseAwareTierList(currentPlan: currentPlan, familyId: familyId);
+  }
+}
+
+class _PurchaseAwareTierList extends StatefulWidget {
+  final String currentPlan;
+  final String familyId;
+
+  const _PurchaseAwareTierList({
+    required this.currentPlan,
+    required this.familyId,
+  });
+
+  @override
+  State<_PurchaseAwareTierList> createState() => _PurchaseAwareTierListState();
+}
+
+class _PurchaseAwareTierListState extends State<_PurchaseAwareTierList> {
+  late final AppleSubscriptionService _subscriptionService;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscriptionService = AppleSubscriptionService();
+    if (widget.familyId.trim().isNotEmpty) {
+      unawaited(_subscriptionService.initialize(familyId: widget.familyId));
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _PurchaseAwareTierList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.familyId.trim().isNotEmpty &&
+        widget.familyId != oldWidget.familyId) {
+      unawaited(_subscriptionService.initialize(familyId: widget.familyId));
+    }
+  }
+
+  @override
+  void dispose() {
+    _subscriptionService.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _subscriptionService,
+      builder: (context, _) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ...AppleSubscriptionConfig.tiers.map(
+            (tier) => _PlanTierTile(
+              tier: tier,
+              isCurrent: tier.plan == widget.currentPlan,
+              service: _subscriptionService,
+              hasFamily: widget.familyId.trim().isNotEmpty,
+            ),
+          ),
+          if (_subscriptionService.message != null) ...[
+            const SizedBox(height: 4),
+            Text(_subscriptionService.message!),
+          ],
+          if (_subscriptionService.error != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              _subscriptionService.error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: AppleSubscriptionConfig.purchaseFlowEnabled
+                  ? _subscriptionService.restore
+                  : null,
+              child: const Text('Restore purchases'),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _subscriptionService.openManageSubscriptions,
+              child: const Text('Manage with Apple'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanTierTile extends StatelessWidget {
+  final AppleSubscriptionTier tier;
+  final bool isCurrent;
+  final AppleSubscriptionService service;
+  final bool hasFamily;
+
+  const _PlanTierTile({
+    required this.tier,
+    required this.isCurrent,
+    required this.service,
+    required this.hasFamily,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final monthlyProduct = tier.monthlyProductId.trim().isEmpty
+        ? null
+        : service.productFor(tier.monthlyProductId);
+    final annualProduct = tier.annualProductId.trim().isEmpty
+        ? null
+        : service.productFor(tier.annualProductId);
+    final canBuyMonthly =
+        hasFamily &&
+        tier.canPurchase &&
+        monthlyProduct != null &&
+        !service.loading &&
+        !service.purchasePending;
+    final canBuyAnnual =
+        hasFamily &&
+        tier.canPurchase &&
+        annualProduct != null &&
+        !service.loading &&
+        !service.purchasePending;
+    final borderColor = isCurrent
+        ? theme.colorScheme.primary
+        : theme.colorScheme.outlineVariant;
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: borderColor),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  tier.title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (isCurrent)
+                Text(
+                  'Current',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(tier.subtitle),
+          const SizedBox(height: 8),
+          Text(
+            tier.storageLabel,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(tier.included),
+          const SizedBox(height: 10),
+          if (tier.isFree)
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton(
+                onPressed: null,
+                child: Text(tier.setupStatus),
+              ),
+            )
+          else
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: canBuyMonthly
+                      ? () => service.buy(monthlyProduct.id)
+                      : null,
+                  child: Text(monthlyProduct?.price ?? 'Monthly unavailable'),
+                ),
+                FilledButton(
+                  onPressed: canBuyAnnual
+                      ? () => service.buy(annualProduct.id)
+                      : null,
+                  child: Text(annualProduct?.price ?? tier.setupStatus),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _FeedItem {

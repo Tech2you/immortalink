@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
+import '../services/push_notification_service.dart';
+import '../utils/everroot_upgrade_prompt.dart';
 import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
@@ -83,6 +85,16 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<bool> _showQuotaPromptIfNeeded(Object error) async {
+    if (!isEverRootFamilyUpgradeError(error) || !mounted) return false;
+
+    await showEverRootFamilyUpgradePrompt(
+      context,
+      message: everRootUploadErrorMessage(error),
+    );
+    return true;
   }
 
   String _extension(String name) {
@@ -499,12 +511,21 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
           memoryId: memoryId,
         ).catchError((_) => 0),
       );
+      if (_shareToFamilyFeed) {
+        unawaited(PushNotificationService.notifyFamilyMemoryAdded(memoryId));
+      }
 
       if (!mounted) return;
       Navigator.pop(context, true);
     } on PostgrestException catch (e) {
-      _toast('Could not preserve this memory: ${e.message}');
+      if (!await _showQuotaPromptIfNeeded(e)) {
+        _toast('Could not preserve this memory: ${e.message}');
+      }
     } catch (e) {
+      if (await _showQuotaPromptIfNeeded(e)) {
+        if (memoryId != null && mounted) Navigator.pop(context, true);
+        return;
+      }
       _toast(
         memoryId == null
             ? 'Could not preserve this memory: $e'
