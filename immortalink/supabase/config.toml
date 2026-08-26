@@ -19,3 +19,9 @@ entrypoint = "./functions/index_voice_note/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/index_voice_note/*.html" ]
+
+[functions.vault_view_bundle]
+verify_jwt = true
+
+[functions.legacy_vault_ai_chat]
+verify_jwt = true

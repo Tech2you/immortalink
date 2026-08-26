@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/onboarding_invite_state.dart';
 import 'relationship_tree_screen.dart';
 
 class JoinFamilyScreen extends StatefulWidget {
-  const JoinFamilyScreen({super.key});
+  final String initialInviteCode;
+
+  const JoinFamilyScreen({super.key, this.initialInviteCode = ''});
 
   @override
   State<JoinFamilyScreen> createState() => _JoinFamilyScreenState();
@@ -13,6 +16,13 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   final _supabase = Supabase.instance.client;
   final _controller = TextEditingController();
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final code = normalizeInviteCode(widget.initialInviteCode);
+    if (code.isNotEmpty) _controller.text = code;
+  }
 
   String _friendlyJoinError(Object error) {
     final text = error.toString().toLowerCase();
@@ -180,6 +190,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
 
       // ✅ Critical: ensure THIS viewer gets the invite slot_key + correct role
       await _finalizeMemberSlot(familyId: familyId, userId: user.id);
+      await clearPendingFamilyInviteCode();
 
       if (!mounted) return;
 
@@ -212,7 +223,11 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Paste the invite code you received.'),
+            Text(
+              _controller.text.trim().isEmpty
+                  ? 'Paste the invite code you received.'
+                  : 'Your invite code is ready. Tap Join to enter the family.',
+            ),
             const SizedBox(height: 6),
             Text(
               'Joining another family will not remove you from your current family. You can switch between trees from Your Vault.',

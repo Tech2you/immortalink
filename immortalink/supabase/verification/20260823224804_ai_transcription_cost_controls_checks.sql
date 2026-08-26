@@ -1,7 +1,7 @@
 -- EverRoot AI/transcription cost-control verification checks.
 --
 -- Safe read-only checks for production after applying
--- 20260822220129_everroot_ai_transcription_cost_controls.sql.
+-- 20260823224804_everroot_ai_transcription_cost_controls.sql.
 -- Boundary inserts should only be run in staging or inside an explicit
 -- transaction that is rolled back.
 
@@ -38,15 +38,15 @@ select
   n.nspname as schema,
   p.proname as function_name,
   pg_get_function_identity_arguments(p.oid) as args,
-  r.rolname as grantee
+  coalesce(r.rolname, 'public') as grantee
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
-join aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a on true
-join pg_roles r on r.oid = a.grantee
+cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+left join pg_roles r on r.oid = a.grantee
 where n.nspname = 'public'
   and p.prosecdef = true
   and a.privilege_type = 'EXECUTE'
-  and r.rolname in ('public', 'anon')
+  and coalesce(r.rolname, 'public') in ('public', 'anon')
   and (
     p.proname like 'everroot_%'
     or p.proname = 'get_family_entitlements_and_usage'
@@ -60,7 +60,7 @@ select
   r.rolname as grantee
 from pg_proc p
 join pg_namespace n on n.oid = p.pronamespace
-join aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a on true
+cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
 join pg_roles r on r.oid = a.grantee
 where n.nspname = 'public'
   and a.privilege_type = 'EXECUTE'

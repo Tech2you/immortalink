@@ -120,7 +120,7 @@ class _Sheet extends StatelessWidget {
                     shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
                     itemCount: notes.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (context, i) {
                       final n = notes[i];
                       return _VoiceRow(

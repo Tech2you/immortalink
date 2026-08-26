@@ -34,6 +34,14 @@ String everRootQuotaMessageFromError(Object error) {
     return message ??
         'This family has used this month\'s invite allowance. Try again later.';
   }
+  if (text.contains('ERR_EVERROOT_PENDING_INVITE_LIMIT')) {
+    return message ??
+        'This family already has too many active invite codes. Wait for someone to join or for an invite to expire.';
+  }
+  if (text.contains('ERR_EVERROOT_DUPLICATE_INVITE_RECIPIENT')) {
+    return message ??
+        'This family already has an active invite for that person.';
+  }
   if (text.contains('ERR_EVERROOT_MEMBER_LIMIT')) {
     return message ??
         'This family has reached its real family member allowance.';

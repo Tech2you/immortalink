@@ -4,11 +4,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/ai_chat_reminder_service.dart';
+import '../services/onboarding_invite_state.dart';
 
 enum _AuthMode { signIn, signUp }
 
 const _passwordResetRedirectUrl = 'com.everroots.app://login-callback/';
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
+const _hasSeenCreateAccountPromptKey = 'auth_has_seen_create_account_prompt';
 const _authEmailCooldown = Duration(seconds: 60);
 
 class SignInScreen extends StatefulWidget {
@@ -29,6 +31,8 @@ class _SignInScreenState extends State<SignInScreen> {
 
   _AuthMode _mode = _AuthMode.signIn;
   bool _loading = false;
+  bool _checkingFirstLaunch = true;
+  String _pendingInviteCode = '';
 
   bool _hidePassword = true;
   bool _hideConfirm = true;
@@ -36,6 +40,34 @@ class _SignInScreenState extends State<SignInScreen> {
 
   String? _error;
   DateTime? _nextAuthEmailAt;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOnboardingState();
+  }
+
+  Future<void> _loadOnboardingState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hasSeenPrompt =
+        prefs.getBool(_hasSeenCreateAccountPromptKey) ?? false;
+    final pendingInvite = await pendingFamilyInviteCode();
+
+    if (!mounted) return;
+    setState(() {
+      _pendingInviteCode = pendingInvite;
+      if (pendingInvite.isNotEmpty) {
+        _mode = _AuthMode.signUp;
+      } else if (!hasSeenPrompt) {
+        _mode = _AuthMode.signUp;
+      }
+      _checkingFirstLaunch = false;
+    });
+
+    if (!hasSeenPrompt) {
+      await prefs.setBool(_hasSeenCreateAccountPromptKey, true);
+    }
+  }
 
   @override
   void dispose() {
@@ -109,9 +141,11 @@ class _SignInScreenState extends State<SignInScreen> {
 
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Account created. If email confirmation is enabled, check your inbox.',
+              _pendingInviteCode.isEmpty
+                  ? 'Account created. If email confirmation is enabled, check your inbox.'
+                  : 'Account created. Confirm your email, then Ever Roots will take you to your family invite.',
             ),
           ),
         );
@@ -239,8 +273,13 @@ class _SignInScreenState extends State<SignInScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_checkingFirstLaunch) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     final isSignIn = _mode == _AuthMode.signIn;
     final title = isSignIn ? 'Sign in' : 'Create account';
+    final hasPendingInvite = _pendingInviteCode.isNotEmpty;
     final theme = Theme.of(context);
     final muted = Colors.black.withValues(alpha: 0.58);
 
@@ -288,27 +327,51 @@ class _SignInScreenState extends State<SignInScreen> {
             final logoScale = tight ? 1.16 : (compact ? 1.24 : 1.34);
             final verticalGap = tight ? 18.0 : (compact ? 24.0 : 32.0);
             final outerPadding = tight ? 12.0 : 22.0;
-            final switchTextStyle = TextStyle(
-              color: muted,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            );
-            final switchButtonStyle = OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF70539A),
-              backgroundColor: const Color(0xFFF4EDF8),
-              side: BorderSide(
-                color: const Color(0xFF70539A).withValues(alpha: 0.26),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              minimumSize: const Size(0, 42),
-              textStyle: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(999),
-              ),
-            );
+            Widget modeButton(_AuthMode mode, String label) {
+              final selected = _mode == mode;
+              return Expanded(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  decoration: BoxDecoration(
+                    color: selected ? const Color(0xFF70539A) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: selected
+                          ? const Color(0xFF70539A)
+                          : Colors.black.withValues(alpha: 0.08),
+                    ),
+                    boxShadow: selected
+                        ? [
+                            BoxShadow(
+                              color: const Color(
+                                0xFF70539A,
+                              ).withValues(alpha: 0.16),
+                              blurRadius: 14,
+                              offset: const Offset(0, 6),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: TextButton(
+                    onPressed: _loading ? null : () => _switchMode(mode),
+                    style: TextButton.styleFrom(
+                      foregroundColor: selected
+                          ? Colors.white
+                          : const Color(0xFF4B3D5E),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      textStyle: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15,
+                      ),
+                    ),
+                    child: Text(label),
+                  ),
+                ),
+              );
+            }
 
             return SingleChildScrollView(
               // This padding is what prevents keyboard overlap.
@@ -423,6 +486,18 @@ class _SignInScreenState extends State<SignInScreen> {
 
                               Row(
                                 children: [
+                                  modeButton(
+                                    _AuthMode.signUp,
+                                    'Create account',
+                                  ),
+                                  const SizedBox(width: 10),
+                                  modeButton(_AuthMode.signIn, 'Sign in'),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+
+                              Row(
+                                children: [
                                   Expanded(
                                     child: Text(
                                       title,
@@ -434,6 +509,46 @@ class _SignInScreenState extends State<SignInScreen> {
                                   ),
                                 ],
                               ),
+                              const SizedBox(height: 4),
+                              Text(
+                                isSignIn
+                                    ? 'Use the account your family knows.'
+                                    : 'Start free. Add your vault, then invite or join family.',
+                                style: TextStyle(
+                                  color: muted,
+                                  height: 1.25,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (hasPendingInvite) ...[
+                                const SizedBox(height: 10),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(
+                                      0xFFEFF8F7,
+                                    ).withValues(alpha: 0.92),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: const Color(
+                                        0xFF138489,
+                                      ).withValues(alpha: 0.18),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Family invite ready. After this, Ever Roots will open the join step.',
+                                    style: TextStyle(
+                                      color: Color(0xFF174E52),
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 12),
 
                               TextField(
@@ -610,42 +725,20 @@ class _SignInScreenState extends State<SignInScreen> {
 
                               SizedBox(height: tight ? 6 : (compact ? 10 : 14)),
 
-                              if (isSignIn)
-                                Wrap(
-                                  alignment: WrapAlignment.center,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  children: [
-                                    Text(
-                                      'No account? ',
-                                      style: switchTextStyle,
-                                    ),
-                                    OutlinedButton(
-                                      style: switchButtonStyle,
-                                      onPressed: _loading
-                                          ? null
-                                          : () => _switchMode(_AuthMode.signUp),
-                                      child: const Text('Create one'),
-                                    ),
-                                  ],
-                                )
-                              else
-                                Wrap(
-                                  alignment: WrapAlignment.center,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  children: [
-                                    Text(
-                                      'Account created? ',
-                                      style: switchTextStyle,
-                                    ),
-                                    OutlinedButton(
-                                      style: switchButtonStyle,
-                                      onPressed: _loading
-                                          ? null
-                                          : () => _switchMode(_AuthMode.signIn),
-                                      child: const Text('Sign in now'),
-                                    ),
-                                  ],
+                              TextButton(
+                                onPressed: _loading
+                                    ? null
+                                    : () => _switchMode(
+                                        isSignIn
+                                            ? _AuthMode.signUp
+                                            : _AuthMode.signIn,
+                                      ),
+                                child: Text(
+                                  isSignIn
+                                      ? 'Create a new account'
+                                      : 'I already have an account',
                                 ),
+                              ),
                             ],
                           ),
                         ),

@@ -4213,7 +4213,7 @@ class _AvatarBubble extends StatelessWidget {
           u,
           fit: BoxFit.cover,
           gaplessPlayback: true,
-          errorBuilder: (_, __, ___) => bg,
+          errorBuilder: (_, _, _) => bg,
         ),
       ),
     );

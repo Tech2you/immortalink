@@ -11,12 +11,10 @@
 --   family_members_one_primary_per_user partial unique index.
 --
 -- Production note:
--- A temporary TestFlight beta entitlement trigger was observed in the deployed
--- database even though its local migration was not recorded in deployed
--- migration history. This migration does not create, drop, or depend on that
--- beta trigger. Before production deployment, reconcile migration history for
--- 20260816211500_testflight_beta_family_entitlements.sql and decide whether
--- the beta trigger should remain active until its 2026-11-14 expiry.
+-- A temporary TestFlight beta entitlement trigger is recorded in production as
+-- 20260816101706 and 20260816101752. This migration does not create, drop, or
+-- depend on that beta trigger. Decide whether the beta trigger should remain
+-- active until its 2026-11-14 expiry before a public App Store launch.
 
 create or replace function public.everroot_limits(p_family_id uuid)
 returns jsonb
@@ -210,7 +208,7 @@ begin
     into v_beta_function_exists;
 
   raise notice
-    'TestFlight beta entitlement reconciliation: trigger_exists=%, function_exists=%. Reconcile 20260816211500 migration history before production deployment.',
+    'TestFlight beta entitlement reconciliation: trigger_exists=%, function_exists=%. Confirm beta migration history before production deployment.',
     v_beta_trigger_exists,
     v_beta_function_exists;
 end

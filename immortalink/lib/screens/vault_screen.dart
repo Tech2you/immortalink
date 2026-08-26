@@ -212,7 +212,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                 : ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(),
                     itemCount: _vaults.length,
-                    separatorBuilder: (_, __) => const Divider(),
+                    separatorBuilder: (_, _) => const Divider(),
                     itemBuilder: (context, index) {
                       final v = _vaults[index];
                       final displayName = (v['display_name'] ?? '')

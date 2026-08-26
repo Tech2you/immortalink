@@ -1703,7 +1703,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: preview.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        separatorBuilder: (_, _) => const SizedBox(width: 10),
         itemBuilder: (context, i) {
           final p = preview[i];
           return InkWell(
@@ -1937,7 +1937,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: _featuredPhotos.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                separatorBuilder: (_, _) => const SizedBox(width: 12),
                 itemBuilder: (_, index) {
                   final photo = _featuredPhotos[index];
                   return InkWell(
@@ -2097,7 +2097,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: photos.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
                     itemBuilder: (_, index) => ClipRRect(
                       borderRadius: BorderRadius.circular(16),
                       child: _memoryPhotoImage(
@@ -2171,7 +2171,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: _aboutPhotos.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 10),
+                    separatorBuilder: (_, _) => const SizedBox(width: 10),
                     itemBuilder: (_, index) => InkWell(
                       onTap: _openAboutGallery,
                       child: ClipRRect(

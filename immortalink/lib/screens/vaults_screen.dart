@@ -4,6 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/onboarding_invite_state.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import 'vault_home_screen.dart';
 import 'relationship_tree_screen.dart';
@@ -27,6 +28,8 @@ class VaultsScreen extends StatefulWidget {
 }
 
 class _VaultsScreenState extends State<VaultsScreen> {
+  bool _checkedPendingInvite = false;
+
   void _openJoinFamilyScreen() {
     Navigator.push(
       context,
@@ -52,6 +55,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
   final Map<String, String?> _avatarUrlCache = {};
   final Map<String, List<_MemPhoto>> _feedPhotosByMemoryId = {};
   final Map<String, List<_VoiceNote>> _feedVoiceByMemoryId = {};
+  RealtimeChannel? _familyFeedChannel;
+  Timer? _familyFeedRefreshDebounce;
+  String? _familyFeedRealtimeFamilyId;
 
   String? _playingKey;
   bool _isPlaying = false;
@@ -74,10 +80,35 @@ class _VaultsScreenState extends State<VaultsScreen> {
     });
 
     _loadVault();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _openPendingInviteIfNeeded();
+    });
+  }
+
+  Future<void> _openPendingInviteIfNeeded() async {
+    if (_checkedPendingInvite) return;
+    _checkedPendingInvite = true;
+
+    final code = await pendingFamilyInviteCode();
+    if (!mounted || code.isEmpty) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JoinFamilyScreen(initialInviteCode: code),
+      ),
+    );
+
+    if (mounted) await _loadVault();
   }
 
   @override
   void dispose() {
+    _familyFeedRefreshDebounce?.cancel();
+    final channel = _familyFeedChannel;
+    if (channel != null) {
+      unawaited(_supabase.removeChannel(channel));
+    }
     _player.dispose();
     super.dispose();
   }
@@ -162,6 +193,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
     try {
       await _supabase.auth.signOut();
+      _removeFamilyFeedRealtime();
       if (!mounted) return;
       setState(() {
         _vault = null;
@@ -359,6 +391,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) {
+        _removeFamilyFeedRealtime();
         if (!mounted) return;
         setState(() {
           _vault = null;
@@ -396,6 +429,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       await _loadFamilyMemberships(user.id);
       if (!mounted) return;
       setState(() => _loading = false);
+      _syncFamilyFeedRealtime();
       unawaited(_loadFamilyFeed());
     } on TimeoutException {
       if (!mounted) return;
@@ -520,6 +554,75 @@ class _VaultsScreenState extends State<VaultsScreen> {
     setState(() {
       _familyMemberships = memberships;
       _activeFamilyId = nextActive;
+    });
+  }
+
+  void _syncFamilyFeedRealtime() {
+    final familyId = _activeFamilyId?.trim();
+    if (familyId == null || familyId.isEmpty) {
+      _removeFamilyFeedRealtime();
+      return;
+    }
+
+    if (_familyFeedRealtimeFamilyId == familyId && _familyFeedChannel != null) {
+      return;
+    }
+
+    _removeFamilyFeedRealtime();
+    _familyFeedRealtimeFamilyId = familyId;
+
+    _familyFeedChannel = _supabase
+        .channel('family-feed-$familyId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'family_members',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'family_id',
+            value: familyId,
+          ),
+          callback: (_) => _scheduleFamilyFeedRefresh(reloadMemberships: true),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'memories',
+          callback: (_) => _scheduleFamilyFeedRefresh(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'memory_photos',
+          callback: (_) => _scheduleFamilyFeedRefresh(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'memory_voice_notes',
+          callback: (_) => _scheduleFamilyFeedRefresh(),
+        )
+        .subscribe();
+  }
+
+  void _removeFamilyFeedRealtime() {
+    _familyFeedRealtimeFamilyId = null;
+    final channel = _familyFeedChannel;
+    _familyFeedChannel = null;
+    if (channel != null) {
+      unawaited(_supabase.removeChannel(channel));
+    }
+  }
+
+  void _scheduleFamilyFeedRefresh({bool reloadMemberships = false}) {
+    _familyFeedRefreshDebounce?.cancel();
+    _familyFeedRefreshDebounce = Timer(const Duration(milliseconds: 700), () {
+      if (!mounted || _supabase.auth.currentUser == null) return;
+      if (reloadMemberships) {
+        unawaited(_loadVault());
+        return;
+      }
+      unawaited(_loadFamilyFeed());
     });
   }
 
@@ -1093,6 +1196,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   void _openFamilyTree(String familyId) {
     setState(() => _activeFamilyId = familyId);
+    _syncFamilyFeedRealtime();
     _loadFamilyFeed();
     Navigator.push(
       context,
@@ -1363,7 +1467,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                             child: ListView.separated(
                               scrollDirection: Axis.horizontal,
                               itemCount: photos.length,
-                              separatorBuilder: (_, __) =>
+                              separatorBuilder: (_, _) =>
                                   const SizedBox(width: 10),
                               itemBuilder: (_, i) {
                                 final p = photos[i];

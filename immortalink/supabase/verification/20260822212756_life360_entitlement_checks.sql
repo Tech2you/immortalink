@@ -1,7 +1,7 @@
 -- EverRoot Life360 entitlement verification checks.
 --
 -- Run only against a local or disposable staging database after applying:
---   20260822202536_everroot_life360_entitlement_adjustment.sql
+--   20260822212756_everroot_life360_entitlement_adjustment.sql
 --
 -- The script is wrapped in a transaction and rolls back at the end. It creates
 -- disposable auth users, vaults, families, memberships, and invites to prove:

@@ -2440,7 +2440,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           itemCount: preview.length + 1,
-          separatorBuilder: (_, __) => const SizedBox(width: 10),
+          separatorBuilder: (_, _) => const SizedBox(width: 10),
           itemBuilder: (context, i) {
             if (i == 0) {
               return InkWell(
@@ -3218,7 +3218,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: _featuredPhotos.length + 1,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                separatorBuilder: (_, _) => const SizedBox(width: 12),
                 itemBuilder: (context, index) {
                   if (index == _featuredPhotos.length) {
                     return InkWell(
@@ -3454,7 +3454,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: photos.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (_, index) => InkWell(
                     onTap: () => _openMemoryGallery(memoryId),
                     child: ClipRRect(

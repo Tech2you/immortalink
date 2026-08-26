@@ -2582,7 +2582,7 @@ class _BranchAvatar extends StatelessWidget {
           u,
           fit: BoxFit.cover,
           gaplessPlayback: true,
-          errorBuilder: (_, __, ___) => fallback,
+          errorBuilder: (_, _, _) => fallback,
         ),
       ),
     );
