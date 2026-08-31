@@ -17,6 +17,8 @@ class AppleSubscriptionService extends ChangeNotifier {
 
   StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
   final Map<String, ProductDetails> _productsById = {};
+  final Set<String> _requestedProductIds = {};
+  final Set<String> _notFoundProductIds = {};
 
   bool _initialized = false;
   bool _storeAvailable = false;
@@ -30,8 +32,15 @@ class AppleSubscriptionService extends ChangeNotifier {
   bool get purchasePending => _purchasePending;
   bool get storeAvailable => _storeAvailable;
   String? get message => _message;
-  String? get error => _error;
+  String? get error => _friendlyError(_error);
   List<ProductDetails> get products => _productsById.values.toList();
+  List<String> get requestedProductIds => _requestedProductIds.toList()..sort();
+  List<String> get foundProductIds => _productsById.keys.toList()..sort();
+  List<String> get notFoundProductIds => _notFoundProductIds.toList()..sort();
+  String? get rawError => _error;
+  bool get hasPricingDiagnostics =>
+      AppleSubscriptionConfig.purchaseFlowEnabled &&
+      (_error != null || (_initialized && !_loading && _productsById.isEmpty));
 
   ProductDetails? productFor(String productId) => _productsById[productId];
 
@@ -49,6 +58,10 @@ class AppleSubscriptionService extends ChangeNotifier {
     _setLoading(true);
 
     try {
+      _requestedProductIds
+        ..clear()
+        ..addAll(AppleSubscriptionConfig.activeProductIds);
+      _notFoundProductIds.clear();
       _storeAvailable = await _iap.isAvailable();
       if (!_storeAvailable) {
         _error = 'The App Store is not available on this device.';
@@ -67,6 +80,9 @@ class AppleSubscriptionService extends ChangeNotifier {
       final response = await _iap.queryProductDetails(
         AppleSubscriptionConfig.activeProductIds.toSet(),
       );
+      _notFoundProductIds
+        ..clear()
+        ..addAll(response.notFoundIDs);
       _productsById
         ..clear()
         ..addEntries(response.productDetails.map((p) => MapEntry(p.id, p)));
@@ -78,6 +94,8 @@ class AppleSubscriptionService extends ChangeNotifier {
       } else {
         _error = null;
       }
+    } catch (e) {
+      _error = e.toString();
     } finally {
       _setLoading(false);
     }
@@ -206,5 +224,15 @@ class AppleSubscriptionService extends ChangeNotifier {
   void dispose() {
     _purchaseSubscription?.cancel();
     super.dispose();
+  }
+
+  static String? _friendlyError(String? error) {
+    if (error == null || error.trim().isEmpty) return null;
+    final lower = error.toLowerCase();
+    if (lower.contains('failed to get response from platform') ||
+        lower.contains('storekit')) {
+      return 'Prices are temporarily unavailable. Open the latest TestFlight build and try again.';
+    }
+    return error;
   }
 }

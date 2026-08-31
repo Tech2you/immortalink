@@ -44,19 +44,16 @@ class AppleSubscriptionConfig {
       title: 'Free Family',
       subtitle: 'Start the family tree and invite close relatives.',
       storageLabel: '500 MB shared storage',
-      included:
-          '8 family accounts, 25 monthly invites, 100 memories, 100 photos, '
-          '25 voice notes, 20 AI replies, and 10 minutes of transcription.',
+      included: 'Included for every family.',
     ),
     AppleSubscriptionTier(
       plan: 'everroot_family',
       title: 'Ever Roots Family',
-      subtitle: 'For families preserving photos, stories, and voice notes.',
+      subtitle: 'For families saving more photos, stories, and voice notes.',
       storageLabel: '10 GB shared storage',
       included:
-          '20 family accounts, 50 monthly invites, 1,000 memories, 2,000 '
-          'photos, 500 voice notes, 500 AI replies, and 10 hours of '
-          'transcription.',
+          'Photos, voice notes, memories, AI replies, and transcription all '
+          'share this plan.',
       monthlyProductId: everRootsFamilyMonthlyProductId,
       annualProductId: everRootsFamilyAnnualProductId,
       draftMonthlyProductId: draftFamilyMonthlyProductId,
@@ -65,12 +62,9 @@ class AppleSubscriptionConfig {
     AppleSubscriptionTier(
       plan: 'everroot_legacy',
       title: 'Ever Roots Legacy',
-      subtitle: 'For larger families and heavier archive building.',
+      subtitle: 'For larger archives and heavier AI/transcription use.',
       storageLabel: '50 GB shared storage',
-      included:
-          '30 family accounts, 100 monthly invites, 3,000 memories, 6,000 '
-          'photos, 1,500 voice notes, 1,500 AI replies, and premium '
-          'transcription capacity.',
+      included: 'More room for long-term family archives as your family grows.',
       monthlyProductId: everRootsLegacyMonthlyProductId,
       annualProductId: everRootsLegacyAnnualProductId,
       draftMonthlyProductId: draftLegacyMonthlyProductId,

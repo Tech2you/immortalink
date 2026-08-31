@@ -2555,8 +2555,8 @@ class _FamilyPlanStatusContent extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Join or create a family to see shared storage. Subscription '
-              'controls will appear here once App Store billing is connected.',
+              'Join or create a family to see shared storage and choose a '
+              'family plan.',
             ),
             SizedBox(height: 16),
             _TierList(currentPlan: 'free', familyId: ''),
@@ -2572,8 +2572,8 @@ class _FamilyPlanStatusContent extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Subscription controls will appear here once App Store billing '
-              'is connected. Storage usage could not be loaded right now.',
+              'Storage usage could not be loaded right now. You can still '
+              'review the available plans.',
             ),
             const SizedBox(height: 16),
             _TierList(currentPlan: 'free', familyId: familyId),
@@ -2602,9 +2602,8 @@ class _FamilyPlanStatusContent extends StatelessWidget {
               'a family organizer upgrades the family plan.'
         : isNearFull
         ? 'Storage is almost full. A family organizer can upgrade this family '
-              'plan once App Store billing is connected.'
-        : 'A family organizer will be able to upgrade this family plan once '
-              'App Store billing is connected.';
+              'plan for more shared storage.'
+        : 'Upgrade when your family needs more room for memories and media.';
 
     return SizedBox(
       width: double.maxFinite,
@@ -2626,6 +2625,13 @@ class _FamilyPlanStatusContent extends StatelessWidget {
             const SizedBox(height: 12),
             Text(status),
             const SizedBox(height: 18),
+            Text(
+              'Choose a plan',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
             _TierList(currentPlan: plan, familyId: familyId),
           ],
         ),
@@ -2697,48 +2703,111 @@ class _PurchaseAwareTierListState extends State<_PurchaseAwareTierList> {
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _subscriptionService,
-      builder: (context, _) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ...AppleSubscriptionConfig.tiers.map(
-            (tier) => _PlanTierTile(
-              tier: tier,
-              isCurrent: tier.plan == widget.currentPlan,
-              service: _subscriptionService,
-              hasFamily: widget.familyId.trim().isNotEmpty,
+      builder: (context, _) {
+        final error = _subscriptionService.error;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ...AppleSubscriptionConfig.tiers.map(
+              (tier) => _PlanTierTile(
+                tier: tier,
+                isCurrent: tier.plan == widget.currentPlan,
+                service: _subscriptionService,
+                hasFamily: widget.familyId.trim().isNotEmpty,
+              ),
             ),
-          ),
-          if (_subscriptionService.message != null) ...[
+            if (_subscriptionService.message != null) ...[
+              const SizedBox(height: 4),
+              Text(_subscriptionService.message!),
+            ],
+            if (error != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                error,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            if (_subscriptionService.hasPricingDiagnostics) ...[
+              const SizedBox(height: 10),
+              _StoreKitDiagnostics(service: _subscriptionService),
+            ],
             const SizedBox(height: 4),
-            Text(_subscriptionService.message!),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: AppleSubscriptionConfig.purchaseFlowEnabled
+                    ? _subscriptionService.restore
+                    : null,
+                child: const Text('Restore purchases'),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _subscriptionService.openManageSubscriptions,
+                child: const Text('Manage with Apple'),
+              ),
+            ),
           ],
-          if (_subscriptionService.error != null) ...[
-            const SizedBox(height: 4),
+        );
+      },
+    );
+  }
+}
+
+class _StoreKitDiagnostics extends StatelessWidget {
+  final AppleSubscriptionService service;
+
+  const _StoreKitDiagnostics({required this.service});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final requested = service.requestedProductIds;
+    final found = service.foundProductIds;
+    final notFound = service.notFoundProductIds;
+    final rawError = service.rawError;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: DefaultTextStyle(
+        style:
+            theme.textTheme.bodySmall ??
+            TextStyle(color: theme.colorScheme.onSurface),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Text(
-              _subscriptionService.error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              'TestFlight billing diagnostics',
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
+            const SizedBox(height: 6),
+            Text(
+              'Purchase flag: ${AppleSubscriptionConfig.purchaseFlowEnabled}',
+            ),
+            Text('Store available: ${service.storeAvailable}'),
+            Text('Requested: ${_joinIds(requested)}'),
+            Text('Returned: ${_joinIds(found)}'),
+            Text('Missing: ${_joinIds(notFound)}'),
+            if (rawError != null && rawError.trim().isNotEmpty)
+              Text('Raw error: $rawError'),
           ],
-          const SizedBox(height: 4),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: AppleSubscriptionConfig.purchaseFlowEnabled
-                  ? _subscriptionService.restore
-                  : null,
-              child: const Text('Restore purchases'),
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: _subscriptionService.openManageSubscriptions,
-              child: const Text('Manage with Apple'),
-            ),
-          ),
-        ],
+        ),
       ),
     );
+  }
+
+  static String _joinIds(List<String> ids) {
+    if (ids.isEmpty) return '-';
+    return ids.join(', ');
   }
 }
 
@@ -2776,6 +2845,16 @@ class _PlanTierTile extends StatelessWidget {
         annualProduct != null &&
         !service.loading &&
         !service.purchasePending;
+    final monthlyLabel = _purchaseLabel(
+      service: service,
+      productPrice: monthlyProduct?.price,
+      fallback: 'Monthly price unavailable',
+    );
+    final annualLabel = _purchaseLabel(
+      service: service,
+      productPrice: annualProduct?.price,
+      fallback: 'Annual price unavailable',
+    );
     final borderColor = isCurrent
         ? theme.colorScheme.primary
         : theme.colorScheme.outlineVariant;
@@ -2843,19 +2922,32 @@ class _PlanTierTile extends StatelessWidget {
                   onPressed: canBuyMonthly
                       ? () => service.buy(monthlyProduct.id)
                       : null,
-                  child: Text(monthlyProduct?.price ?? 'Monthly unavailable'),
+                  child: Text(monthlyLabel),
                 ),
                 FilledButton(
                   onPressed: canBuyAnnual
                       ? () => service.buy(annualProduct.id)
                       : null,
-                  child: Text(annualProduct?.price ?? tier.setupStatus),
+                  child: Text(annualLabel),
                 ),
               ],
             ),
         ],
       ),
     );
+  }
+
+  static String _purchaseLabel({
+    required AppleSubscriptionService service,
+    required String? productPrice,
+    required String fallback,
+  }) {
+    if (productPrice != null && productPrice.trim().isNotEmpty) {
+      return productPrice;
+    }
+    if (service.loading) return 'Checking price...';
+    if (service.purchasePending) return 'Purchase pending...';
+    return fallback;
   }
 }
 
