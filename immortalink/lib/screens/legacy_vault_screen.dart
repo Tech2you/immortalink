@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../widgets/vault_section_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'family_branch_screen.dart';
@@ -2349,29 +2350,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   Widget _sectionPicker() {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      child: SegmentedButton<int>(
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(
-            value: 0,
-            icon: Icon(Icons.view_stream_outlined),
-            label: Text('Memories'),
-          ),
-          ButtonSegment(
-            value: 1,
-            icon: Icon(Icons.person_outline),
-            label: Text('About'),
-          ),
-          ButtonSegment(
-            value: 2,
-            icon: Icon(Icons.photo_library_outlined),
-            label: Text('Media'),
-          ),
-        ],
-        selected: {_selectedLegacySection},
-        onSelectionChanged: (selection) {
-          setState(() => _selectedLegacySection = selection.first);
-        },
+      child: VaultSectionPicker(
+        selected: _selectedLegacySection,
+        onChanged: (selection) => setState(() => _selectedLegacySection = selection),
       ),
     );
   }

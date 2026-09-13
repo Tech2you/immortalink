@@ -2795,7 +2795,7 @@ class _PersonBubble extends StatelessWidget {
                               : null,
                         ),
                       ),
-                      if (focused && !person.isPlaceholder) ...[
+                      if (focused) ...[
                         const SizedBox(height: 8),
                         SizedBox(
                           height: 30,
@@ -2805,7 +2805,11 @@ class _PersonBubble extends StatelessWidget {
                               Icons.lock_open_outlined,
                               size: 15,
                             ),
-                            label: const Text('Open Vault'),
+                            label: Text(
+                              person.isPlaceholder
+                                  ? 'Edit profile'
+                                  : 'Open Vault',
+                            ),
                             style: FilledButton.styleFrom(
                               visualDensity: VisualDensity.compact,
                               textStyle: const TextStyle(
@@ -2823,17 +2827,16 @@ class _PersonBubble extends StatelessWidget {
                   ),
                 ),
               ),
-              if (!person.isPlaceholder)
-                Positioned(
-                  right: 2,
-                  top: 2,
-                  child: IconButton(
-                    visualDensity: VisualDensity.compact,
-                    tooltip: 'Open ${person.name}\'s vault',
-                    onPressed: onOpen,
-                    icon: const Icon(Icons.lock_open_outlined, size: 18),
-                  ),
+              Positioned(
+                right: 2,
+                top: 2,
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Open ${person.name}\'s vault',
+                  onPressed: onOpen,
+                  icon: const Icon(Icons.lock_open_outlined, size: 18),
                 ),
+              ),
             ],
           ),
         ),

@@ -250,6 +250,17 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
       setState(() {
         _icebreakerError = 'Icebreakers took too long to load.';
       });
+    } on FunctionException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _icebreakerError = switch (error.status) {
+          401 => 'Sign in again to load icebreakers.',
+          403 => 'You do not have access to this vault in the selected family.',
+          429 =>
+            'Your AI allowance is unavailable or has been reached. Check your family plan.',
+          _ => 'Could not load personalised icebreakers yet.',
+        };
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/onboarding_invite_state.dart';
@@ -9,6 +10,8 @@ import '../services/apple_subscription_config.dart';
 import '../services/apple_subscription_service.dart';
 import '../services/push_notification_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
+import '../utils/image_upload_optimizer.dart';
+import '../utils/media_upload_policy.dart';
 import 'vault_home_screen.dart';
 import 'relationship_tree_screen.dart';
 import 'join_family_screen.dart';
@@ -42,6 +45,88 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   final _supabase = Supabase.instance.client;
+  final Map<String, String> _familyPhotos = {};
+  final Set<String> _familyPhotoBusy = {};
+
+  Future<void> _loadFamilyPhoto(String familyId) async {
+    try {
+      final url = await _supabase.storage
+          .from('family_avatars')
+          .createSignedUrl('$familyId/avatar', 3600);
+      if (mounted) setState(() => _familyPhotos[familyId] = url);
+    } catch (_) {
+      if (mounted) setState(() => _familyPhotos.remove(familyId));
+    }
+  }
+
+  Future<void> _editFamilyPhoto(String familyId) async {
+    if (_familyPhotoBusy.contains(familyId)) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Change family photo'),
+              onTap: () => Navigator.pop(context, 'change'),
+            ),
+            if (_familyPhotos.containsKey(familyId))
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('Remove family photo'),
+                onTap: () => Navigator.pop(context, 'remove'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    setState(() => _familyPhotoBusy.add(familyId));
+    try {
+      final bucket = _supabase.storage.from('family_avatars');
+      if (action == 'remove') {
+        await bucket.remove(['$familyId/avatar']);
+        if (mounted) setState(() => _familyPhotos.remove(familyId));
+      } else {
+        final picked = await FilePicker.platform.pickFiles(
+          type: FileType.image,
+          withData: true,
+        );
+        if (picked == null || picked.files.isEmpty) return;
+        final file = picked.files.first;
+        if (file.bytes == null) throw Exception('No image data');
+        final image = await ImageUploadOptimizer.optimize(
+          file.bytes!,
+          kind: MediaUploadKind.avatarPhoto,
+          fileName: file.name,
+        );
+        if (image.bytes.length > 5242880) {
+          _toast('Choose a family photo smaller than 5 MB.');
+          return;
+        }
+        await bucket.uploadBinary(
+          '$familyId/avatar',
+          image.bytes,
+          fileOptions: FileOptions(
+            upsert: true,
+            contentType: image.contentType,
+            cacheControl: '0',
+          ),
+        );
+        final oldUrl = _familyPhotos[familyId];
+        if (oldUrl != null) await NetworkImage(oldUrl).evict();
+        await _loadFamilyPhoto(familyId);
+      }
+      _toast('Family photo updated.');
+    } catch (_) {
+      _toast('Could not update the family photo. Please try again.');
+    } finally {
+      if (mounted) setState(() => _familyPhotoBusy.remove(familyId));
+    }
+  }
+
   final AudioPlayer _player = AudioPlayer();
 
   bool _loading = true;
@@ -592,6 +677,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
         .toList();
 
     final namesById = <String, String>{};
+    _familyPhotos.removeWhere((id, _) => !familyIds.contains(id));
+    for (final id in familyIds) {
+      unawaited(_loadFamilyPhoto(id));
+    }
     if (familyIds.isNotEmpty) {
       try {
         final rawFamilies = await _supabase
@@ -1390,11 +1479,28 @@ class _VaultsScreenState extends State<VaultsScreen> {
               final isActive = id == _activeFamilyId;
               return ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: CircleAvatar(
-                  backgroundColor: isActive
-                      ? const Color(0xFFE6D7EF)
-                      : Colors.black.withOpacity(0.06),
-                  child: const Icon(Icons.account_tree),
+                leading: Tooltip(
+                  message: 'Edit family photo',
+                  child: InkWell(
+                    customBorder: const CircleBorder(),
+                    onTap: () => _editFamilyPhoto(id),
+                    child: CircleAvatar(
+                      backgroundImage: _familyPhotos[id] == null
+                          ? null
+                          : NetworkImage(_familyPhotos[id]!),
+                      backgroundColor: isActive
+                          ? const Color(0xFFE6D7EF)
+                          : Colors.black.withOpacity(0.06),
+                      child: _familyPhotoBusy.contains(id)
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : _familyPhotos[id] == null
+                          ? const Icon(Icons.account_tree)
+                          : null,
+                    ),
+                  ),
                 ),
                 title: Text(name),
                 subtitle: Text(isPrimary ? 'Home family' : 'Family member'),

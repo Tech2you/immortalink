@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../widgets/vault_section_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
@@ -3282,29 +3283,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   Widget _vaultSectionPicker() {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
-      child: SegmentedButton<int>(
-        showSelectedIcon: false,
-        segments: const [
-          ButtonSegment(
-            value: 0,
-            icon: Icon(Icons.view_stream_outlined),
-            label: Text('Memories'),
-          ),
-          ButtonSegment(
-            value: 1,
-            icon: Icon(Icons.person_outline),
-            label: Text('About'),
-          ),
-          ButtonSegment(
-            value: 2,
-            icon: Icon(Icons.photo_library_outlined),
-            label: Text('Media'),
-          ),
-        ],
-        selected: {_selectedVaultSection},
-        onSelectionChanged: (selection) {
-          setState(() => _selectedVaultSection = selection.first);
-        },
+      child: VaultSectionPicker(
+        selected: _selectedVaultSection,
+        onChanged: (selection) => setState(() => _selectedVaultSection = selection),
       ),
     );
   }
