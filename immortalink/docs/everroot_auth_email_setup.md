@@ -27,8 +27,8 @@ Good alternatives:
 
 Use a dedicated auth sending subdomain and from-address:
 
-- `auth.everroots.app`
-- `no-reply@auth.everroots.app`
+- `auth.everroots.org`
+- `no-reply@auth.everroots.org`
 
 Keep auth email separate from marketing email. Do not put marketing copy,
 multiple CTAs, or promotional images inside auth emails.
@@ -44,7 +44,7 @@ Configure the records supplied by the SMTP provider:
 Recommended starting DMARC policy:
 
 ```text
-v=DMARC1; p=none; rua=mailto:dmarc@everroots.app
+v=DMARC1; p=none; rua=mailto:dmarc@everroots.org
 ```
 
 After deliverability is verified, tighten DMARC gradually.

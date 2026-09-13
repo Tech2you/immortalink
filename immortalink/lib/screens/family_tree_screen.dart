@@ -1,6 +1,5 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'vault_home_screen.dart';
@@ -12,6 +11,7 @@ import 'sign_in_screen.dart';
 import 'relationship_tree_screen.dart';
 import '../services/family_leave_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
+import '../utils/family_invite_share.dart';
 
 class FamilyTreeScreen extends StatefulWidget {
   final String familyId;
@@ -2452,50 +2452,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
       if (!mounted) return;
 
-      await showDialog<void>(
+      await showFamilyInviteDialog(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Invite created: $title'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Slot: $slotKey'),
-              const SizedBox(height: 10),
-              const Text('Invite code (copy & share):'),
-              const SizedBox(height: 6),
-              SelectableText(
-                code,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Expires: ${expiresAt.toLocal()}',
-                style: TextStyle(
-                  color: Colors.black.withOpacity(0.6),
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: code));
-                if (!mounted || !ctx.mounted) return;
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invite code copied')),
-                );
-              },
-              child: const Text('Copy'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+        title: 'Invite created: $title',
+        code: code,
+        expiresAt: expiresAt,
+        slotLabel: 'Slot: $slotKey',
       );
 
       _refresh();

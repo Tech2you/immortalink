@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "DNLP6MCWMN.com.everroots.app",
+        "paths": ["/invite/*", "/invite", "/join"]
+      }
+    ]
+  }
+}

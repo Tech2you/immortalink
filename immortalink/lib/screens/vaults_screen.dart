@@ -2672,12 +2672,14 @@ class _PurchaseAwareTierList extends StatefulWidget {
   State<_PurchaseAwareTierList> createState() => _PurchaseAwareTierListState();
 }
 
-class _PurchaseAwareTierListState extends State<_PurchaseAwareTierList> {
+class _PurchaseAwareTierListState extends State<_PurchaseAwareTierList>
+    with WidgetsBindingObserver {
   late final AppleSubscriptionService _subscriptionService;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _subscriptionService = AppleSubscriptionService();
     if (widget.familyId.trim().isNotEmpty) {
       unawaited(_subscriptionService.initialize(familyId: widget.familyId));
@@ -2694,7 +2696,15 @@ class _PurchaseAwareTierListState extends State<_PurchaseAwareTierList> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_subscriptionService.refreshStorefront());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _subscriptionService.dispose();
     super.dispose();
   }
@@ -2730,6 +2740,16 @@ class _PurchaseAwareTierListState extends State<_PurchaseAwareTierList> {
             if (_subscriptionService.hasPricingDiagnostics) ...[
               const SizedBox(height: 10),
               _StoreKitDiagnostics(service: _subscriptionService),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: _subscriptionService.loading
+                      ? null
+                      : _subscriptionService.refreshProducts,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Check prices again'),
+                ),
+              ),
             ],
             const SizedBox(height: 4),
             Align(
@@ -2784,7 +2804,7 @@ class _StoreKitDiagnostics extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'TestFlight billing diagnostics',
+              'Billing diagnostics',
               style: theme.textTheme.labelMedium?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
@@ -2794,6 +2814,7 @@ class _StoreKitDiagnostics extends StatelessWidget {
               'Purchase flag: ${AppleSubscriptionConfig.purchaseFlowEnabled}',
             ),
             Text('Store available: ${service.storeAvailable}'),
+            Text('Storefront: ${service.storefrontCountryCode ?? '-'}'),
             Text('Requested: ${_joinIds(requested)}'),
             Text('Returned: ${_joinIds(found)}'),
             Text('Missing: ${_joinIds(notFound)}'),
@@ -2848,11 +2869,13 @@ class _PlanTierTile extends StatelessWidget {
     final monthlyLabel = _purchaseLabel(
       service: service,
       productPrice: monthlyProduct?.price,
+      billingPeriod: 'month',
       fallback: 'Monthly price unavailable',
     );
     final annualLabel = _purchaseLabel(
       service: service,
       productPrice: annualProduct?.price,
+      billingPeriod: 'year',
       fallback: 'Annual price unavailable',
     );
     final borderColor = isCurrent
@@ -2940,13 +2963,14 @@ class _PlanTierTile extends StatelessWidget {
   static String _purchaseLabel({
     required AppleSubscriptionService service,
     required String? productPrice,
+    required String billingPeriod,
     required String fallback,
   }) {
     if (productPrice != null && productPrice.trim().isNotEmpty) {
-      return productPrice;
+      return '${productPrice.trim()} / $billingPeriod';
     }
-    if (service.loading) return 'Checking price...';
     if (service.purchasePending) return 'Purchase pending...';
+    if (service.loading) return 'Checking price...';
     return fallback;
   }
 }

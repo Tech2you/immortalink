@@ -1,7 +1,6 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'legacy_vault_screen.dart';
@@ -10,6 +9,7 @@ import 'vault_readonly_screen.dart';
 import 'vaults_screen.dart';
 import '../services/family_leave_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
+import '../utils/family_invite_share.dart';
 
 enum _RelativeKind { parent, spouse, sibling, child }
 
@@ -1214,42 +1214,11 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         );
       }
       if (!mounted) return;
-      await showDialog<void>(
+      await showFamilyInviteDialog(
         context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text('Invite ${_kindLabel(kind)}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Share this invite code:'),
-              const SizedBox(height: 8),
-              SelectableText(
-                code,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text('Expires ${expiresAt.toLocal()}'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: code));
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-              },
-              child: const Text('Copy'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Done'),
-            ),
-          ],
-        ),
+        title: 'Invite ${_kindLabel(kind)}',
+        code: code,
+        expiresAt: expiresAt,
       );
       await _load(keepFocusKey: focus.key);
     } catch (e) {

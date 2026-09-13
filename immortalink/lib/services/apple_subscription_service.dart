@@ -24,25 +24,39 @@ class AppleSubscriptionService extends ChangeNotifier {
   bool _storeAvailable = false;
   bool _loading = false;
   bool _purchasePending = false;
+  int _restoreAttempt = 0;
   String? _familyId;
+  String? _storefrontCountryCode;
   String? _message;
   String? _error;
+  String? _validationDiagnostic;
 
   bool get loading => _loading;
   bool get purchasePending => _purchasePending;
   bool get storeAvailable => _storeAvailable;
+  String? get storefrontCountryCode => _storefrontCountryCode;
   String? get message => _message;
   String? get error => _friendlyError(_error);
   List<ProductDetails> get products => _productsById.values.toList();
   List<String> get requestedProductIds => _requestedProductIds.toList()..sort();
   List<String> get foundProductIds => _productsById.keys.toList()..sort();
   List<String> get notFoundProductIds => _notFoundProductIds.toList()..sort();
-  String? get rawError => _error;
+  String? get rawError => _validationDiagnostic ?? _error;
   bool get hasPricingDiagnostics =>
       AppleSubscriptionConfig.purchaseFlowEnabled &&
       (_error != null || (_initialized && !_loading && _productsById.isEmpty));
 
   ProductDetails? productFor(String productId) => _productsById[productId];
+
+  Future<void> refreshStorefront() async {
+    if (!_initialized || _loading || !_storeAvailable) return;
+    try {
+      final country = await _iap.countryCode();
+      if (country != _storefrontCountryCode) await refreshProducts();
+    } catch (_) {
+      // A temporary storefront lookup failure must not interrupt verification.
+    }
+  }
 
   Future<void> initialize({required String familyId}) async {
     _familyId = familyId.trim();
@@ -55,8 +69,19 @@ class AppleSubscriptionService extends ChangeNotifier {
 
     if (_initialized) return;
     _initialized = true;
-    _setLoading(true);
+    await refreshProducts();
+  }
 
+  Future<void> refreshProducts() async {
+    if (!AppleSubscriptionConfig.purchaseFlowEnabled ||
+        AppleSubscriptionConfig.activeProductIds.isEmpty) {
+      _message = 'Purchases are not enabled for this build yet.';
+      notifyListeners();
+      return;
+    }
+
+    _setLoading(true);
+    _message = null;
     try {
       _requestedProductIds
         ..clear()
@@ -68,7 +93,13 @@ class AppleSubscriptionService extends ChangeNotifier {
         return;
       }
 
-      _purchaseSubscription = _iap.purchaseStream.listen(
+      try {
+        _storefrontCountryCode = await _iap.countryCode();
+      } catch (e) {
+        _storefrontCountryCode = 'Unavailable: $e';
+      }
+
+      _purchaseSubscription ??= _iap.purchaseStream.listen(
         _handlePurchaseUpdates,
         onError: (Object error) {
           _purchasePending = false;
@@ -102,6 +133,7 @@ class AppleSubscriptionService extends ChangeNotifier {
   }
 
   Future<void> buy(String productId) async {
+    if (_purchasePending || _loading) return;
     final product = _productsById[productId];
     final familyId = _familyId;
     if (product == null || familyId == null || familyId.isEmpty) return;
@@ -109,11 +141,18 @@ class AppleSubscriptionService extends ChangeNotifier {
     _purchasePending = true;
     _message = null;
     _error = null;
+    _validationDiagnostic = null;
     notifyListeners();
 
-    final purchaseParam = PurchaseParam(productDetails: product);
-    final started = await _iap.buyNonConsumable(purchaseParam: purchaseParam);
-    if (!started) {
+    try {
+      final purchaseParam = PurchaseParam(productDetails: product);
+      final started = await _iap.buyNonConsumable(purchaseParam: purchaseParam);
+      if (!started) {
+        _purchasePending = false;
+        _error = 'The App Store did not start the purchase.';
+        notifyListeners();
+      }
+    } catch (_) {
       _purchasePending = false;
       _error = 'The App Store did not start the purchase.';
       notifyListeners();
@@ -121,6 +160,7 @@ class AppleSubscriptionService extends ChangeNotifier {
   }
 
   Future<void> restore() async {
+    if (_purchasePending || _loading) return;
     if (!AppleSubscriptionConfig.purchaseFlowEnabled) {
       _message = 'Purchases are not enabled for this build yet.';
       notifyListeners();
@@ -130,8 +170,22 @@ class AppleSubscriptionService extends ChangeNotifier {
     _purchasePending = true;
     _message = null;
     _error = null;
+    _validationDiagnostic = null;
     notifyListeners();
-    await _iap.restorePurchases();
+    final attempt = ++_restoreAttempt;
+    try {
+      await _iap.restorePurchases();
+      await Future<void>.delayed(const Duration(seconds: 8));
+      if (attempt == _restoreAttempt && _purchasePending) {
+        _purchasePending = false;
+        _message = 'No previous App Store purchase was found.';
+        notifyListeners();
+      }
+    } catch (e) {
+      _purchasePending = false;
+      _error = 'Restore failed: $e';
+      notifyListeners();
+    }
   }
 
   Future<void> openManageSubscriptions() async {
@@ -144,6 +198,7 @@ class AppleSubscriptionService extends ChangeNotifier {
   }
 
   Future<void> _handlePurchaseUpdates(List<PurchaseDetails> purchases) async {
+    await refreshStorefront();
     for (final purchase in purchases) {
       switch (purchase.status) {
         case PurchaseStatus.pending:
@@ -153,14 +208,17 @@ class AppleSubscriptionService extends ChangeNotifier {
           break;
         case PurchaseStatus.purchased:
         case PurchaseStatus.restored:
+          _restoreAttempt++;
           await _validateAndComplete(purchase);
           break;
         case PurchaseStatus.error:
+          _restoreAttempt++;
           _purchasePending = false;
           _error = purchase.error?.message ?? 'Purchase failed.';
           notifyListeners();
           break;
         case PurchaseStatus.canceled:
+          _restoreAttempt++;
           _purchasePending = false;
           _message = 'Purchase cancelled.';
           notifyListeners();
@@ -179,6 +237,9 @@ class AppleSubscriptionService extends ChangeNotifier {
     }
 
     try {
+      _purchasePending = true;
+      _message = 'Verifying your purchase...';
+      notifyListeners();
       final response = await _supabase.functions.invoke(
         'validate_apple_subscription',
         body: {
@@ -195,7 +256,23 @@ class AppleSubscriptionService extends ChangeNotifier {
       );
 
       if (response.status < 200 || response.status >= 300) {
-        throw Exception('Validation failed: HTTP ${response.status}');
+        throw FunctionException(
+          status: response.status,
+          details: response.data,
+        );
+      }
+      final data = response.data;
+      if (data is! Map || data['ok'] != true || data['entitlement'] is! Map) {
+        throw const FormatException('Invalid validation response');
+      }
+      final entitlement = data['entitlement'] as Map;
+      if (entitlement['product_id'] != purchase.productID ||
+          !const [
+            'active',
+            'expired',
+            'refunded',
+          ].contains(entitlement['status'])) {
+        throw const FormatException('Invalid entitlement response');
       }
 
       if (purchase.pendingCompletePurchase) {
@@ -203,16 +280,54 @@ class AppleSubscriptionService extends ChangeNotifier {
       }
 
       _purchasePending = false;
-      _message = 'Family plan updated.';
+      _message = entitlement['status'] == 'active'
+          ? 'Family plan updated.'
+          : 'This subscription is no longer active.';
       _error = null;
+      _validationDiagnostic = null;
       notifyListeners();
     } catch (e) {
       _purchasePending = false;
+      _message = null;
       _error =
-          'The App Store purchase was not verified. Your family plan was not changed.';
-      debugPrint('Apple subscription validation failed: $e');
+          'Your purchase could not be verified yet. Try Restore purchases to retry.';
+      _validationDiagnostic = validationDiagnostic(e);
+      debugPrint('Apple subscription validation: $_validationDiagnostic');
       notifyListeners();
     }
+  }
+
+  @visibleForTesting
+  static String validationDiagnostic(Object error) {
+    if (error is! FunctionException) {
+      return error is FormatException
+          ? 'VALIDATION_RESPONSE_INVALID'
+          : 'VALIDATION_CONNECTION_OR_COMPLETION_FAILED';
+    }
+    final details = error.details;
+    final message =
+        (details is Map ? details['error'] ?? details['message'] ?? '' : '')
+            .toString()
+            .toLowerCase();
+    String code = 'VALIDATION_REJECTED';
+    if (error.status == 401) {
+      code = 'AUTH_REJECTED';
+    } else if (message.contains('missing apple app store server api secrets')) {
+      code = 'APPLE_SECRETS_MISSING';
+    } else if (message.contains('apple transaction lookup failed 401')) {
+      code = 'APPLE_API_CREDENTIALS_REJECTED';
+    } else if (message.contains('apple transaction lookup failed 404')) {
+      code = 'APPLE_TRANSACTION_NOT_FOUND_CHECK_ENVIRONMENT';
+    } else if (message.contains('only a family owner')) {
+      code = 'FAMILY_OWNER_REQUIRED';
+    } else if (message.contains('missing apple transaction id')) {
+      code = 'APPLE_TRANSACTION_ID_MISSING';
+    } else if (message.contains('bundle id')) {
+      code = 'APPLE_BUNDLE_MISMATCH';
+    } else if (message.contains('unsupported apple subscription')) {
+      code = 'APPLE_PRODUCT_MISMATCH';
+    }
+    return '$code (HTTP ${error.status})';
   }
 
   void _setLoading(bool value) {

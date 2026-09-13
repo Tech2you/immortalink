@@ -1,18 +1,23 @@
 import 'dart:async';
 
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'env.dart';
+import 'services/onboarding_invite_state.dart';
 import 'services/push_notification_service.dart';
+import 'screens/join_family_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/vaults_screen.dart';
+import 'utils/family_invite_share.dart';
 import 'widgets/keyboard_dismiss_scope.dart';
 
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
 final _passwordRecoveryPending = ValueNotifier<bool>(false);
+final _navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   await runZonedGuarded(_runApp, _handleUncaughtError);
@@ -110,6 +115,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Ever Roots',
+      navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
@@ -131,12 +137,24 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
+  final _appLinks = AppLinks();
   bool _checkedSessionPreference = false;
+  int _inviteLinkRevision = 0;
+  String _lastHandledInviteCode = '';
+  DateTime? _lastHandledInviteAt;
+  StreamSubscription<Uri>? _linkSubscription;
 
   @override
   void initState() {
     super.initState();
     _enforceSessionPreference();
+    _listenForInviteLinks();
+  }
+
+  @override
+  void dispose() {
+    _linkSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _enforceSessionPreference() async {
@@ -151,6 +169,57 @@ class _AuthGateState extends State<AuthGate> {
     if (mounted) {
       setState(() => _checkedSessionPreference = true);
     }
+  }
+
+  void _listenForInviteLinks() {
+    unawaited(_handleInitialInviteLink());
+    _linkSubscription = _appLinks.uriLinkStream.listen(
+      _handleInviteLink,
+      onError: (Object error) {
+        debugPrint('Invite link listener failed: $error');
+      },
+    );
+  }
+
+  Future<void> _handleInitialInviteLink() async {
+    try {
+      final uri = await _appLinks.getInitialLink();
+      if (uri != null) await _handleInviteLink(uri);
+    } catch (error) {
+      debugPrint('Initial invite link failed: $error');
+    }
+  }
+
+  Future<void> _handleInviteLink(Uri uri) async {
+    final code = familyInviteCodeFromUri(uri);
+    if (code.isEmpty) return;
+    final now = DateTime.now();
+    final lastHandledAt = _lastHandledInviteAt;
+    if (code == _lastHandledInviteCode &&
+        lastHandledAt != null &&
+        now.difference(lastHandledAt) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastHandledInviteCode = code;
+    _lastHandledInviteAt = now;
+
+    await savePendingFamilyInviteCode(code);
+    if (!mounted) return;
+
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null || _passwordRecoveryPending.value) {
+      setState(() => _inviteLinkRevision++);
+      return;
+    }
+
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
+
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (_) => JoinFamilyScreen(initialInviteCode: code),
+      ),
+    );
   }
 
   @override
@@ -170,7 +239,7 @@ class _AuthGateState extends State<AuthGate> {
             final session = auth.currentSession;
 
             if (session == null) {
-              return const SignInScreen();
+              return SignInScreen(key: ValueKey(_inviteLinkRevision));
             }
 
             if (passwordRecoveryPending) {

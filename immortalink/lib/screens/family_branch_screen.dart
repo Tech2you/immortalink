@@ -1,7 +1,6 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'family_tree_screen.dart';
@@ -9,6 +8,7 @@ import 'legacy_vault_screen.dart';
 import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
 import '../utils/everroot_upgrade_prompt.dart';
+import '../utils/family_invite_share.dart';
 
 class FamilyBranchScreen extends StatefulWidget {
   final String familyId;
@@ -1155,49 +1155,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
       if (!mounted) return;
 
-      await showDialog<void>(
+      await showFamilyInviteDialog(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Invite created: $title'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Invite code (copy & share):'),
-              const SizedBox(height: 6),
-              SelectableText(
-                code,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Expires: ${expiresAt.toLocal()}',
-                style: TextStyle(
-                  color: Colors.black.withOpacity(0.6),
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: code));
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx);
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invite code copied')),
-                );
-              },
-              child: const Text('Copy'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+        title: 'Invite created: $title',
+        code: code,
+        expiresAt: expiresAt,
       );
 
       await _load();
@@ -1287,49 +1249,11 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
       if (!mounted) return;
 
-      await showDialog<void>(
+      await showFamilyInviteDialog(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Invite created: $title'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Invite code (copy & share):'),
-              const SizedBox(height: 6),
-              SelectableText(
-                code,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Expires: ${expiresAt.toLocal()}',
-                style: TextStyle(
-                  color: Colors.black.withOpacity(0.6),
-                  fontSize: 12,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: code));
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx);
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invite code copied')),
-                );
-              },
-              child: const Text('Copy'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+        title: 'Invite created: $title',
+        code: code,
+        expiresAt: expiresAt,
       );
 
       await _load();
