@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { productValidationError } from "./product_validation.ts";
+import { productMap } from "../_shared/apple_subscription_products.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -96,28 +98,6 @@ async function createAppleServerToken() {
     new TextEncoder().encode(unsigned),
   );
   return `${unsigned}.${base64UrlEncode(signature)}`;
-}
-
-function productMap() {
-  const familyMonthly =
-    Deno.env.get("APPLE_EVER_ROOTS_FAMILY_MONTHLY_PRODUCT_ID") ||
-    "everroots.family.monthly";
-  const familyAnnual =
-    Deno.env.get("APPLE_EVER_ROOTS_FAMILY_ANNUAL_PRODUCT_ID") ||
-    "everroots.family.annual";
-  const legacyMonthly =
-    Deno.env.get("APPLE_EVER_ROOTS_LEGACY_MONTHLY_PRODUCT_ID") ||
-    "everroots.legacy.monthly";
-  const legacyAnnual =
-    Deno.env.get("APPLE_EVER_ROOTS_LEGACY_ANNUAL_PRODUCT_ID") ||
-    "everroots.legacy.annual";
-
-  return new Map<string, string>([
-    [familyMonthly, "everroot_family"],
-    [familyAnnual, "everroot_family"],
-    [legacyMonthly, "everroot_legacy"],
-    [legacyAnnual, "everroot_legacy"],
-  ]);
 }
 
 async function fetchAppleTransaction(transactionId: string) {
@@ -262,6 +242,14 @@ serve(async (req) => {
 
     await assertOwner(admin, familyId, user.id);
     const transaction = await fetchAppleTransaction(transactionId);
+    const validationError = productValidationError({
+      transaction,
+      bundleId,
+      transactionId,
+      requestedProductId: clean(body.product_id),
+      supportedProducts: productMap(),
+    });
+    if (validationError) return json(400, validationError);
     const result = await applyEntitlement({
       admin,
       familyId,

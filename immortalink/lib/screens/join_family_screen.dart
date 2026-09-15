@@ -24,11 +24,18 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   void initState() {
     super.initState();
     final code = normalizeInviteCode(widget.initialInviteCode);
-    if (code.isNotEmpty) _controller.text = code;
+    if (code.isNotEmpty) {
+      _controller.text = code;
+      unawaited(clearPendingFamilyInviteCode(expectedCode: code));
+    }
   }
 
   String _friendlyJoinError(Object error) {
     final text = error.toString().toLowerCase();
+    if (text.contains('expired') || text.contains('used') || text.contains('revoked')) {
+      return 'This invite is no longer available. Ask your family for a new link.';
+    }
+    if (text.contains('already')) return 'You are already part of this family.';
     if (text.contains('invalid') ||
         text.contains('invite') ||
         text.contains('code') ||
@@ -81,10 +88,10 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
     // NOTE: this assumes vaults.about_me_memory_id is nullable (you already dropped NOT NULL).
     final meta = user.userMetadata;
     final fullName = meta == null ? null : meta['full_name'];
-    final fallbackName = (fullName ?? user.email ?? 'My Vault')
+    final fallbackName = (fullName ?? 'My Vault')
         .toString()
         .trim();
-    final name = fallbackName.isEmpty ? 'My Vault' : fallbackName;
+    final name = fallbackName.isEmpty || fallbackName.contains('@') ? 'My Vault' : fallbackName;
 
     await _supabase.from('vaults').insert({
       'owner_id': user.id,
@@ -174,8 +181,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
             'join_family_by_invite',
             params: {'p_invite_code': code},
           );
-        } else if (msg.contains('P0001') ||
-            msg.toLowerCase().contains('no vault')) {
+        } else if (msg.toLowerCase().contains('no vault')) {
           await _ensureVaultExistsForUser(user);
           res = await _supabase.rpc(
             'join_family_by_relationship_invite',
@@ -193,7 +199,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
 
       // ✅ Critical: ensure THIS viewer gets the invite slot_key + correct role
       await _finalizeMemberSlot(familyId: familyId, userId: user.id);
-      await clearPendingFamilyInviteCode();
+      await clearPendingFamilyInviteCode(expectedCode: code);
       unawaited(PushNotificationService.notifyFamilyJoined(familyId));
 
       if (!mounted) return;
@@ -230,7 +236,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
             Text(
               _controller.text.trim().isEmpty
                   ? 'Paste the invite code you received.'
-                  : 'Your invite code is ready. Tap Join to enter the family.',
+                  : 'Tap Join to check this invite and join the family.',
             ),
             const SizedBox(height: 6),
             Text(

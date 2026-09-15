@@ -1,17 +1,17 @@
 import 'dart:async';
+import '../utils/vault_media_upload.dart';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
 import '../services/push_notification_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
-import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
+import '../widgets/vault_media.dart';
 
 class CreateMemoryScreen extends StatefulWidget {
   final String vaultId;
@@ -106,10 +106,12 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
 
   Future<void> _pickPhotos() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.image,
+      final result = await pickVaultMedia(
+        context,
         allowMultiple: true,
-        withData: true,
+        remainingBytes:
+            MediaUploadPolicy.pendingMediaMaxBytes -
+            _photos.fold<int>(0, (sum, p) => sum + p.bytes.length),
       );
       if (result == null) return;
 
@@ -120,9 +122,8 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         if (bytes == null) continue;
 
         try {
-          final image = await ImageUploadOptimizer.optimize(
+          final image = await VaultMediaUpload.prepare(
             bytes,
-            kind: MediaUploadKind.photo,
             fileName: file.name,
             contentType: _imageMime(_extension(file.name)),
           );
@@ -146,13 +147,13 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         _photos.addAll(accepted);
       });
       if (selected.length > available) {
-        _toast('You can add up to 10 photos to one memory.');
+        _toast('You can add up to 10 photos or videos to one memory.');
       }
       if (rejectedMessage != null) {
         _toast(rejectedMessage);
       }
     } catch (e) {
-      _toast('Could not add photos: $e');
+      _toast('Could not add media: $e');
     }
   }
 
@@ -378,7 +379,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
     for (var index = 0; index < _photos.length; index++) {
       final photo = _photos[index];
       MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.photo,
+        MediaUploadPolicy.visualKind(photo.name),
         photo.bytes,
         fileName: photo.name,
         contentType: photo.contentType,
@@ -479,7 +480,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
           ? title
           : body.isNotEmpty
           ? ''
-          : (_voices.isNotEmpty ? 'Voice memory' : 'Photo memory');
+          : (_voices.isNotEmpty ? 'Voice memory' : 'Media memory');
       final stamp = DateTime.now().millisecondsSinceEpoch;
       final inserted = await _client
           .from('memories')
@@ -590,12 +591,14 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                   width: 150,
                   height: 150,
                   color: Colors.black.withValues(alpha: 0.04),
-                  child: Image.memory(
-                    photo.bytes,
-                    width: 150,
-                    height: 150,
-                    fit: BoxFit.contain,
-                  ),
+                  child: MediaUploadPolicy.isVideo(photo.name)
+                      ? PendingVideoPreview(bytes: photo.bytes, name: photo.name)
+                      : Image.memory(
+                          photo.bytes,
+                          width: 150,
+                          height: 150,
+                          fit: BoxFit.contain,
+                        ),
                 ),
                 Positioned(
                   top: 6,
@@ -725,9 +728,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                     OutlinedButton.icon(
                       onPressed: _saving ? null : _pickPhotos,
                       icon: const Icon(Icons.photo_library_outlined),
-                      label: Text(
-                        _photos.isEmpty ? 'Add photos' : 'More photos',
-                      ),
+                      label: Text(_photos.isEmpty ? 'Add media' : 'More media'),
                     ),
                     OutlinedButton.icon(
                       onPressed: _saving ? null : _recordVoice,

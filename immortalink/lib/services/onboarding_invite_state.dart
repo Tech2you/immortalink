@@ -22,7 +22,11 @@ Future<void> savePendingFamilyInviteCode(String value) async {
   await prefs.setString(pendingFamilyInviteCodePreferenceKey, code);
 }
 
-Future<void> clearPendingFamilyInviteCode() async {
+Future<void> clearPendingFamilyInviteCode({String? expectedCode}) async {
   final prefs = await SharedPreferences.getInstance();
+  if (expectedCode != null && normalizeInviteCode(expectedCode) !=
+      normalizeInviteCode(prefs.getString(pendingFamilyInviteCodePreferenceKey) ?? '')) {
+    return;
+  }
   await prefs.remove(pendingFamilyInviteCodePreferenceKey);
 }

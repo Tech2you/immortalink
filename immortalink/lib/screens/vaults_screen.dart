@@ -1,7 +1,9 @@
 import 'dart:async';
+import '../widgets/vault_media.dart';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import '../widgets/profile_photo_cropper.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -61,12 +63,22 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Future<void> _editFamilyPhoto(String familyId) async {
     if (_familyPhotoBusy.contains(familyId)) return;
+    final membership = _familyMemberships.firstWhere(
+      (row) => row['family_id'] == familyId,
+      orElse: () => <String, dynamic>{},
+    );
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (membership['role'] == 'owner')
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit family name'),
+                onTap: () => Navigator.pop(context, 'rename'),
+              ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Change family photo'),
@@ -83,6 +95,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
       ),
     );
     if (action == null || !mounted) return;
+    if (action == 'rename') {
+      await _renameFamily(
+        familyId,
+        (membership['family_name'] ?? '').toString(),
+      );
+      return;
+    }
     setState(() => _familyPhotoBusy.add(familyId));
     try {
       final bucket = _supabase.storage.from('family_avatars');
@@ -97,10 +116,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
         if (picked == null || picked.files.isEmpty) return;
         final file = picked.files.first;
         if (file.bytes == null) throw Exception('No image data');
+        if (!mounted) return;
+        final cropped = await cropProfilePhoto(context, file.bytes!);
+        if (cropped == null) return;
         final image = await ImageUploadOptimizer.optimize(
-          file.bytes!,
+          cropped,
           kind: MediaUploadKind.avatarPhoto,
-          fileName: file.name,
+          fileName: 'profile.png',
         );
         if (image.bytes.length > 5242880) {
           _toast('Choose a family photo smaller than 5 MB.');
@@ -128,6 +150,68 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   final AudioPlayer _player = AudioPlayer();
+
+  Future<void> _renameFamily(String familyId, String currentName) async {
+    final controller = TextEditingController(text: currentName);
+    final formKey = GlobalKey<FormState>();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit family name'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 100,
+            decoration: const InputDecoration(labelText: 'Family name'),
+            validator: (value) =>
+                (value ?? '').trim().isEmpty ? 'Enter a family name.' : null,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                Navigator.pop(context, controller.text.trim());
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    // The dialog's exit animation can still reference its controller.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    controller.dispose();
+    if (name == null || name == currentName || !mounted) return;
+    setState(() => _familyPhotoBusy.add(familyId));
+    try {
+      await _supabase.rpc(
+        'rename_family',
+        params: {'p_family_id': familyId, 'p_name': name},
+      );
+      if (!mounted) return;
+      setState(() {
+        for (final membership in _familyMemberships) {
+          if (membership['family_id'] == familyId) {
+            membership['family_name'] = name;
+          }
+        }
+      });
+      _toast('Family name updated.');
+    } catch (_) {
+      _toast(
+        'Could not rename the family. Only a family owner can change its name.',
+      );
+    } finally {
+      if (mounted) setState(() => _familyPhotoBusy.remove(familyId));
+    }
+  }
 
   bool _loading = true;
   String? _error;
@@ -535,7 +619,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       return 'shared a memory';
     }
     if (item.photoCount > 0) {
-      return item.body.trim().isNotEmpty ? 'added a memory' : 'shared photos';
+      return item.body.trim().isNotEmpty ? 'added a memory' : 'shared media';
     }
     if (item.voiceCount > 0) {
       return item.body.trim().isNotEmpty
@@ -570,11 +654,30 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
       final data = await _supabase
           .from('vaults')
-          .select('id, name, created_at, family_id, avatar_path')
+          .select('id, name, display_name, created_at, family_id, avatar_path')
           .eq('owner_id', user.id)
           .order('created_at', ascending: false)
           .maybeSingle()
           .timeout(const Duration(seconds: 12));
+
+      // Repair the old email fallback without replacing a chosen display name.
+      if (data != null) {
+        final email = user.email?.trim().toLowerCase();
+        final name = (data['name'] ?? '').toString().trim();
+        final display = (data['display_name'] ?? '').toString().trim();
+        if (email != null && email.isNotEmpty &&
+            (name.toLowerCase() == email || display.toLowerCase() == email)) {
+          final repaired = name.isNotEmpty && name.toLowerCase() != email
+              ? name
+              : display.isNotEmpty && display.toLowerCase() != email
+                  ? display : 'My Vault';
+          await _supabase.from('vaults').update({
+            'name': repaired, 'display_name': repaired,
+          }).eq('id', data['id']).eq('owner_id', user.id);
+          data['name'] = repaired;
+          data['display_name'] = repaired;
+        }
+      }
 
       String? signedUrl;
       final path = (data?['avatar_path'] as String?)?.trim();
@@ -1107,7 +1210,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
     try {
       await _supabase
           .from('vaults')
-          .update({'name': newName})
+          .update({'name': newName, 'display_name': newName})
           .eq('id', vaultId)
           .timeout(const Duration(seconds: 12));
 
@@ -1639,7 +1742,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                         ),
                         const SizedBox(height: 14),
                         Text(
-                          'Photos',
+                          'Media',
                           style: TextStyle(
                             fontWeight: FontWeight.w800,
                             color: Colors.black.withOpacity(0.85),
@@ -1648,7 +1751,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                         const SizedBox(height: 8),
                         if (photos.isEmpty)
                           Text(
-                            'No photos on this memory.',
+                            'No media on this memory.',
                             style: TextStyle(
                               fontSize: 12,
                               color: Colors.black.withOpacity(0.55),
@@ -1784,7 +1887,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                       Row(
                         children: [
                           const Text(
-                            'Memory photos',
+                            'Memory media',
                             style: TextStyle(fontWeight: FontWeight.w800),
                           ),
                           const Spacer(),
@@ -1809,7 +1912,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                 return InteractiveViewer(
                                   minScale: 1,
                                   maxScale: 4,
-                                  child: Image.network(
+                                  child: VaultMedia.network(
                                     p.url,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
@@ -1862,7 +1965,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       width: width,
       height: height,
       color: Colors.black.withValues(alpha: 0.04),
-      child: Image.network(
+      child: VaultMedia.network(
         url,
         width: width,
         height: height,
@@ -2085,7 +2188,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                               if (item.photoCount > 0)
                                 _metaBadge(
                                   Icons.photo_library_outlined,
-                                  '${item.photoCount} photo${item.photoCount == 1 ? '' : 's'}',
+                                  '${item.photoCount} media file${item.photoCount == 1 ? '' : 's'}',
                                 ),
                               if (item.voiceCount > 0)
                                 _metaBadge(
@@ -2112,7 +2215,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (item.photoCount > 0 &&
         item.voiceCount == 0 &&
         item.body.trim().isEmpty) {
-      label = 'Photos';
+      label = 'Media';
     } else if (item.voiceCount > 0 &&
         item.photoCount == 0 &&
         item.body.trim().isEmpty) {
@@ -3040,6 +3143,12 @@ class _PlanTierTile extends StatelessWidget {
                 onPressed: null,
                 child: Text(tier.setupStatus),
               ),
+            )
+          else if (isCurrent)
+            OutlinedButton.icon(
+              onPressed: service.openManageSubscriptions,
+              icon: const Icon(Icons.manage_accounts_outlined),
+              label: const Text('Change or cancel plan'),
             )
           else
             Wrap(

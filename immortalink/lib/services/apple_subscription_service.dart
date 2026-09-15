@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -16,6 +17,9 @@ class AppleSubscriptionService extends ChangeNotifier {
   final InAppPurchase _iap;
 
   StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
+  Future<void> _updateQueue = Future<void>.value();
+  Timer? _validationErrorTimer;
+  bool _disposed = false;
   final Map<String, ProductDetails> _productsById = {};
   final Set<String> _requestedProductIds = {};
   final Set<String> _notFoundProductIds = {};
@@ -100,7 +104,11 @@ class AppleSubscriptionService extends ChangeNotifier {
       }
 
       _purchaseSubscription ??= _iap.purchaseStream.listen(
-        _handlePurchaseUpdates,
+        (purchases) {
+          _updateQueue = _updateQueue.then((_) async {
+            if (!_disposed) await _handlePurchaseUpdates(purchases);
+          });
+        },
         onError: (Object error) {
           _purchasePending = false;
           _error = 'Purchase update failed: $error';
@@ -189,8 +197,23 @@ class AppleSubscriptionService extends ChangeNotifier {
   }
 
   Future<void> openManageSubscriptions() async {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        await const MethodChannel(
+          'com.everroots.app/subscriptions',
+        ).invokeMethod<void>('manageSubscriptions');
+        return;
+      } on PlatformException {
+        // Older builds or a temporarily unavailable sheet can use Apple's URL.
+      } on MissingPluginException {
+        // The native bridge is unavailable on older installed builds.
+      }
+    }
     final url = Uri.parse('https://apps.apple.com/account/subscriptions');
-    final opened = await launchUrl(url, mode: LaunchMode.externalApplication);
+    var opened = false;
+    try {
+      opened = await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (_) {}
     if (!opened) {
       _error = 'Could not open Apple subscription settings.';
       notifyListeners();
@@ -200,6 +223,14 @@ class AppleSubscriptionService extends ChangeNotifier {
   Future<void> _handlePurchaseUpdates(List<PurchaseDetails> purchases) async {
     await refreshStorefront();
     for (final purchase in purchases) {
+      if (_disposed) return;
+      // StoreKit can replay transactions from products outside this catalog.
+      // Never validate or finish those as an Ever Roots family subscription.
+      if (!AppleSubscriptionConfig.activeProductIds.contains(
+        purchase.productID,
+      )) {
+        continue;
+      }
       switch (purchase.status) {
         case PurchaseStatus.pending:
           _purchasePending = true;
@@ -212,12 +243,14 @@ class AppleSubscriptionService extends ChangeNotifier {
           await _validateAndComplete(purchase);
           break;
         case PurchaseStatus.error:
+          _validationErrorTimer?.cancel();
           _restoreAttempt++;
           _purchasePending = false;
           _error = purchase.error?.message ?? 'Purchase failed.';
           notifyListeners();
           break;
         case PurchaseStatus.canceled:
+          _validationErrorTimer?.cancel();
           _restoreAttempt++;
           _purchasePending = false;
           _message = 'Purchase cancelled.';
@@ -237,8 +270,11 @@ class AppleSubscriptionService extends ChangeNotifier {
     }
 
     try {
+      _validationErrorTimer?.cancel();
       _purchasePending = true;
       _message = 'Verifying your purchase...';
+      _error = null;
+      _validationDiagnostic = null;
       notifyListeners();
       final response = await _supabase.functions.invoke(
         'validate_apple_subscription',
@@ -262,6 +298,7 @@ class AppleSubscriptionService extends ChangeNotifier {
         );
       }
       final data = response.data;
+      if (_disposed) return;
       if (data is! Map || data['ok'] != true || data['entitlement'] is! Map) {
         throw const FormatException('Invalid validation response');
       }
@@ -287,13 +324,22 @@ class AppleSubscriptionService extends ChangeNotifier {
       _validationDiagnostic = null;
       notifyListeners();
     } catch (e) {
-      _purchasePending = false;
-      _message = null;
-      _error =
-          'Your purchase could not be verified yet. Try Restore purchases to retry.';
-      _validationDiagnostic = validationDiagnostic(e);
-      debugPrint('Apple subscription validation: $_validationDiagnostic');
-      notifyListeners();
+      if (_disposed) return;
+      final diagnostic = validationDiagnostic(e);
+      debugPrint('Apple subscription validation: $diagnostic');
+      // A restore may immediately deliver another transaction. Keep the
+      // checking state briefly, but surface unresolved failures without
+      // completing the rejected transaction or granting access locally.
+      _validationErrorTimer?.cancel();
+      _validationErrorTimer = Timer(const Duration(seconds: 2), () {
+        if (_disposed) return;
+        _purchasePending = false;
+        _message = null;
+        _error =
+            'We could not confirm this purchase. Tap Restore purchases to retry.';
+        _validationDiagnostic = diagnostic;
+        notifyListeners();
+      });
     }
   }
 
@@ -305,6 +351,18 @@ class AppleSubscriptionService extends ChangeNotifier {
           : 'VALIDATION_CONNECTION_OR_COMPLETION_FAILED';
     }
     final details = error.details;
+    if (details is Map && details['code'] == 'APPLE_PRODUCT_UNSUPPORTED') {
+      String safeProduct(Object? value) {
+        final text = value?.toString() ?? '';
+        return RegExp(r'^[a-zA-Z0-9_.-]{1,160}$').hasMatch(text)
+            ? text
+            : 'unknown';
+      }
+
+      return 'APPLE_PRODUCT_MISMATCH (HTTP ${error.status}); '
+          'requested=${safeProduct(details['requested_product_id'])}; '
+          'Apple=${safeProduct(details['apple_product_id'])}';
+    }
     final message =
         (details is Map ? details['error'] ?? details['message'] ?? '' : '')
             .toString()
@@ -336,7 +394,14 @@ class AppleSubscriptionService extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
+    _validationErrorTimer?.cancel();
     _purchaseSubscription?.cancel();
     super.dispose();
   }

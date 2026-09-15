@@ -7,6 +7,7 @@ import '../widgets/vault_section_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../widgets/logo_watermark.dart';
+import '../widgets/vault_media.dart';
 import 'family_branch_screen.dart';
 import 'vault_companion_screen.dart';
 
@@ -601,7 +602,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           Row(
             children: [
               const Text(
-                'About me photos',
+                'About me media',
                 style: TextStyle(fontWeight: FontWeight.w800),
               ),
               const Spacer(),
@@ -662,7 +663,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                             return Stack(
                               children: [
                                 Positioned.fill(
-                                  child: Image.network(
+                                  child: VaultMedia.network(
                                     url,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
@@ -727,7 +728,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                       Row(
                         children: [
                           const Text(
-                            'About me photos',
+                            'About me media',
                             style: TextStyle(fontWeight: FontWeight.w800),
                           ),
                           const Spacer(),
@@ -752,7 +753,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                                 return InteractiveViewer(
                                   minScale: 1,
                                   maxScale: 4,
-                                  child: Image.network(
+                                  child: VaultMedia.network(
                                     url,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
@@ -926,7 +927,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                                 return InteractiveViewer(
                                   minScale: 1,
                                   maxScale: 4,
-                                  child: Image.network(
+                                  child: VaultMedia.network(
                                     url,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
@@ -1067,7 +1068,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                             return Stack(
                               children: [
                                 Positioned.fill(
-                                  child: Image.network(
+                                  child: VaultMedia.network(
                                     url,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
@@ -1548,7 +1549,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                           ),
                         const SizedBox(height: 12),
                         Text(
-                          'Photos',
+                          'Media',
                           style: TextStyle(
                             fontWeight: FontWeight.w800,
                             color: Colors.black.withOpacity(0.85),
@@ -1606,7 +1607,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                       Row(
                         children: [
                           const Text(
-                            'Memory photos',
+                            'Memory media',
                             style: TextStyle(fontWeight: FontWeight.w800),
                           ),
                           const Spacer(),
@@ -1631,7 +1632,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                                 return InteractiveViewer(
                                   minScale: 1,
                                   maxScale: 4,
-                                  child: Image.network(
+                                  child: VaultMedia.network(
                                     p.url,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
@@ -1694,7 +1695,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
 
     if (photos.isEmpty) {
       return Text(
-        'No photos on this memory.',
+        'No media on this memory.',
         style: TextStyle(fontSize: 12, color: Colors.black.withOpacity(0.55)),
       );
     }
@@ -1735,7 +1736,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       width: width,
       height: height,
       color: Colors.black.withValues(alpha: 0.04),
-      child: Image.network(
+      child: VaultMedia.network(
         url,
         width: width,
         height: height,
@@ -1946,7 +1947,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                     onTap: _openHighlightsGallery,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(18),
-                      child: Image.network(
+                      child: VaultMedia.network(
                         photo['url'] ?? '',
                         width: 118,
                         height: 152,
@@ -2157,7 +2158,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                       onTap: _openAboutGallery,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(16),
-                        child: Image.network(
+                        child: VaultMedia.network(
                           _aboutPhotos[index]['url'] ?? '',
                           width: 180,
                           height: 180,
@@ -2246,7 +2247,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           ),
           const SizedBox(height: 12),
           if (uniquePhotos.isEmpty)
-            const Text('No photos have been shared yet.')
+            const Text('No media has been shared yet.')
           else
             GridView.builder(
               shrinkWrap: true,
@@ -2261,7 +2262,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                 borderRadius: BorderRadius.circular(14),
                 child: Container(
                   color: Colors.black.withValues(alpha: 0.04),
-                  child: Image.network(
+                  child: VaultMedia.network(
                     uniquePhotos[index]['url'] ?? '',
                     fit: BoxFit.contain,
                   ),

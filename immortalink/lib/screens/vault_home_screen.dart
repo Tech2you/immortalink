@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../widgets/profile_photo_cropper.dart';
 import '../widgets/vault_section_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -12,6 +13,8 @@ import '../services/indexing_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
+import '../utils/vault_media_upload.dart';
+import '../widgets/vault_media.dart';
 import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
 import 'create_memory_screen.dart';
@@ -610,11 +613,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
+      if (!mounted) return;
+      final cropped = await cropProfilePhoto(context, bytes);
+      if (cropped == null) return;
       final image = await ImageUploadOptimizer.optimize(
-        bytes,
+        cropped,
         kind: MediaUploadKind.avatarPhoto,
-        fileName: file.name,
-        contentType: _contentTypeFromExt(_extFromName(file.name)),
+        fileName: 'profile.png',
+        contentType: 'image/png',
       );
       final path = '$userId/${widget.vaultId}/avatar.${image.extension}';
 
@@ -872,19 +878,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-      );
+      final picked = await pickVaultMedia(context);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
       final bytes = file.bytes;
       if (bytes == null) throw Exception('No file bytes received.');
 
-      final image = await ImageUploadOptimizer.optimize(
+      final image = await VaultMediaUpload.prepare(
         bytes,
-        kind: MediaUploadKind.photo,
         fileName: file.name,
         contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
@@ -910,7 +912,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _loadFeaturedPhotos();
       _toast('Added to highlights.');
     } catch (e) {
-      await _handleUploadError(e, 'Photo upload failed');
+      await _handleUploadError(e, 'Media upload failed');
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
     }
@@ -920,8 +922,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete photo?'),
-        content: const Text('This will permanently delete this photo.'),
+        title: const Text('Delete media?'),
+        content: const Text('This will permanently delete this media.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -944,7 +946,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .eq('vault_id', widget.vaultId)
           .eq('path', fullPath);
       await _loadFeaturedPhotos();
-      _toast('Photo deleted.');
+      _toast('Media deleted.');
     } catch (e) {
       _toast('Delete failed: $e');
     }
@@ -977,7 +979,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       Row(
                         children: [
                           const Text(
-                            'All photos',
+                            'All media',
                             style: TextStyle(fontWeight: FontWeight.w800),
                           ),
                           const Spacer(),
@@ -1006,7 +1008,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                       child: InteractiveViewer(
                                         minScale: 1,
                                         maxScale: 4,
-                                        child: Image.network(
+                                        child: VaultMedia.network(
                                           url,
                                           fit: BoxFit.contain,
                                           alignment: Alignment.center,
@@ -1135,7 +1137,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             child: OutlinedButton.icon(
               onPressed: _uploadingPhoto ? null : _uploadFeaturedPhoto,
               icon: const Icon(Icons.photo_library_outlined),
-              label: Text(_uploadingPhoto ? 'Uploading…' : 'Add photo'),
+              label: Text(_uploadingPhoto ? 'Uploading…' : 'Add media'),
             ),
           ),
           const SizedBox(height: 12),
@@ -1183,7 +1185,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             return Stack(
                               children: [
                                 Positioned.fill(
-                                  child: Image.network(
+                                  child: VaultMedia.network(
                                     url,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
@@ -1385,19 +1387,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-      );
+      final picked = await pickVaultMedia(context);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
       final bytes = file.bytes;
       if (bytes == null) throw Exception('No file bytes received.');
 
-      final image = await ImageUploadOptimizer.optimize(
+      final image = await VaultMediaUpload.prepare(
         bytes,
-        kind: MediaUploadKind.photo,
         fileName: file.name,
         contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
@@ -1433,8 +1431,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete photo?'),
-        content: const Text('This will permanently delete this photo.'),
+        title: const Text('Delete media?'),
+        content: const Text('This will permanently delete this media.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -1457,7 +1455,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .eq('vault_id', widget.vaultId)
           .eq('path', path);
       await _loadAboutPhotos();
-      _toast('Photo deleted.');
+      _toast('Media deleted.');
     } catch (e) {
       _toast('Delete failed: $e');
     }
@@ -1490,7 +1488,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       Row(
                         children: [
                           const Text(
-                            'About me photos',
+                            'About me media',
                             style: TextStyle(fontWeight: FontWeight.w800),
                           ),
                           const Spacer(),
@@ -1519,7 +1517,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                       child: InteractiveViewer(
                                         minScale: 1,
                                         maxScale: 4,
-                                        child: Image.network(
+                                        child: VaultMedia.network(
                                           url,
                                           fit: BoxFit.contain,
                                           alignment: Alignment.center,
@@ -1661,7 +1659,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           Row(
             children: [
               const Text(
-                'About me photos',
+                'About me media',
                 style: TextStyle(fontWeight: FontWeight.w800),
               ),
               const Spacer(),
@@ -1671,7 +1669,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   onPressed: _uploadingAboutPhoto ? null : _uploadAboutPhoto,
                   icon: const Icon(Icons.add_photo_alternate_outlined),
                   label: Text(
-                    _uploadingAboutPhoto ? 'Uploading…' : 'Add photo',
+                    _uploadingAboutPhoto ? 'Uploading…' : 'Add media',
                   ),
                 ),
               ),
@@ -1726,7 +1724,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             return Stack(
                               children: [
                                 Positioned.fill(
-                                  child: Image.network(
+                                  child: VaultMedia.network(
                                     url,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
@@ -2210,19 +2208,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-      );
+      final picked = await pickVaultMedia(context);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
       final bytes = file.bytes;
       if (bytes == null) throw Exception('No file bytes received');
 
-      final image = await ImageUploadOptimizer.optimize(
+      final image = await VaultMediaUpload.prepare(
         bytes,
-        kind: MediaUploadKind.photo,
         fileName: file.name,
         contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
@@ -2248,9 +2242,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       });
 
       await _loadMemoryPhotosForVault();
-      _toast('Photo added to memory.');
+      _toast('Media added to memory.');
     } catch (e) {
-      await _handleUploadError(e, 'Add photo failed');
+      await _handleUploadError(e, 'Add media failed');
     }
   }
 
@@ -2258,8 +2252,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete photo?'),
-        content: const Text('This will permanently delete this photo.'),
+        title: const Text('Delete media?'),
+        content: const Text('This will permanently delete this media.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -2278,7 +2272,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _client.storage.from(_memoryPhotosBucket).remove([p.path]);
       await _client.from('memory_photos').delete().eq('id', p.id);
       await _loadMemoryPhotosForVault();
-      _toast('Photo deleted.');
+      _toast('Media deleted.');
     } catch (e) {
       _toast('Delete failed: $e');
     }
@@ -2312,7 +2306,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       Row(
                         children: [
                           const Text(
-                            'Memory photos',
+                            'Memory media',
                             style: TextStyle(fontWeight: FontWeight.w800),
                           ),
                           const Spacer(),
@@ -2340,7 +2334,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                       child: InteractiveViewer(
                                         minScale: 1,
                                         maxScale: 4,
-                                        child: Image.network(
+                                        child: VaultMedia.network(
                                           p.url,
                                           fit: BoxFit.contain,
                                           alignment: Alignment.center,
@@ -2441,7 +2435,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           child: OutlinedButton.icon(
             onPressed: () => _uploadMemoryPhoto(memoryId),
             icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-            label: const Text('Add photo'),
+            label: const Text('Add media'),
           ),
         ),
       );
@@ -2523,7 +2517,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       width: width,
       height: height,
       color: Colors.black.withValues(alpha: 0.04),
-      child: Image.network(
+      child: VaultMedia.network(
         url,
         width: width,
         height: height,
@@ -3177,7 +3171,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               _composerAction(Icons.edit_note, 'Write a memory', 'text'),
               _composerAction(
                 Icons.photo_camera_outlined,
-                'Add photos',
+                'Add media',
                 'photo',
               ),
               _composerAction(Icons.mic_none, 'Record voice', 'voice'),
@@ -3264,7 +3258,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     onTap: _openHighlightsGallery,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(18),
-                      child: Image.network(
+                      child: VaultMedia.network(
                         photo['url'] ?? '',
                         width: 104,
                         height: 132,
@@ -3285,7 +3279,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       margin: const EdgeInsets.only(bottom: 14),
       child: VaultSectionPicker(
         selected: _selectedVaultSection,
-        onChanged: (selection) => setState(() => _selectedVaultSection = selection),
+        onChanged: (selection) =>
+            setState(() => _selectedVaultSection = selection),
       ),
     );
   }
@@ -3490,7 +3485,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 TextButton.icon(
                   onPressed: () => _uploadMemoryPhoto(memoryId),
                   icon: const Icon(Icons.photo_outlined),
-                  label: const Text('Photo'),
+                  label: const Text('Media'),
                 ),
                 TextButton.icon(
                   onPressed: _recorder.isSupported
@@ -3516,7 +3511,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Widget _mediaSection() {
-    final media = [..._featuredPhotos, ..._aboutPhotos];
+    final media = [
+      ..._featuredPhotos,
+      ..._aboutPhotos,
+      for (final group in _memoryPhotosById.values)
+        for (final photo in group) {'path': photo.path, 'url': photo.url},
+    ];
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -3531,8 +3531,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 12),
-          if (media.isEmpty)
-            const Text('Photos and recordings you add will appear here.')
+          if (_loadingMemoryPhotos) const LinearProgressIndicator(),
+          if (_memoryPhotoError != null)
+            TextButton.icon(
+              onPressed: _loadMemoryPhotosForVault,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry loading memory media'),
+            ),
+          if (media.isEmpty && !_loadingMemoryPhotos)
+            const Text('Photos and videos you add will appear here.')
           else
             GridView.builder(
               shrinkWrap: true,
@@ -3545,7 +3552,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               itemCount: media.length,
               itemBuilder: (_, index) => ClipRRect(
                 borderRadius: BorderRadius.circular(14),
-                child: Image.network(
+                child: VaultMedia.network(
                   media[index]['url'] ?? '',
                   fit: BoxFit.cover,
                 ),
@@ -3592,14 +3599,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     try {
       await _client
           .from('vaults')
-          .update({'name': newName})
+          .update({'name': newName, 'display_name': newName})
           .eq('id', widget.vaultId);
 
-      setState(() => _vaultName = newName);
-
-      if ((_displayName == null || _displayName!.trim().isEmpty) && mounted) {
-        setState(() => _displayName = newName);
-      }
+      if (!mounted) return;
+      setState(() {
+        _vaultName = newName;
+        _displayName = newName;
+      });
 
       _toast('Vault renamed.');
     } on PostgrestException catch (e) {
@@ -3802,7 +3809,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                       children: [
                         const Expanded(
                           child: Text(
-                            'Photos',
+                            'Media',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
@@ -3821,7 +3828,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     ),
                     if (photos.isEmpty)
                       const Text(
-                        'No photos on this memory.',
+                        'No media on this memory.',
                         style: TextStyle(color: Colors.black54),
                       )
                     else
@@ -3847,7 +3854,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                   top: 5,
                                   right: 5,
                                   child: IconButton.filledTonal(
-                                    tooltip: 'Remove photo',
+                                    tooltip: 'Remove media',
                                     visualDensity: VisualDensity.compact,
                                     onPressed: () async {
                                       await _deleteMemoryPhoto(photo);

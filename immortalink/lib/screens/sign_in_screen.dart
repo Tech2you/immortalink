@@ -8,7 +8,7 @@ import '../services/onboarding_invite_state.dart';
 
 enum _AuthMode { signIn, signUp }
 
-const _passwordResetRedirectUrl = 'com.everroots.app://login-callback/';
+const _authRedirectUrl = 'com.everroots.app://login-callback/';
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
 const _hasSeenCreateAccountPromptKey = 'auth_has_seen_create_account_prompt';
 const _authEmailCooldown = Duration(seconds: 60);
@@ -137,7 +137,11 @@ class _SignInScreenState extends State<SignInScreen> {
         }
         // Your app should route away via auth listener / main.dart.
       } else {
-        await client.auth.signUp(email: email, password: password);
+        await client.auth.signUp(
+          email: email,
+          password: password,
+          emailRedirectTo: kIsWeb ? null : _authRedirectUrl,
+        );
 
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -195,7 +199,7 @@ class _SignInScreenState extends State<SignInScreen> {
       // Keep web on the configured Site URL; native builds return through the app.
       await client.auth.resetPasswordForEmail(
         email,
-        redirectTo: kIsWeb ? null : _passwordResetRedirectUrl,
+        redirectTo: kIsWeb ? null : _authRedirectUrl,
       );
 
       if (!mounted) return;
@@ -238,6 +242,9 @@ class _SignInScreenState extends State<SignInScreen> {
 
   String _authErrorMessage(AuthException error) {
     final message = error.message.toLowerCase();
+    if (message.contains('error sending confirmation email')) {
+      return 'We could not send your confirmation email. Please try again later. If this continues, contact support.';
+    }
     if (message.contains('email address not authorized')) {
       return 'Email delivery is not ready for that address yet. Production auth email setup is required before broader testing.';
     }

@@ -1,12 +1,24 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { productMap } from "../_shared/apple_subscription_products.ts";
+import {
+  createNotificationVerifier,
+  notificationErrorStatus,
+  verifyNotification,
+} from "./notification_verifier.ts";
 
 const bundleId = Deno.env.get("APPLE_BUNDLE_ID") || "com.everroots.app";
 const configuredEnvironment =
-  (Deno.env.get("APPLE_IAP_ENVIRONMENT") || "sandbox").toLowerCase() ===
-    "production"
-    ? "production"
-    : "sandbox";
+  (Deno.env.get("APPLE_IAP_ENVIRONMENT") || "sandbox").trim().toLowerCase();
+let verifier: ReturnType<typeof createNotificationVerifier> | undefined;
+
+function getVerifier() {
+  return verifier ??= createNotificationVerifier(
+    configuredEnvironment,
+    bundleId,
+    Deno.env.get("APPLE_APP_ID"),
+  );
+}
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -20,30 +32,15 @@ function clean(value: unknown) {
 }
 
 function base64UrlEncode(input: string | ArrayBuffer) {
-  const bytes =
-    typeof input === "string"
-      ? new TextEncoder().encode(input)
-      : new Uint8Array(input);
+  const bytes = typeof input === "string"
+    ? new TextEncoder().encode(input)
+    : new Uint8Array(input);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlDecodeJson(segment: string) {
-  const normalized = segment.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(
-    normalized.length + ((4 - (normalized.length % 4)) % 4),
-    "=",
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
+    /=+$/g,
+    "",
   );
-  return JSON.parse(new TextDecoder().decode(
-    Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)),
-  ));
-}
-
-function decodeJwsPayload(jws: string) {
-  const parts = jws.split(".");
-  if (parts.length !== 3) throw new Error("Invalid Apple JWS payload");
-  return base64UrlDecodeJson(parts[1]);
 }
 
 function decodePrivateKey(privateKey: string) {
@@ -64,17 +61,21 @@ async function createAppleServerToken() {
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const unsigned = `${base64UrlEncode(JSON.stringify({
-    alg: "ES256",
-    kid: keyId,
-    typ: "JWT",
-  }))}.${base64UrlEncode(JSON.stringify({
-    iss: issuerId,
-    iat: now,
-    exp: now + 900,
-    aud: "appstoreconnect-v1",
-    bid: bundleId,
-  }))}`;
+  const unsigned = `${
+    base64UrlEncode(JSON.stringify({
+      alg: "ES256",
+      kid: keyId,
+      typ: "JWT",
+    }))
+  }.${
+    base64UrlEncode(JSON.stringify({
+      iss: issuerId,
+      iat: now,
+      exp: now + 900,
+      aud: "appstoreconnect-v1",
+      bid: bundleId,
+    }))
+  }`;
 
   const key = await crypto.subtle.importKey(
     "pkcs8",
@@ -91,31 +92,6 @@ async function createAppleServerToken() {
   return `${unsigned}.${base64UrlEncode(signature)}`;
 }
 
-function productMap() {
-  return new Map<string, string>([
-    [
-      Deno.env.get("APPLE_EVER_ROOTS_FAMILY_MONTHLY_PRODUCT_ID") ||
-      "everroots.family.monthly",
-      "everroot_family",
-    ],
-    [
-      Deno.env.get("APPLE_EVER_ROOTS_FAMILY_ANNUAL_PRODUCT_ID") ||
-      "everroots.family.annual",
-      "everroot_family",
-    ],
-    [
-      Deno.env.get("APPLE_EVER_ROOTS_LEGACY_MONTHLY_PRODUCT_ID") ||
-      "everroots.legacy.monthly",
-      "everroot_legacy",
-    ],
-    [
-      Deno.env.get("APPLE_EVER_ROOTS_LEGACY_ANNUAL_PRODUCT_ID") ||
-      "everroots.legacy.annual",
-      "everroot_legacy",
-    ],
-  ]);
-}
-
 async function fetchAppleTransaction(transactionId: string) {
   const token = await createAppleServerToken();
   const host = configuredEnvironment === "production"
@@ -129,37 +105,37 @@ async function fetchAppleTransaction(transactionId: string) {
     throw new Error(`Apple transaction lookup failed ${response.status}`);
   }
   const payload = await response.json();
-  return decodeJwsPayload(String(payload.signedTransactionInfo || ""));
+  return await getVerifier().verifyAndDecodeTransaction(
+    String(payload.signedTransactionInfo || ""),
+  );
 }
 
 function entitlementStatus(transaction: any, notificationType: string) {
-  if (transaction.revocationDate || notificationType === "REFUND") return "refunded";
+  if (transaction.revocationDate || notificationType === "REFUND") {
+    return "refunded";
+  }
   if (notificationType === "REVOKE") return "revoked";
   const expiresDate = Number(transaction.expiresDate || 0);
   if (!expiresDate || expiresDate <= Date.now()) return "expired";
   return "active";
 }
 
-serve(async (req) => {
+export async function handleNotification(req: Request) {
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
   try {
-    const admin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
     const body = await req.json().catch(() => ({}));
-    const notification = decodeJwsPayload(clean(body.signedPayload));
+    const { notification, transaction: notificationTransaction } =
+      await verifyNotification(
+        body?.signedPayload,
+        getVerifier(),
+      );
     const notificationType = clean(notification.notificationType);
     const subtype = clean(notification.subtype);
-    const signedTransactionInfo = clean(
-      notification?.data?.signedTransactionInfo,
-    );
-    if (!signedTransactionInfo) {
+    if (!notificationTransaction) {
       return json(202, { ok: true, ignored: "No signed transaction" });
     }
 
-    const notificationTransaction = decodeJwsPayload(signedTransactionInfo);
     const transactionId = clean(notificationTransaction.transactionId);
     if (!transactionId) {
       return json(202, { ok: true, ignored: "No transaction id" });
@@ -169,6 +145,14 @@ serve(async (req) => {
     if (transaction.bundleId !== bundleId) {
       throw new Error("Apple transaction bundle id does not match this app");
     }
+    if (
+      transaction.transactionId !== transactionId ||
+      transaction.originalTransactionId !==
+        notificationTransaction.originalTransactionId ||
+      transaction.productId !== notificationTransaction.productId
+    ) {
+      throw new Error("Apple transaction identity mismatch");
+    }
 
     const originalTransactionId = clean(transaction.originalTransactionId);
     const productId = clean(transaction.productId);
@@ -176,6 +160,12 @@ serve(async (req) => {
     if (!originalTransactionId || !plan) {
       return json(202, { ok: true, ignored: "Unknown subscription" });
     }
+
+    // No database access until both Apple signatures and transaction identity pass.
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
 
     const { data: existing, error: existingError } = await admin
       .from("family_entitlements")
@@ -186,7 +176,9 @@ serve(async (req) => {
 
     const familyId = clean(existing?.family_id);
     if (!familyId) {
-      await admin.from("apple_subscription_events").insert({
+      const { error: eventError } = await admin.from(
+        "apple_subscription_events",
+      ).insert({
         event_source: "server_notification",
         apple_environment: configuredEnvironment,
         apple_product_id: productId,
@@ -197,6 +189,7 @@ serve(async (req) => {
         entitlement_status: "unmatched",
         raw_payload: notification,
       });
+      if (eventError) throw new Error(eventError.message);
       return json(202, { ok: true, ignored: "No matching family entitlement" });
     }
 
@@ -209,7 +202,7 @@ serve(async (req) => {
       .from("apple_subscription_events")
       .insert({
         family_id: familyId,
-        user_id: existing.billing_owner_user_id || null,
+        user_id: existing?.billing_owner_user_id || null,
         event_source: "server_notification",
         apple_environment: configuredEnvironment,
         apple_product_id: productId,
@@ -233,7 +226,9 @@ serve(async (req) => {
         current_period_end: currentPeriodEnd,
         apple_product_id: productId,
         apple_environment: configuredEnvironment,
-        offer_type: transaction.offerType ? String(transaction.offerType) : null,
+        offer_type: transaction.offerType
+          ? String(transaction.offerType)
+          : null,
         offer_identifier: transaction.offerIdentifier
           ? String(transaction.offerIdentifier)
           : null,
@@ -244,7 +239,17 @@ serve(async (req) => {
 
     return json(200, { ok: true, status, family_id: familyId });
   } catch (e) {
-    console.error(e);
-    return json(400, { error: e instanceof Error ? e.message : String(e) });
+    const status = notificationErrorStatus(e);
+    console.error("Apple notification rejected", {
+      status,
+      reason: e instanceof Error ? e.name : "Unknown",
+    });
+    return json(status, {
+      error: status === 400
+        ? "Invalid Apple signed notification"
+        : "Notification processing temporarily unavailable",
+    });
   }
-});
+}
+
+if (import.meta.main) serve(handleNotification);

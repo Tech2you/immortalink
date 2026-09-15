@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import '../utils/family_placeholder.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'legacy_vault_screen.dart';
@@ -182,7 +183,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
             ownerId: null,
             slotKey: (row['slot_key'] ?? '').toString().trim(),
             avatarUrl: await _signedUrl(_legacyAvatarBucket, avatarPath),
-            isPlaceholder: name.toLowerCase() == 'parent not added yet',
+            isPlaceholder: isUnfilledFamilyProfile(name),
           ),
         );
       }
@@ -241,10 +242,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   }
 
   String _nameFromRow(Map<String, dynamic> row, String fallback) {
-    final displayName = (row['display_name'] ?? '').toString().trim();
-    if (displayName.isNotEmpty) return displayName;
-    final name = (row['name'] ?? '').toString().trim();
-    return name.isEmpty ? fallback : name;
+    return familyProfileName(row, fallback);
   }
 
   _TreePerson? _person(String key) {
@@ -437,6 +435,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           builder: (_) => LegacyVaultScreen(
             legacyMemberId: person.id,
             familyId: widget.familyId,
+            editProfile: person.isPlaceholder,
           ),
         ),
       );

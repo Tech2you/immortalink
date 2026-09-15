@@ -1,9 +1,12 @@
 import 'dart:async';
+import '../widgets/vault_media.dart';
+import '../utils/vault_media_upload.dart';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../widgets/profile_photo_cropper.dart';
 import '../widgets/vault_section_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -17,11 +20,13 @@ import '../utils/web_audio_recorder.dart';
 class LegacyVaultScreen extends StatefulWidget {
   final String legacyMemberId;
   final String familyId;
+  final bool editProfile;
 
   const LegacyVaultScreen({
     super.key,
     required this.legacyMemberId,
     required this.familyId,
+    this.editProfile = false,
   });
 
   @override
@@ -47,6 +52,23 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   bool _loadingMemoryVoice = true;
   bool _showExtraDetails = false;
   int _selectedLegacySection = 0;
+  final _profileEditorKey = GlobalKey();
+  bool _openedInitialEditor = false;
+
+  void _openProfileEditor() {
+    setState(() => _selectedLegacySection = 1);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final editorContext = _profileEditorKey.currentContext;
+      if (editorContext != null) {
+        Scrollable.ensureVisible(
+          editorContext,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
+  }
 
   String? _error;
   String? _photoError;
@@ -348,6 +370,11 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       setState(() {
         _loading = false;
       });
+
+      if (widget.editProfile && !_openedInitialEditor) {
+        _openedInitialEditor = true;
+        _openProfileEditor();
+      }
 
       await _loadPhotos();
       await _loadMemories();
@@ -865,19 +892,15 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-      );
+      final picked = await pickVaultMedia(context);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
       final Uint8List? bytes = file.bytes;
       if (bytes == null) throw Exception('No image bytes received.');
 
-      final image = await ImageUploadOptimizer.optimize(
+      final image = await VaultMediaUpload.prepare(
         bytes,
-        kind: MediaUploadKind.photo,
         fileName: file.name,
         contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
@@ -903,9 +926,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       });
 
       await _loadPhotos();
-      _toast('Photo added.');
+      _toast('Media added.');
     } catch (e) {
-      await _handleUploadError(e, 'Photo upload failed');
+      await _handleUploadError(e, 'Media upload failed');
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
     }
@@ -931,11 +954,14 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final oldProfilePath = (_profilePhotoPath ?? '').trim();
       final oldProfileId = (_profilePhotoId ?? '').trim();
 
+      if (!mounted) return;
+      final cropped = await cropProfilePhoto(context, bytes);
+      if (cropped == null) return;
       final image = await ImageUploadOptimizer.optimize(
-        bytes,
+        cropped,
         kind: MediaUploadKind.avatarPhoto,
-        fileName: file.name,
-        contentType: _contentTypeFromExt(_extFromName(file.name)),
+        fileName: 'profile.png',
+        contentType: 'image/png',
       );
       final ts = DateTime.now().millisecondsSinceEpoch;
       final newPath =
@@ -993,8 +1019,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete photo?'),
-        content: const Text('This will permanently delete this photo.'),
+        title: const Text('Delete media?'),
+        content: const Text('This will permanently delete this media.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -1028,7 +1054,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       }
 
       await _loadPhotos();
-      _toast('Photo deleted.');
+      _toast('Media deleted.');
     } catch (e) {
       _toast('Delete failed: $e');
     }
@@ -1062,6 +1088,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           .from('legacy_family_members')
           .update({
             'name': name,
+            'display_name': name,
             'birth_year': birthYear,
             'death_year': deathYear,
             'about_me_text': about.isEmpty ? null : about,
@@ -1320,11 +1347,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
           Future<void> pickPendingPhotos() async {
             try {
-              final picked = await FilePicker.platform.pickFiles(
-                type: FileType.image,
-                allowMultiple: true,
-                withData: true,
-              );
+              final picked = await pickVaultMedia(context, allowMultiple: true, remainingBytes: MediaUploadPolicy.pendingMediaMaxBytes - pendingPhotos.fold<int>(0, (sum, p) => sum + p.bytes.length));
               if (picked == null) return;
 
               final selected = <_LegacyPendingPhoto>[];
@@ -1334,9 +1357,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 if (bytes == null) continue;
 
                 try {
-                  final image = await ImageUploadOptimizer.optimize(
-                    bytes,
-                    kind: MediaUploadKind.photo,
+                  final image = await VaultMediaUpload.prepare(
+        bytes,
                     fileName: file.name,
                     contentType: _contentTypeFromExt(_extFromName(file.name)),
                   );
@@ -1359,13 +1381,13 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
               setDialogState(() => pendingPhotos.addAll(accepted));
 
               if (selected.length > available) {
-                _toast('You can add up to 10 photos to one memory.');
+                _toast('You can add up to 10 photos or videos to one memory.');
               }
               if (rejectedMessage != null) {
                 _toast(rejectedMessage);
               }
             } catch (e) {
-              _toast('Could not add photos: $e');
+              _toast('Could not add media: $e');
             }
           }
 
@@ -1531,8 +1553,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                           icon: const Icon(Icons.photo_library_outlined),
                           label: Text(
                             pendingPhotos.isEmpty && existingPhotos.isEmpty
-                                ? 'Add photos'
-                                : 'More photos',
+                                ? 'Add media'
+                                : 'More media',
                           ),
                         ),
                         OutlinedButton.icon(
@@ -1552,7 +1574,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                         pendingPhotos.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       const Text(
-                        'Photos',
+                        'Media',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
@@ -1583,7 +1605,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                     top: 5,
                                     right: 5,
                                     child: IconButton.filledTonal(
-                                      tooltip: 'Remove photo',
+                                      tooltip: 'Remove media',
                                       visualDensity: VisualDensity.compact,
                                       onPressed: memoryId == null
                                           ? null
@@ -1613,7 +1635,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                     width: 116,
                                     height: 116,
                                     color: Colors.black.withValues(alpha: 0.04),
-                                    child: Image.memory(
+                                    child: MediaUploadPolicy.isVideo(photo.name)
+ ? PendingVideoPreview(bytes: photo.bytes, name: photo.name)
+ : Image.memory(
                                       photo.bytes,
                                       width: 116,
                                       height: 116,
@@ -1625,7 +1649,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                   top: 5,
                                   right: 5,
                                   child: IconButton.filledTonal(
-                                    tooltip: 'Remove photo',
+                                    tooltip: 'Remove media',
                                     visualDensity: VisualDensity.compact,
                                     onPressed: () => setDialogState(
                                       () =>
@@ -1922,19 +1946,15 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await FilePicker.platform.pickFiles(
-        type: FileType.image,
-        withData: true,
-      );
+      final picked = await pickVaultMedia(context);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
       final Uint8List? bytes = file.bytes;
       if (bytes == null) throw Exception('No image bytes received.');
 
-      final image = await ImageUploadOptimizer.optimize(
+      final image = await VaultMediaUpload.prepare(
         bytes,
-        kind: MediaUploadKind.photo,
         fileName: file.name,
         contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
@@ -1961,11 +1981,11 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       });
 
       await _loadMemoryPhotos();
-      _toast('Photo added to memory.');
+      _toast('Media added to memory.');
     } on PostgrestException catch (e) {
-      await _handleUploadError(e, 'Add photo failed');
+      await _handleUploadError(e, 'Add media failed');
     } catch (e) {
-      await _handleUploadError(e, 'Add photo failed');
+      await _handleUploadError(e, 'Add media failed');
     }
   }
 
@@ -1981,7 +2001,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     for (var index = 0; index < photos.length; index++) {
       final photo = photos[index];
       MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadKind.photo,
+        MediaUploadPolicy.visualKind(photo.name),
         photo.bytes,
         fileName: photo.name,
         contentType: photo.contentType,
@@ -2115,7 +2135,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       }
 
       await _loadMemoryPhotos();
-      _toast('Photo deleted.');
+      _toast('Media deleted.');
     } on PostgrestException catch (e) {
       _toast('Delete failed: ${e.message}');
     } catch (e) {
@@ -2276,7 +2296,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                   label: const Text('Branch'),
                 ),
               OutlinedButton.icon(
-                onPressed: () => setState(() => _selectedLegacySection = 1),
+                onPressed: _openProfileEditor,
                 icon: const Icon(Icons.edit_outlined, size: 18),
                 label: const Text('Edit profile'),
               ),
@@ -2332,7 +2352,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
               ),
               ActionChip(
                 avatar: const Icon(Icons.photo_camera_outlined, size: 18),
-                label: const Text('Add photos'),
+                label: const Text('Add media'),
                 onPressed: _uploadingPhoto ? null : _uploadPhoto,
               ),
               ActionChip(
@@ -2352,7 +2372,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       margin: const EdgeInsets.only(bottom: 14),
       child: VaultSectionPicker(
         selected: _selectedLegacySection,
-        onChanged: (selection) => setState(() => _selectedLegacySection = selection),
+        onChanged: (selection) =>
+            setState(() => _selectedLegacySection = selection),
       ),
     );
   }
@@ -2440,9 +2461,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       case 1:
         return Column(
           children: [
-            _aboutCard(),
+            KeyedSubtree(key: _profileEditorKey, child: _identityCard()),
             const SizedBox(height: 12),
-            _identityCard(),
+            _aboutCard(),
             const SizedBox(height: 12),
             _extraDetailsCard(),
             const SizedBox(height: 12),
@@ -2474,7 +2495,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           children: [
             Icon(Icons.add_circle_outline, size: 30),
             SizedBox(height: 8),
-            Text('New photo'),
+            Text('New media'),
           ],
         ),
       ),
@@ -2482,6 +2503,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   }
 
   Widget _mediaCard() {
+    final media = [
+      ..._photos,
+      for (final entry in _memoryPhotosById.entries)
+        for (final photo in entry.value)
+          {...photo, 'memory_id': entry.key},
+    ];
     return _fieldCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -2510,8 +2537,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
               'Photo load issue: $_photoError',
               style: TextStyle(color: Colors.black.withValues(alpha: 0.60)),
             )
-          else if (_photos.isEmpty)
-            const Text('Photos added to this profile will appear here.')
+          else if (media.isEmpty)
+            const Text('Photos and videos added to this profile will appear here.')
           else
             GridView.builder(
               shrinkWrap: true,
@@ -2521,9 +2548,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
               ),
-              itemCount: _photos.length,
+              itemCount: media.length,
               itemBuilder: (_, index) {
-                final photo = _photos[index];
+                final photo = media[index];
                 final url = (photo['url'] ?? '').trim();
                 return ClipRRect(
                   borderRadius: BorderRadius.circular(16),
@@ -2534,12 +2561,14 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                           ? Container(
                               color: Colors.black.withValues(alpha: 0.05),
                             )
-                          : Image.network(url, fit: BoxFit.cover),
+                          : VaultMedia.network(url, fit: BoxFit.cover),
                       Positioned(
                         top: 8,
                         right: 8,
                         child: InkWell(
-                          onTap: () => _deletePhoto(photo),
+                          onTap: () => photo['memory_id'] == null
+                              ? _deletePhoto(photo)
+                              : _deleteMemoryPhoto(photo['memory_id']!, photo),
                           child: CircleAvatar(
                             radius: 15,
                             backgroundColor: Colors.black.withValues(
@@ -2654,7 +2683,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                               height: 132,
                               color: Colors.black.withValues(alpha: 0.05),
                             )
-                          : Image.network(
+                          : VaultMedia.network(
                               url,
                               width: 104,
                               height: 132,
@@ -2774,7 +2803,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           child: OutlinedButton.icon(
             onPressed: () => _uploadMemoryPhoto(memoryId),
             icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-            label: const Text('Add photo'),
+            label: const Text('Add media'),
           ),
         ),
       );
@@ -2858,7 +2887,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       width: width,
       height: height,
       color: Colors.black.withValues(alpha: 0.04),
-      child: Image.network(
+      child: VaultMedia.network(
         url,
         width: width,
         height: height,
@@ -3031,7 +3060,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 TextButton.icon(
                   onPressed: () => _uploadMemoryPhoto(memoryId),
                   icon: const Icon(Icons.photo_outlined),
-                  label: const Text('Photo'),
+                  label: const Text('Media'),
                 ),
                 const Spacer(),
                 Icon(
@@ -3117,17 +3146,20 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 980),
-        child: ListView(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          children: [
-            _headerCard(),
-            _legacyComposerCard(),
-            const SizedBox(height: 14),
-            _photosCard(),
-            const SizedBox(height: 14),
-            _sectionPicker(),
-            _activeSection(),
-          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _headerCard(),
+              _legacyComposerCard(),
+              const SizedBox(height: 14),
+              _photosCard(),
+              const SizedBox(height: 14),
+              _sectionPicker(),
+              _activeSection(),
+            ],
+          ),
         ),
       ),
     );

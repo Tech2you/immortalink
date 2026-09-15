@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-enum MediaUploadKind { avatarPhoto, photo, voice }
+enum MediaUploadKind { avatarPhoto, photo, voice, video }
 
 class MediaUploadException implements Exception {
   final String message;
@@ -15,6 +15,21 @@ class MediaUploadPolicy {
   static const int avatarPhotoMaxBytes = 5 * 1024 * 1024;
   static const int photoMaxBytes = 12 * 1024 * 1024;
   static const int voiceMaxBytes = 25 * 1024 * 1024;
+  static const int videoMaxBytes = 50 * 1024 * 1024;
+  static const int pendingMediaMaxBytes = 100 * 1024 * 1024;
+  static const Set<String> videoMimeTypes = {
+    'video/mp4',
+    'video/quicktime',
+    'video/x-m4v',
+  };
+
+  static bool isVideo(String path) {
+    final name = Uri.tryParse(path)?.path ?? path;
+    return {'mp4', 'mov', 'm4v'}.contains(extensionForName(name));
+  }
+
+  static MediaUploadKind visualKind(String name) =>
+      isVideo(name) ? MediaUploadKind.video : MediaUploadKind.photo;
   static const int avatarPhotoMaxDimension = 768;
   static const int photoMaxDimension = 2048;
   static const int avatarPhotoJpegQuality = 82;
@@ -43,24 +58,28 @@ class MediaUploadPolicy {
     MediaUploadKind.avatarPhoto => avatarPhotoMaxBytes,
     MediaUploadKind.photo => photoMaxBytes,
     MediaUploadKind.voice => voiceMaxBytes,
+    MediaUploadKind.video => videoMaxBytes,
   };
 
   static String labelFor(MediaUploadKind kind) => switch (kind) {
     MediaUploadKind.avatarPhoto => 'profile photo',
     MediaUploadKind.photo => 'photo',
     MediaUploadKind.voice => 'voice note',
+    MediaUploadKind.video => 'video',
   };
 
   static int imageMaxDimensionFor(MediaUploadKind kind) => switch (kind) {
     MediaUploadKind.avatarPhoto => avatarPhotoMaxDimension,
     MediaUploadKind.photo => photoMaxDimension,
     MediaUploadKind.voice => 0,
+    MediaUploadKind.video => 0,
   };
 
   static int imageQualityFor(MediaUploadKind kind) => switch (kind) {
     MediaUploadKind.avatarPhoto => avatarPhotoJpegQuality,
     MediaUploadKind.photo => photoJpegQuality,
     MediaUploadKind.voice => 0,
+    MediaUploadKind.video => 0,
   };
 
   static String extensionForName(String name, {String fallback = 'bin'}) {
@@ -86,6 +105,12 @@ class MediaUploadPolicy {
         return 'image/heif';
       case 'm4a':
         return 'audio/mp4';
+      case 'mp4':
+        return 'video/mp4';
+      case 'mov':
+        return 'video/quicktime';
+      case 'm4v':
+        return 'video/x-m4v';
       case 'mp3':
         return 'audio/mpeg';
       case 'wav':
@@ -108,6 +133,9 @@ class MediaUploadPolicy {
     String? contentType,
   }) {
     final maxBytes = maxBytesFor(kind);
+    if (byteLength <= 0) {
+      return 'This file is empty. Please choose another file.';
+    }
     if (byteLength > maxBytes) {
       return 'This ${labelFor(kind)} is ${_formatBytes(byteLength)}, but the limit is ${_formatBytes(maxBytes)}. Please choose a smaller file.';
     }
@@ -134,6 +162,10 @@ class MediaUploadPolicy {
       if (type.isNotEmpty && !voiceMimeTypes.contains(type)) {
         return 'That file type is not supported for voice notes. Please choose M4A, MP3, WAV, AAC, OGG, or WebM audio.';
       }
+    }
+
+    if (kind == MediaUploadKind.video && !videoMimeTypes.contains(type)) {
+      return 'Please choose an MP4, MOV, or M4V video.';
     }
 
     return null;

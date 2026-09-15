@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,11 +11,14 @@ import 'package:immortalink/services/apple_subscription_service.dart';
 
 class FakeFunctions implements FunctionsClient {
   Object result = FunctionResponse(status: 200, data: {'ok': false});
+  int calls = 0;
 
   @override
   dynamic noSuchMethod(Invocation invocation) {
     if (invocation.memberName == #invoke) {
+      calls++;
       final value = result;
+      if (value is Future<FunctionResponse>) return value;
       return value is FunctionResponse
           ? Future<FunctionResponse>.value(value)
           : Future<FunctionResponse>.error(value);
@@ -69,6 +75,57 @@ class FakeStore implements InAppPurchase {
 }
 
 void main() {
+  testWidgets('opens the native Apple management sheet on iPhone', (
+    tester,
+  ) async {
+    const channel = MethodChannel('com.everroots.app/subscriptions');
+    String? method;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      method = call.method;
+      return null;
+    });
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    final store = FakeStore();
+    final service = AppleSubscriptionService(
+      supabase: FakeSupabase(),
+      iap: store,
+    );
+    try {
+      await service.openManageSubscriptions();
+      expect(method, 'manageSubscriptions');
+      expect(service.error, isNull);
+    } finally {
+      service.dispose();
+      await store.updates.close();
+      debugDefaultTargetPlatformOverride = null;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      );
+    }
+  });
+
+  test('product diagnostics expose only bounded product identifiers', () {
+    final result = AppleSubscriptionService.validationDiagnostic(
+      FunctionException(
+        status: 400,
+        details: {
+          'code': 'APPLE_PRODUCT_UNSUPPORTED',
+          'requested_product_id': 'everroots.legacy.monthly',
+          'apple_product_id': 'old.product',
+          'receipt': 'private-receipt',
+        },
+      ),
+    );
+    expect(
+      result,
+      contains('requested=everroots.legacy.monthly; Apple=old.product'),
+    );
+    expect(result, isNot(contains('private-receipt')));
+  });
+
   test(
     'classifies server rejection without exposing payload or credentials',
     () {
@@ -110,7 +167,7 @@ void main() {
         await store.updates.close();
       });
 
-      Future<void> purchase() async {
+      Future<void> purchase({bool waitForError = true}) async {
         store.updates.add([
           PurchaseDetails(
             productID: productId,
@@ -125,7 +182,62 @@ void main() {
           )..pendingCompletePurchase = true,
         ]);
         await pumpEventQueue();
+        if (waitForError) {
+          await Future<void>.delayed(const Duration(milliseconds: 2100));
+        }
       }
+
+      test(
+        'queues overlapping updates and clears a transient rejection only after verification',
+        () async {
+          final first = Completer<FunctionResponse>();
+          backend.functions.result = first.future;
+          await purchase(waitForError: false);
+          await purchase(waitForError: false);
+          expect(backend.functions.calls, 1);
+          backend.functions.result = FunctionResponse(
+            status: 200,
+            data: {
+              'ok': true,
+              'entitlement': {'product_id': productId, 'status': 'active'},
+            },
+          );
+          first.completeError(
+            FunctionException(
+              status: 400,
+              details: {'error': 'Unsupported Apple subscription product'},
+            ),
+          );
+          await pumpEventQueue();
+          await Future<void>.delayed(const Duration(milliseconds: 2100));
+          expect(backend.functions.calls, 2);
+          expect(store.completed, 1);
+          expect(service.error, isNull);
+          expect(service.message, 'Family plan updated.');
+          expect(service.purchasePending, false);
+        },
+      );
+
+      test('unresolved product rejection still fails closed', () async {
+        backend.functions.result = FunctionException(
+          status: 400,
+          details: {'error': 'Unsupported Apple subscription product'},
+        );
+        await purchase();
+        expect(store.completed, 0);
+        expect(service.rawError, 'APPLE_PRODUCT_MISMATCH (HTTP 400)');
+        expect(service.error, contains('Restore purchases'));
+      });
+
+      test(
+        'ignores unrelated StoreKit products without completing them',
+        () async {
+          productId = 'unrelated.product';
+          await purchase(waitForError: false);
+          expect(backend.functions.calls, 0);
+          expect(store.completed, 0);
+        },
+      );
 
       test('refreshes localized catalog after storefront changes', () async {
         expect(service.productFor(productId)!.currencyCode, 'USD');

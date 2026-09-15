@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../widgets/companion_prompt_button.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -508,8 +509,8 @@ class _QuickPrompts extends StatelessWidget {
           spacing: 10,
           runSpacing: 10,
           children: items.map((t) {
-            return ActionChip(
-              label: Text(t),
+            return CompanionPromptButton(
+              text: t,
               onPressed: onTap == null ? null : () => onTap!(t),
             );
           }).toList(),
