@@ -8,6 +8,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/onboarding_invite_state.dart';
+import '../services/first_account_setup.dart';
+import 'first_account_setup_screen.dart';
 import '../services/apple_subscription_config.dart';
 import '../services/apple_subscription_service.dart';
 import '../services/push_notification_service.dart';
@@ -255,10 +257,29 @@ class _VaultsScreenState extends State<VaultsScreen> {
     });
 
     PushNotificationService.intent.addListener(_handlePushNotificationIntent);
-    _loadVault();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _openPendingInviteIfNeeded();
+      _startAccount();
     });
+  }
+
+  Future<void> _startAccount() async {
+    final user = _supabase.auth.currentUser;
+    FirstAccountSetupResult? setupResult;
+    if (needsFirstAccountSetup(user?.userMetadata)) {
+      setupResult = await Navigator.of(context).push<FirstAccountSetupResult>(
+        MaterialPageRoute(builder: (_) => const FirstAccountSetupScreen()),
+      );
+    }
+    if (!mounted || _supabase.auth.currentUser?.id != user?.id) return;
+    await _loadVault();
+    if (!mounted) return;
+    final invite = await pendingFamilyInviteCode();
+    if (!mounted) return;
+    await _openPendingInviteIfNeeded();
+    if (!mounted) return;
+    if (invite.isEmpty && setupResult == FirstAccountSetupResult.familyTree) {
+      await _ensureFamilyAndOpenTree();
+    }
   }
 
   Future<void> _openPendingInviteIfNeeded() async {

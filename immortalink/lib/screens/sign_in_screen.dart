@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/ai_chat_reminder_service.dart';
 import '../services/onboarding_invite_state.dart';
+import '../services/first_account_setup.dart';
 
 enum _AuthMode { signIn, signUp }
 
@@ -141,6 +142,7 @@ class _SignInScreenState extends State<SignInScreen> {
           email: email,
           password: password,
           emailRedirectTo: kIsWeb ? null : _authRedirectUrl,
+          data: {firstAccountSetupKey: 'pending'},
         );
 
         if (!mounted) return;

@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'env.dart';
 import 'services/onboarding_invite_state.dart';
+import 'services/first_account_setup.dart';
 import 'services/push_notification_service.dart';
 import 'screens/join_family_screen.dart';
 import 'screens/reset_password_screen.dart';
@@ -207,7 +208,8 @@ class _AuthGateState extends State<AuthGate> {
     if (!mounted) return;
 
     final session = Supabase.instance.client.auth.currentSession;
-    if (session == null || _passwordRecoveryPending.value) {
+    if (session == null || _passwordRecoveryPending.value ||
+        needsFirstAccountSetup(session.user.userMetadata)) {
       setState(() => _inviteLinkRevision++);
       return;
     }
@@ -250,7 +252,7 @@ class _AuthGateState extends State<AuthGate> {
               );
             }
 
-            return const VaultsScreen();
+            return VaultsScreen(key: ValueKey(session.user.id));
           },
         );
       },
