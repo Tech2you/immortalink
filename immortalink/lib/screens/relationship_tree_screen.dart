@@ -1,4 +1,9 @@
 import 'dart:math';
+import '../utils/public_error.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import '../services/recent_cache.dart';
 
 import 'package:flutter/material.dart';
 import '../utils/family_placeholder.dart';
@@ -11,13 +16,22 @@ import 'vaults_screen.dart';
 import '../services/family_leave_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import '../utils/family_invite_share.dart';
+import '../utils/family_profile_actions.dart';
+import '../widgets/family_tree_settings_menu.dart';
 
 enum _RelativeKind { parent, spouse, sibling, child }
 
 class RelationshipTreeScreen extends StatefulWidget {
   final String familyId;
+  final bool cachedOnly;
+  final RecentCache? cache;
 
-  const RelationshipTreeScreen({super.key, required this.familyId});
+  const RelationshipTreeScreen({
+    super.key,
+    required this.familyId,
+    this.cachedOnly = false,
+    this.cache,
+  });
 
   @override
   State<RelationshipTreeScreen> createState() => _RelationshipTreeScreenState();
@@ -32,6 +46,12 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   static const _legacyAvatarBucket = 'vault_photos';
 
   bool _loading = true;
+  bool _offline = false;
+  late final _cache = widget.cache ?? RecentCache.instance;
+  Timer? _cacheExpiryTimer;
+  bool _familySettingsBusy = false;
+  bool _isFamilyMember = false;
+  bool _canRenameFamily = false;
   String? _error;
   List<_TreePerson> _people = [];
   List<_TreeRelationship> _relationships = [];
@@ -44,13 +64,91 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _cache.addListener(_cacheCleared);
+    _cacheExpiryTimer = Timer.periodic(const Duration(minutes: 1), (_) async {
+      if (_offline && await _cache.read('tree:${widget.familyId}') == null)
+        _cacheCleared();
+    });
+    if (widget.cachedOnly) {
+      _loadSnapshot();
+    } else {
+      _load();
+    }
   }
 
   @override
   void dispose() {
+    _cache.removeListener(_cacheCleared);
+    _cacheExpiryTimer?.cancel();
     _transformController.dispose();
     super.dispose();
+  }
+
+  void _cacheCleared() {
+    if (_offline && mounted) {
+      setState(() {
+        _people = [];
+        _relationships = [];
+        _focus = null;
+        _viewer = null;
+        _focusHistory.clear();
+        _error = 'This offline copy is no longer available.';
+      });
+    }
+  }
+
+  Future<bool> _loadSnapshot() async {
+    final epoch = _cache.generation;
+    try {
+      final bytes = await _cache.read('tree:${widget.familyId}');
+      if (bytes == null) throw StateError('No recent tree copy');
+      final data = jsonDecode(utf8.decode(bytes)) as Map;
+      final people = (data['people'] as List)
+          .map(
+            (p) => _TreePerson(
+              type: p['type'],
+              id: p['id'],
+              name: p['name'],
+              ownerId: p['ownerId'],
+              slotKey: p['slotKey'],
+              avatarUrl: null,
+              isPlaceholder: p['placeholder'] == true,
+            ),
+          )
+          .toList();
+      final relationships = (data['relationships'] as List)
+          .map(
+            (r) => _TreeRelationship(
+              firstKey: r['a'],
+              secondKey: r['b'],
+              kind: r['kind'],
+            ),
+          )
+          .toList();
+      if (!mounted || epoch != _cache.generation) return false;
+      setState(() {
+        _offline = true;
+        _loading = false;
+        _error = null;
+        _people = people;
+        _relationships = relationships;
+        _viewer = people.where((p) => p.key == data['viewer']).firstOrNull;
+        _focus = _viewer ?? people.firstOrNull;
+        _focusHistory.clear();
+        if (_focus != null) _focusHistory.add(_focus!);
+        _isFamilyMember = false;
+        _canRenameFamily = false;
+      });
+      return true;
+    } catch (_) {
+      if (mounted && widget.cachedOnly) {
+        setState(() {
+          _loading = false;
+          _error = 'No recent offline copy is available.';
+        });
+      }
+      return false;
+    }
   }
 
   EdgeInsets _relationshipDialogInsetPadding(BuildContext context) {
@@ -94,6 +192,11 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   }
 
   Future<void> _load({String? keepFocusKey}) async {
+    if (widget.cachedOnly) {
+      await _loadSnapshot();
+      return;
+    }
+    final epoch = _cache.generation;
     if (mounted) {
       setState(() {
         _loading = true;
@@ -105,8 +208,19 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       final rawMemberRows = await _supabase
           .from('family_members')
           .select('user_id, slot_key, role, is_primary')
-          .eq('family_id', widget.familyId);
+          .eq('family_id', widget.familyId)
+          .timeout(const Duration(seconds: 8));
+      if (epoch != _cache.generation) return;
       final memberRows = (rawMemberRows as List).cast<Map<String, dynamic>>();
+      final membership = memberRows.where(
+        (row) => row['user_id'] == _supabase.auth.currentUser?.id,
+      );
+      _isFamilyMember = membership.isNotEmpty;
+      if (!_isFamilyMember) {
+        await _cache.clear();
+        throw StateError('You no longer have access to this family.');
+      }
+      _canRenameFamily = membership.any((row) => row['role'] == 'owner');
       final memberUserIds = memberRows
           .map((row) => (row['user_id'] ?? '').toString().trim())
           .where((id) => id.isNotEmpty)
@@ -134,7 +248,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
             )
             .eq('family_id', widget.familyId)
             .order('created_at', ascending: true),
-      ]);
+      ]).timeout(const Duration(seconds: 8));
 
       final vaultRows = (results[0] as List).cast<Map<String, dynamic>>();
       final legacyRows = (results[1] as List).cast<Map<String, dynamic>>();
@@ -216,8 +330,37 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           ? viewer
           : peopleByKey[wantedFocus] ?? viewer;
 
-      if (!mounted) return;
+      if (!mounted || epoch != _cache.generation) return;
+      await _cache.put(
+        'tree:${widget.familyId}',
+        utf8.encode(
+          jsonEncode({
+            'viewer': viewer?.key,
+            'people': people
+                .map(
+                  (p) => {
+                    'type': p.type,
+                    'id': p.id,
+                    'name': p.name,
+                    'ownerId': p.ownerId,
+                    'slotKey': p.slotKey,
+                    'placeholder': p.isPlaceholder,
+                  },
+                )
+                .toList(),
+            'relationships': relationships
+                .map((r) => {'a': r.firstKey, 'b': r.secondKey, 'kind': r.kind})
+                .toList(),
+          }),
+        ),
+        epoch: epoch,
+        kind: 'tree',
+        familyId: widget.familyId,
+        title: '${viewer?.name ?? 'Family'} - family tree',
+      );
+      if (!mounted || epoch != _cache.generation) return;
       setState(() {
+        _offline = false;
         _people = people;
         _relationships = relationships;
         _viewer = viewer;
@@ -233,10 +376,19 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         _loading = false;
       });
     } catch (e) {
+      if (epoch == _cache.generation &&
+          (e is AuthException ||
+              (e is PostgrestException && e.code == '42501'))) {
+        await _cache.clear();
+      }
+      if (epoch == _cache.generation &&
+          (e is http.ClientException || e is TimeoutException)) {
+        if (await _loadSnapshot()) return;
+      }
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e.toString();
+        _error = publicErrorMessage(e);
       });
     }
   }
@@ -369,9 +521,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   }
 
   Future<void> _leaveFamily() async {
-    final viewer = _viewer;
-    final focus = _focus;
-    if (viewer == null || focus?.key != viewer.key) return;
+    if (!_isFamilyMember) return;
 
     try {
       final leaveService = FamilyLeaveService(_supabase);
@@ -423,11 +573,78 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not leave family: $e')));
+      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
+    }
+  }
+
+  Future<void> _handleFamilySetting(FamilyTreeAction action) async {
+    if (_familySettingsBusy || _loading) return;
+    if (_offline &&
+        action != FamilyTreeAction.recenter &&
+        action != FamilyTreeAction.refresh)
+      return;
+    switch (action) {
+      case FamilyTreeAction.recenter:
+        _returnToViewer();
+        return;
+      case FamilyTreeAction.refresh:
+        await _load(keepFocusKey: _focus?.key);
+        return;
+      case FamilyTreeAction.leave:
+        await _leaveFamily();
+        return;
+      case FamilyTreeAction.photo:
+      case FamilyTreeAction.name:
+        if (!_isFamilyMember) return;
+        if (action == FamilyTreeAction.name && !_canRenameFamily) return;
+        setState(() => _familySettingsBusy = true);
+        try {
+          if (action == FamilyTreeAction.photo) {
+            if (!await changeFamilyPhoto(context, widget.familyId)) return;
+          } else {
+            final family = await _supabase
+                .from('family_groups')
+                .select('name')
+                .eq('id', widget.familyId)
+                .single();
+            if (!mounted) return;
+            final currentName = (family['name'] ?? '').toString();
+            final name = await promptFamilyName(context, currentName);
+            if (!mounted || name == null || name == currentName) return;
+            await _supabase.rpc(
+              'rename_family',
+              params: {'p_family_id': widget.familyId, 'p_name': name},
+            );
+          }
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                action == FamilyTreeAction.photo
+                    ? 'Family photo updated.'
+                    : 'Family name updated.',
+              ),
+            ),
+          );
+        } catch (_) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                action == FamilyTreeAction.photo
+                    ? 'Could not update the family photo. Please try again.'
+                    : 'Could not rename the family. Only a family owner can change its name.',
+              ),
+            ),
+          );
+        } finally {
+          if (mounted) setState(() => _familySettingsBusy = false);
+        }
     }
   }
 
   Future<void> _openPerson(_TreePerson person) async {
+    if (_offline) return;
     if (person.isLegacy) {
       await Navigator.push(
         context,
@@ -516,20 +733,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                   _showLegacyDialog(kind, focus);
                 },
               ),
-              if (kind == _RelativeKind.child)
-                ListTile(
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.account_tree_outlined),
-                  ),
-                  title: const Text('Add grandchild with missing parent'),
-                  subtitle: const Text(
-                    'Creates a visible “Parent not added yet” placeholder',
-                  ),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _showMissingParentGrandchildOptions(focus);
-                  },
-                ),
             ],
           ),
         ),
@@ -845,9 +1048,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update the children’s parents: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
     }
   }
 
@@ -956,9 +1159,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update the siblings’ parentage: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
     }
   }
 
@@ -1069,9 +1272,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not set the other parent: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
     }
   }
 
@@ -1237,7 +1440,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       }
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not create invite: $e')));
+      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
     }
   }
 
@@ -1727,7 +1930,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                       return;
                     }
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Could not create invite: $e')),
+                      SnackBar(content: Text(publicErrorMessage(e))),
                     );
                   }
                 },
@@ -1914,9 +2117,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                             return;
                           }
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Could not create invite: $e'),
-                            ),
+                            SnackBar(content: Text(publicErrorMessage(e))),
                           );
                         }
                       },
@@ -2325,24 +2526,15 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     final focus = _focus;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Your Family Tree'),
+        title: Text(_offline ? 'Offline' : 'Your Family Tree'),
         actions: [
-          IconButton(
-            tooltip: 'Return to my branch',
-            onPressed: _viewer == null ? null : _returnToViewer,
-            icon: const Icon(Icons.my_location),
+          FamilyTreeSettingsMenu(
+            onSelected: _handleFamilySetting,
+            canRecenter: _viewer != null,
+            canLeave: _isFamilyMember && !_offline,
+            canEditName: _canRenameFamily && !_offline,
+            enabled: !_loading && !_familySettingsBusy,
           ),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: () => _load(keepFocusKey: focus?.key),
-            icon: const Icon(Icons.refresh),
-          ),
-          if (_viewer != null && focus?.key == _viewer!.key)
-            IconButton(
-              tooltip: 'Leave family',
-              onPressed: _leaveFamily,
-              icon: const Icon(Icons.group_remove_outlined),
-            ),
         ],
       ),
       body: _loading
@@ -2445,10 +2637,12 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                         person: focus,
                         focused: true,
                         onTap: () {},
-                        onOpen: () => _openPerson(focus),
+                        onOpen: _offline ? null : () => _openPerson(focus),
                       ),
                     ),
-                    for (final bubble in model.bubbles)
+                    for (final bubble in model.bubbles.where(
+                      (b) => !_offline || b.person != null,
+                    ))
                       Positioned(
                         left: bubble.center.dx - 80,
                         top: bubble.center.dy - 58,
@@ -2468,7 +2662,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                                 person: bubble.person!,
                                 focused: false,
                                 onTap: () => _focusOn(bubble.person!),
-                                onOpen: () => _openPerson(bubble.person!),
+                                onOpen: _offline
+                                    ? null
+                                    : () => _openPerson(bubble.person!),
                               ),
                       ),
                   ],
@@ -2735,7 +2931,7 @@ class _PersonBubble extends StatelessWidget {
   final _TreePerson person;
   final bool focused;
   final VoidCallback onTap;
-  final VoidCallback onOpen;
+  final VoidCallback? onOpen;
 
   const _PersonBubble({
     required this.person,
@@ -2794,7 +2990,7 @@ class _PersonBubble extends StatelessWidget {
                               : null,
                         ),
                       ),
-                      if (focused) ...[
+                      if (focused && onOpen != null) ...[
                         const SizedBox(height: 8),
                         SizedBox(
                           height: 30,

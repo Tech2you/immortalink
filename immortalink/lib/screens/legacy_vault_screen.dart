@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../services/recent_cache.dart';
+import '../services/vault_snapshot.dart';
 import '../widgets/vault_media.dart';
 import '../utils/vault_media_upload.dart';
 import 'dart:typed_data';
@@ -328,6 +330,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
   Future<void> _load() async {
     if (!mounted) return;
+    final cache = RecentCache.instance;
+    final epoch = cache.generation;
+    final snapshotKey = 'legacy-screen:${widget.legacyMemberId}';
 
     setState(() {
       _loading = true;
@@ -347,6 +352,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       if (!mounted) return;
 
       if (res == null) {
+        await cache.remove(snapshotKey);
+        if (!mounted) return;
         setState(() {
           _row = null;
           _error = 'Legacy predecessor not found.';
@@ -380,13 +387,37 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _loadMemories();
       await _loadMemoryPhotos();
       await _loadMemoryVoice();
+      if (mounted &&
+          epoch == cache.generation &&
+          _memoryError == null &&
+          _memoryPhotoError == null &&
+          _photoError == null) {
+        await cacheVisitedVault(
+          key: snapshotKey,
+          epoch: epoch,
+          name: (_row?['display_name'] ?? _row?['name'] ?? 'Family vault')
+              .toString(),
+          avatar: _profilePhotoUrl,
+          about: _aboutController.text,
+          familyId: widget.familyId,
+          memories: _memories,
+          photos: [
+            for (final group in _memoryPhotosById.entries)
+              for (final p in group.value) {...p, 'memoryId': group.key},
+          ],
+        );
+      } else if (mounted && epoch == cache.generation) {
+        await cache.remove(snapshotKey);
+      }
     } on PostgrestException catch (e) {
+      await cache.remove(snapshotKey);
       if (!mounted) return;
       setState(() {
         _error = e.message;
         _loading = false;
       });
     } catch (e) {
+      if (e is AuthException) await cache.remove(snapshotKey);
       if (!mounted) return;
       setState(() {
         _error = e.toString();
@@ -1347,7 +1378,16 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
           Future<void> pickPendingPhotos() async {
             try {
-              final picked = await pickVaultMedia(context, allowMultiple: true, remainingBytes: MediaUploadPolicy.pendingMediaMaxBytes - pendingPhotos.fold<int>(0, (sum, p) => sum + p.bytes.length));
+              final picked = await pickVaultMedia(
+                context,
+                allowMultiple: true,
+                remainingBytes:
+                    MediaUploadPolicy.pendingMediaMaxBytes -
+                    pendingPhotos.fold<int>(
+                      0,
+                      (sum, p) => sum + p.bytes.length,
+                    ),
+              );
               if (picked == null) return;
 
               final selected = <_LegacyPendingPhoto>[];
@@ -1358,7 +1398,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
                 try {
                   final image = await VaultMediaUpload.prepare(
-        bytes,
+                    bytes,
                     fileName: file.name,
                     contentType: _contentTypeFromExt(_extFromName(file.name)),
                   );
@@ -1636,13 +1676,16 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                     height: 116,
                                     color: Colors.black.withValues(alpha: 0.04),
                                     child: MediaUploadPolicy.isVideo(photo.name)
- ? PendingVideoPreview(bytes: photo.bytes, name: photo.name)
- : Image.memory(
-                                      photo.bytes,
-                                      width: 116,
-                                      height: 116,
-                                      fit: BoxFit.contain,
-                                    ),
+                                        ? PendingVideoPreview(
+                                            bytes: photo.bytes,
+                                            name: photo.name,
+                                          )
+                                        : Image.memory(
+                                            photo.bytes,
+                                            width: 116,
+                                            height: 116,
+                                            fit: BoxFit.contain,
+                                          ),
                                   ),
                                 ),
                                 Positioned(
@@ -2221,11 +2264,15 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
               CircleAvatar(
                 radius: 48,
                 backgroundColor: Colors.white,
-                backgroundImage: hasPhoto
-                    ? NetworkImage(_profilePhotoUrl!)
-                    : null,
                 child: hasPhoto
-                    ? null
+                    ? ClipOval(
+                        child: VaultMedia.network(
+                          _profilePhotoUrl!,
+                          width: 96,
+                          height: 96,
+                          fit: BoxFit.cover,
+                        ),
+                      )
                     : const Icon(Icons.person_outline, size: 44),
               ),
               Positioned(
@@ -2506,8 +2553,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final media = [
       ..._photos,
       for (final entry in _memoryPhotosById.entries)
-        for (final photo in entry.value)
-          {...photo, 'memory_id': entry.key},
+        for (final photo in entry.value) {...photo, 'memory_id': entry.key},
     ];
     return _fieldCard(
       padding: const EdgeInsets.all(16),
@@ -2538,7 +2584,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
               style: TextStyle(color: Colors.black.withValues(alpha: 0.60)),
             )
           else if (media.isEmpty)
-            const Text('Photos and videos added to this profile will appear here.')
+            const Text(
+              'Photos and videos added to this profile will appear here.',
+            )
           else
             GridView.builder(
               shrinkWrap: true,

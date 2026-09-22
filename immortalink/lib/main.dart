@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'env.dart';
+import 'services/recent_cache.dart';
 import 'services/onboarding_invite_state.dart';
 import 'services/first_account_setup.dart';
 import 'services/push_notification_service.dart';
@@ -70,9 +71,16 @@ Future<void> _runApp() async {
     ),
   );
 
+  await RecentCache.instance.setUser(Supabase.instance.client.auth.currentUser?.id);
   await PushNotificationService.configureMessageHandlers();
 
   Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+    final user = data.session?.user.id;
+    if (RecentCache.instance.user != user) {
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+      unawaited(RecentCache.instance.setUser(user));
+    }
     if (data.event == AuthChangeEvent.passwordRecovery) {
       _passwordRecoveryPending.value = true;
     } else if (data.event == AuthChangeEvent.signedOut) {

@@ -1,12 +1,14 @@
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../utils/media_upload_policy.dart';
 import '../utils/video_preview_source.dart';
+import 'recent_photo.dart';
 
 class VaultMedia extends StatelessWidget {
   final String url;
+  final bool cachedOnly;
   final BoxFit? fit;
   final double? width;
   final double? height;
@@ -18,6 +20,7 @@ class VaultMedia extends StatelessWidget {
   const VaultMedia.network(
     this.url, {
     super.key,
+    this.cachedOnly = false,
     this.fit,
     this.width,
     this.height,
@@ -30,15 +33,52 @@ class VaultMedia extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!MediaUploadPolicy.isVideo(url)) {
-      return Image.network(
+      if (kIsWeb) {
+        return Image.network(
+          url,
+          fit: fit,
+          width: width,
+          height: height,
+          alignment: alignment,
+          gaplessPlayback: gaplessPlayback,
+          errorBuilder: errorBuilder,
+          loadingBuilder: loadingBuilder,
+        );
+      }
+      return RecentPhoto(
         url,
+        cachedOnly: cachedOnly,
         fit: fit,
         width: width,
         height: height,
         alignment: alignment,
-        gaplessPlayback: gaplessPlayback,
         errorBuilder: errorBuilder,
-        loadingBuilder: loadingBuilder,
+      );
+    }
+    if (cachedOnly) {
+      return SizedBox(
+        width: width,
+        height: height,
+        child: ColoredBox(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          child: const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.videocam_off_outlined, size: 28),
+                  SizedBox(height: 8),
+                  Flexible(child: Text(
+                    'Video\nOffline',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, height: 1.3),
+                  )),
+                ],
+              ),
+            ),
+          ),
+        ),
       );
     }
     return VaultVideoTile(url: url, width: width, height: height, fit: fit);

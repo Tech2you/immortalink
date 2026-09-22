@@ -1,5 +1,7 @@
 // lib/screens/vault_readonly_screen.dart
 import 'dart:async';
+import '../services/recent_cache.dart';
+import '../services/vault_snapshot.dart';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -296,6 +298,9 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
   }
 
   Future<void> _loadAll() async {
+    final cache = RecentCache.instance;
+    final epoch = cache.generation;
+    final snapshotKey = 'vault-screen:${widget.vaultId}';
     setState(() {
       _loading = true;
       _error = null;
@@ -309,6 +314,13 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           .maybeSingle();
 
       final ownerId = (meta?['owner_id'] as String?)?.trim();
+      if (meta == null) {
+        await cache.remove(snapshotKey);
+        throw const PostgrestException(
+          message: 'Vault unavailable',
+          code: '42501',
+        );
+      }
       final familyId = (widget.familyId ?? meta?['family_id'] as String?)
           ?.trim();
       final path = (meta?['avatar_path'] as String?)?.trim();
@@ -381,17 +393,45 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       _sharedMediaRequest = null;
 
       unawaited(_loadHighlights());
-      unawaited(_loadAboutMeText());
       unawaited(_loadAboutPhotos());
       unawaited(_loadCoreVoice());
-      unawaited(_loadMemoryPhotosForVault());
       unawaited(_loadMemoryVoiceForVault());
+      await Future.wait([_loadAboutMeText(), _loadMemoryPhotosForVault()]);
+      if (mounted &&
+          epoch == cache.generation &&
+          _memoryPhotoError == null &&
+          _aboutMeTextError == null) {
+        await cacheVisitedVault(
+          key: snapshotKey,
+          epoch: epoch,
+          name: _displayName ?? _vaultName,
+          avatar: _avatarUrl,
+          about: _aboutMeText,
+          familyId: _familyId,
+          memories: _memories,
+          photos: [
+            for (final p in _memoryPhotosById.values.expand((v) => v))
+              {
+                'id': p.id,
+                'memoryId': p.memoryId,
+                'path': p.path,
+                'url': p.url,
+              },
+          ],
+        );
+      } else if (mounted && epoch == cache.generation) {
+        await cache.remove(snapshotKey);
+      }
     } on PostgrestException catch (e) {
+      await cache.remove(snapshotKey);
+      if (!mounted) return;
       setState(() {
         _error = e.message;
         _loading = false;
       });
     } catch (e) {
+      if (e is AuthException) await cache.remove(snapshotKey);
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -1829,9 +1869,15 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
           CircleAvatar(
             radius: 48,
             backgroundColor: const Color(0xFFE9D7F1),
-            backgroundImage: hasAvatar ? NetworkImage(_avatarUrl!) : null,
             child: hasAvatar
-                ? null
+                ? ClipOval(
+                    child: VaultMedia.network(
+                      _avatarUrl!,
+                      width: 96,
+                      height: 96,
+                      fit: BoxFit.cover,
+                    ),
+                  )
                 : const Icon(Icons.person_outline, size: 42),
           ),
           const SizedBox(height: 14),
@@ -1970,7 +2016,8 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       width: double.infinity,
       child: VaultSectionPicker(
         selected: _selectedVaultSection,
-        onChanged: (selection) => setState(() => _selectedVaultSection = selection),
+        onChanged: (selection) =>
+            setState(() => _selectedVaultSection = selection),
       ),
     );
   }

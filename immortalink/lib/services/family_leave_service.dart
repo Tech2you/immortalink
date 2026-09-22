@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'recent_cache.dart';
 
 class FamilyLeaveImpact {
   final bool isLastRealMember;
@@ -48,5 +49,6 @@ class FamilyLeaveService {
       confirmedDestructiveLeave ? 'leave_family_confirmed' : 'leave_family',
       params: {'p_family_id': familyId},
     );
+    await RecentCache.instance.clear();
   }
 }

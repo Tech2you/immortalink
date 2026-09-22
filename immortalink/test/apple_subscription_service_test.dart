@@ -39,17 +39,19 @@ class FakeStore implements InAppPurchase {
   String country = 'USA';
   int completed = 0;
   int queries = 0;
+  bool available = true;
+  bool empty = false;
   @override
   Stream<List<PurchaseDetails>> get purchaseStream => updates.stream;
   @override
-  Future<bool> isAvailable() async => true;
+  Future<bool> isAvailable() async => available;
   @override
   Future<String> countryCode() async => country;
   @override
   Future<ProductDetailsResponse> queryProductDetails(Set<String> ids) async {
     queries++;
     return ProductDetailsResponse(
-      productDetails: ids
+      productDetails: (empty ? <String>{} : ids)
           .map(
             (id) => ProductDetails(
               id: id,
@@ -165,6 +167,30 @@ void main() {
       tearDown(() async {
         service.dispose();
         await store.updates.close();
+      });
+
+      test(
+        'retries an unavailable store without a storefront change',
+        () async {
+          store.available = false;
+          await service.refreshProducts();
+          expect(service.storeAvailable, isFalse);
+          store.available = true;
+          final before = store.queries;
+          await service.refreshStorefront();
+          expect(store.queries, before + 1);
+          expect(service.error, isNull);
+        },
+      );
+
+      test('retries an empty catalog without a storefront change', () async {
+        store.empty = true;
+        await service.refreshProducts();
+        expect(service.products, isEmpty);
+        store.empty = false;
+        await service.refreshStorefront();
+        expect(service.products, isNotEmpty);
+        expect(service.error, isNull);
       });
 
       Future<void> purchase({bool waitForError = true}) async {

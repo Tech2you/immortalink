@@ -14,6 +14,7 @@
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { boundedEmbeddingCandidates, MAX_QUESTION_CHARACTERS } from "../_shared/ai_cost_limits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -87,7 +88,7 @@ async function rankContextByMeaning(
 ) {
   if (!OPENAI_API_KEY || parts.length <= maximum) return parts.slice(0, maximum);
 
-  const candidates = parts.slice(0, 60);
+  const candidates = boundedEmbeddingCandidates(parts);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
@@ -911,6 +912,9 @@ serve(async (req) => {
     if (!question && !wantsIcebreakers) {
       return json({ error: "question is required" }, 400);
     }
+    if (question.length > MAX_QUESTION_CHARACTERS) {
+      return json({ error: "Please keep your question under 2,000 characters." }, 400);
+    }
 
     let familyId = requestedFamilyId;
     let vaultOwnerUserId = "";
@@ -1303,15 +1307,16 @@ serve(async (req) => {
       }
     }
 
-    contextParts = await rankContextByMeaning(question, contextParts, 14);
-    const context = contextParts.join("\n\n").slice(0, 6500);
-
     const quotaError = await consumeAiUsage({
       supabase,
       familyId,
       vaultId,
     });
     if (quotaError) return json({ error: quotaError }, 429);
+
+    // Embeddings are paid too: reserve the allowance before either API call.
+    contextParts = await rankContextByMeaning(question, contextParts, 14);
+    const context = contextParts.join("\n\n").slice(0, 6500);
 
     const ai = await openaiChat({
       question,

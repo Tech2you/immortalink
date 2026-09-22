@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../services/connection_status.dart';
+import '../utils/public_error.dart';
 import '../utils/vault_media_upload.dart';
 import 'dart:typed_data';
 
@@ -49,6 +51,11 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   String? _selectedMood;
   bool _showDetails = false;
   bool _saving = false;
+  final _connection = ConnectionStatus.instance;
+  void _connectionChanged() {
+    if (mounted) setState(() {});
+  }
+
   bool _shareToFamilyFeed = true;
 
   static const _photoBucket = 'memory_photos';
@@ -57,6 +64,8 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   @override
   void initState() {
     super.initState();
+    _connection.addListener(_connectionChanged);
+    _connection.attach();
     _previewPlayer.onPlayerComplete.listen((_) {
       if (mounted) setState(() => _playingVoiceIndex = null);
     });
@@ -69,6 +78,8 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
 
   @override
   void dispose() {
+    _connection.removeListener(_connectionChanged);
+    _connection.detach();
     if (_recorder.isRecording) unawaited(_recorder.cancel());
     _recorder.dispose();
     _previewPlayer.dispose();
@@ -153,7 +164,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         _toast(rejectedMessage);
       }
     } catch (e) {
-      _toast('Could not add media: $e');
+      _toast(publicErrorMessage(e));
     }
   }
 
@@ -198,7 +209,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                   });
                 } catch (e) {
                   if (sheetContext.mounted) {
-                    setSheetState(() => error = e.toString());
+                    setSheetState(() => error = publicErrorMessage(e));
                   }
                 }
               }
@@ -295,7 +306,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                                         }
                                       } catch (e) {
                                         setSheetState(() {
-                                          error = e.toString();
+                                          error = publicErrorMessage(e);
                                           stopping = false;
                                         });
                                       }
@@ -357,7 +368,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
       );
       if (mounted) setState(() => _playingVoiceIndex = index);
     } catch (e) {
-      _toast('Could not play this voice note: $e');
+      _toast(publicErrorMessage(e));
     }
   }
 
@@ -476,6 +487,10 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
     setState(() => _saving = true);
     String? memoryId;
     try {
+      if (!await _connection.check() || !mounted) {
+        _toast('Reconnect to preserve this memory. Your text is still here.');
+        return;
+      }
       final fallbackTitle = title.isNotEmpty
           ? title
           : body.isNotEmpty
@@ -520,17 +535,18 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
       Navigator.pop(context, true);
     } on PostgrestException catch (e) {
       if (!await _showQuotaPromptIfNeeded(e)) {
-        _toast('Could not preserve this memory: ${e.message}');
+        _toast(publicErrorMessage(e));
       }
     } catch (e) {
+      _connection.report(e);
       if (await _showQuotaPromptIfNeeded(e)) {
         if (memoryId != null && mounted) Navigator.pop(context, true);
         return;
       }
       _toast(
         memoryId == null
-            ? 'Could not preserve this memory: $e'
-            : 'The memory was saved, but some media could not be added: $e',
+            ? publicErrorMessage(e)
+            : 'The memory was saved, but some media could not be added. Reconnect and check it before trying again.',
       );
       if (memoryId != null && mounted) Navigator.pop(context, true);
     } finally {
@@ -592,7 +608,10 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                   height: 150,
                   color: Colors.black.withValues(alpha: 0.04),
                   child: MediaUploadPolicy.isVideo(photo.name)
-                      ? PendingVideoPreview(bytes: photo.bytes, name: photo.name)
+                      ? PendingVideoPreview(
+                          bytes: photo.bytes,
+                          name: photo.name,
+                        )
                       : Image.memory(
                           photo.bytes,
                           width: 150,
@@ -624,7 +643,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         title: const Text('New memory'),
         actions: [
           TextButton(
-            onPressed: _saving ? null : _save,
+            onPressed: _saving || _connection.offline ? null : _save,
             child: Text(
               _saving ? 'Preserving…' : 'Preserve',
               style: const TextStyle(fontWeight: FontWeight.w800),
@@ -640,6 +659,13 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
             child: ListView(
               padding: const EdgeInsets.all(18),
               children: [
+                if (_connection.offline)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 16),
+                    child: Text(
+                      'You are offline. Reconnect to preserve this memory. Your text stays here while this screen is open.',
+                    ),
+                  ),
                 _profileRow(),
                 const SizedBox(height: 22),
                 TextField(
@@ -870,7 +896,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                 ),
                 const SizedBox(height: 18),
                 FilledButton.icon(
-                  onPressed: _saving ? null : _save,
+                  onPressed: _saving || _connection.offline ? null : _save,
                   icon: const Icon(Icons.auto_awesome_outlined),
                   label: Text(
                     _saving ? 'Preserving memory…' : 'Preserve memory',

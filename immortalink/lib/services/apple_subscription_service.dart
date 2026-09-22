@@ -53,7 +53,11 @@ class AppleSubscriptionService extends ChangeNotifier {
   ProductDetails? productFor(String productId) => _productsById[productId];
 
   Future<void> refreshStorefront() async {
-    if (!_initialized || _loading || !_storeAvailable) return;
+    if (!_initialized || _loading) return;
+    if (!_storeAvailable || _productsById.isEmpty || _error != null) {
+      await refreshProducts();
+      return;
+    }
     try {
       final country = await _iap.countryCode();
       if (country != _storefrontCountryCode) await refreshProducts();
@@ -77,6 +81,7 @@ class AppleSubscriptionService extends ChangeNotifier {
   }
 
   Future<void> refreshProducts() async {
+    if (_loading || _disposed) return;
     if (!AppleSubscriptionConfig.purchaseFlowEnabled ||
         AppleSubscriptionConfig.activeProductIds.isEmpty) {
       _message = 'Purchases are not enabled for this build yet.';
@@ -91,14 +96,18 @@ class AppleSubscriptionService extends ChangeNotifier {
         ..clear()
         ..addAll(AppleSubscriptionConfig.activeProductIds);
       _notFoundProductIds.clear();
-      _storeAvailable = await _iap.isAvailable();
+      _storeAvailable = await _iap.isAvailable().timeout(
+        const Duration(seconds: 12),
+      );
       if (!_storeAvailable) {
         _error = 'The App Store is not available on this device.';
         return;
       }
 
       try {
-        _storefrontCountryCode = await _iap.countryCode();
+        _storefrontCountryCode = await _iap.countryCode().timeout(
+          const Duration(seconds: 12),
+        );
       } catch (e) {
         _storefrontCountryCode = 'Unavailable: $e';
       }
@@ -116,9 +125,9 @@ class AppleSubscriptionService extends ChangeNotifier {
         },
       );
 
-      final response = await _iap.queryProductDetails(
-        AppleSubscriptionConfig.activeProductIds.toSet(),
-      );
+      final response = await _iap
+          .queryProductDetails(AppleSubscriptionConfig.activeProductIds.toSet())
+          .timeout(const Duration(seconds: 15));
       _notFoundProductIds
         ..clear()
         ..addAll(response.notFoundIDs);
@@ -202,6 +211,7 @@ class AppleSubscriptionService extends ChangeNotifier {
         await const MethodChannel(
           'com.everroots.app/subscriptions',
         ).invokeMethod<void>('manageSubscriptions');
+        await refreshStorefront();
         return;
       } on PlatformException {
         // Older builds or a temporarily unavailable sheet can use Apple's URL.
