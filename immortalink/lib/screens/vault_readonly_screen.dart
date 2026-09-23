@@ -2368,52 +2368,56 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
             : Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 920),
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 72),
-                    children: [
-                      _readOnlyProfileHeader(),
-                      _socialHighlightsSection(),
-                      _vaultSectionPicker(),
-                      if (_selectedVaultSection == 0) ...[
-                        if (_memories
-                            .where(
-                              (memory) =>
-                                  (memory['prompt_key'] ?? '').toString() !=
-                                  'about_me',
-                            )
-                            .isEmpty)
-                          Container(
-                            padding: const EdgeInsets.all(28),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.55),
-                              borderRadius: BorderRadius.circular(22),
-                            ),
-                            child: const Column(
-                              children: [
-                                Icon(Icons.auto_stories_outlined, size: 42),
-                                SizedBox(height: 12),
-                                Text(
-                                  'No memories shared yet',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        else
-                          ..._memories
+                  child: RefreshIndicator(
+                    onRefresh: _loadAll,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 72),
+                      children: [
+                        _readOnlyProfileHeader(),
+                        _socialHighlightsSection(),
+                        _vaultSectionPicker(),
+                        if (_selectedVaultSection == 0) ...[
+                          if (_memories
                               .where(
                                 (memory) =>
                                     (memory['prompt_key'] ?? '').toString() !=
                                     'about_me',
                               )
-                              .map(_socialMemoryCard),
+                              .isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(28),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.55),
+                                borderRadius: BorderRadius.circular(22),
+                              ),
+                              child: const Column(
+                                children: [
+                                  Icon(Icons.auto_stories_outlined, size: 42),
+                                  SizedBox(height: 12),
+                                  Text(
+                                    'No memories shared yet',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            ..._memories
+                                .where(
+                                  (memory) =>
+                                      (memory['prompt_key'] ?? '').toString() !=
+                                      'about_me',
+                                )
+                                .map(_socialMemoryCard),
+                        ],
+                        if (_selectedVaultSection == 1) _readOnlyAboutSection(),
+                        if (_selectedVaultSection == 2) _readOnlyMediaSection(),
                       ],
-                      if (_selectedVaultSection == 1) _readOnlyAboutSection(),
-                      if (_selectedVaultSection == 2) _readOnlyMediaSection(),
-                    ],
+                    ),
                   ),
                 ),
               ),

@@ -16,6 +16,7 @@ void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   late Map<String, dynamic> row;
   Map<String, dynamic>? saved;
+  var loads = 0;
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -33,6 +34,7 @@ void main() {
       anonKey: 'test-key',
       httpClient: MockClient((request) async {
         if (request.url.path.endsWith('/legacy_family_members')) {
+          if (request.method == 'GET') loads++;
           if (request.method == 'PATCH') {
             saved = jsonDecode(request.body) as Map<String, dynamic>;
             row.addAll(saved!);
@@ -91,6 +93,18 @@ void main() {
           .join('\n'),
     );
   }
+
+  testWidgets('pulling the vault down refreshes its contents', (tester) async {
+    await open(tester);
+    final before = loads;
+    await tester.drag(
+      find.byType(SingleChildScrollView).first,
+      const Offset(0, 420),
+    );
+    await tester.pumpAndSettle();
+    expect(loads, greaterThan(before));
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('Edit profile reveals the name field and saves both names', (
     tester,

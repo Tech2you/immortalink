@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { removeStoragePrefix } from "./storage_cleanup.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -47,32 +48,6 @@ async function optionalSelect(
   const { data, error } = await query;
   if (error && !optionalSchemaError(error)) throw error;
   return (data || []) as any[];
-}
-
-async function removeStoragePrefix(admin: any, bucket: string, prefix: string) {
-  const files: string[] = [];
-
-  async function walk(path: string) {
-    const { data, error } = await admin.storage
-      .from(bucket)
-      .list(path, { limit: 1000 });
-    if (error || !data) return;
-
-    for (const item of data) {
-      const itemPath = `${path}/${item.name}`.replace(/^\/+/, "");
-      if (item.id) {
-        files.push(itemPath);
-      } else {
-        await walk(itemPath);
-      }
-    }
-  }
-
-  await walk(prefix.replace(/\/+$/, ""));
-
-  for (let i = 0; i < files.length; i += 100) {
-    await admin.storage.from(bucket).remove(files.slice(i, i + 100));
-  }
 }
 
 serve(async (req) => {

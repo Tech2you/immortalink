@@ -205,13 +205,14 @@ class AppleSubscriptionService extends ChangeNotifier {
     }
   }
 
-  Future<void> openManageSubscriptions() async {
+  Future<void> openManageSubscriptions({bool refreshAfter = true}) async {
+    _error = null;
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       try {
         await const MethodChannel(
           'com.everroots.app/subscriptions',
         ).invokeMethod<void>('manageSubscriptions');
-        await refreshStorefront();
+        if (refreshAfter) await refreshStorefront();
         return;
       } on PlatformException {
         // Older builds or a temporarily unavailable sheet can use Apple's URL.

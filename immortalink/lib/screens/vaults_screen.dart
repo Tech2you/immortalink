@@ -8,6 +8,7 @@ import 'recently_viewed_screen.dart';
 import '../widgets/vault_media.dart';
 
 import 'package:audioplayers/audioplayers.dart';
+import '../widgets/account_deletion_billing_notice.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import '../utils/family_profile_actions.dart';
@@ -504,7 +505,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       }
 
       await _supabase.auth
-          .signInWithPassword(email: email, password: password.trim())
+          .signInWithPassword(email: email, password: password)
           .timeout(const Duration(seconds: 20));
 
       final res = await _supabase.functions
@@ -656,13 +657,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
     return 'added a memory';
   }
 
-  Future<void> _loadVault() async {
+  Future<void> _loadVault({bool showLoading = true}) async {
     if (!mounted || _vaultLoadInProgress) return;
     _vaultLoadInProgress = true;
     final epoch = RecentCache.instance.generation;
 
     setState(() {
-      _loading = !_cachedHome;
+      _loading = showLoading && !_cachedHome;
       _error = null;
     });
 
@@ -743,7 +744,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       setState(() => _loading = false);
       _syncFamilyFeedRealtime();
       _registerForPushNotificationsOnce();
-      unawaited(_loadFamilyFeed());
+      await _loadFamilyFeed();
     } catch (e) {
       _connection.report(e);
       if (isConnectionFailure(e)) {
@@ -2443,82 +2444,90 @@ class _VaultsScreenState extends State<VaultsScreen> {
                             ],
                           ),
                         )
-                      : ListView(
-                          controller: _scrollController,
-                          children: [
-                            _familyTreesCard(),
-                            const SizedBox(height: 12),
-                            Card(
-                              color: Colors.white.withOpacity(0.36),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                                side: BorderSide(
-                                  color: Colors.black.withOpacity(0.08),
-                                ),
-                              ),
-                              elevation: 0,
-                              child: ListTile(
-                                onTap: _openVaultHome,
-                                leading: CircleAvatar(
-                                  radius: 18,
-                                  backgroundColor: Colors.black.withOpacity(
-                                    0.08,
+                      : RefreshIndicator(
+                          onRefresh: () => _loadVault(showLoading: false),
+                          child: ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            controller: _scrollController,
+                            children: [
+                              _familyTreesCard(),
+                              const SizedBox(height: 12),
+                              Card(
+                                color: Colors.white.withOpacity(0.36),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  side: BorderSide(
+                                    color: Colors.black.withOpacity(0.08),
                                   ),
-                                  child: !hasAvatar
-                                      ? Icon(
-                                          Icons.person,
-                                          size: 18,
-                                          color: Colors.black.withOpacity(0.6),
-                                        )
-                                      : ClipOval(
-                                          child: VaultMedia.network(
-                                            _vaultAvatarUrl!,
-                                            width: 36,
-                                            height: 36,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (_, _, _) =>
-                                                const Icon(
-                                                  Icons.person_outline,
-                                                ),
+                                ),
+                                elevation: 0,
+                                child: ListTile(
+                                  onTap: _openVaultHome,
+                                  leading: CircleAvatar(
+                                    radius: 18,
+                                    backgroundColor: Colors.black.withOpacity(
+                                      0.08,
+                                    ),
+                                    child: !hasAvatar
+                                        ? Icon(
+                                            Icons.person,
+                                            size: 18,
+                                            color: Colors.black.withOpacity(
+                                              0.6,
+                                            ),
+                                          )
+                                        : ClipOval(
+                                            child: VaultMedia.network(
+                                              _vaultAvatarUrl!,
+                                              width: 36,
+                                              height: 36,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, _, _) =>
+                                                  const Icon(
+                                                    Icons.person_outline,
+                                                  ),
+                                            ),
                                           ),
+                                  ),
+                                  title: Text(
+                                    (_vault!['name'] ?? '').toString(),
+                                  ),
+                                  subtitle: Text(createdLabel),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'Rename',
+                                        onPressed: () => _renameVault(
+                                          (_vault!['id'] ?? '').toString(),
+                                          (_vault!['name'] ?? '').toString(),
                                         ),
-                                ),
-                                title: Text((_vault!['name'] ?? '').toString()),
-                                subtitle: Text(createdLabel),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Rename',
-                                      onPressed: () => _renameVault(
-                                        (_vault!['id'] ?? '').toString(),
-                                        (_vault!['name'] ?? '').toString(),
+                                        icon: const Icon(Icons.edit),
                                       ),
-                                      icon: const Icon(Icons.edit),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Delete',
-                                      onPressed: () => _deleteVault(
-                                        (_vault!['id'] ?? '').toString(),
+                                      IconButton(
+                                        tooltip: 'Delete',
+                                        onPressed: () => _deleteVault(
+                                          (_vault!['id'] ?? '').toString(),
+                                        ),
+                                        icon: const Icon(Icons.delete_outline),
                                       ),
-                                      icon: const Icon(Icons.delete_outline),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Open',
-                                      onPressed: _openVaultHome,
-                                      icon: const Icon(Icons.chevron_right),
-                                    ),
-                                  ],
+                                      IconButton(
+                                        tooltip: 'Open',
+                                        onPressed: _openVaultHome,
+                                        icon: const Icon(Icons.chevron_right),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                            KeyedSubtree(
-                              key: _familyFeedKey,
-                              child: _buildFeedSection(
-                                _familyMemberships.isNotEmpty,
+                              KeyedSubtree(
+                                key: _familyFeedKey,
+                                child: _buildFeedSection(
+                                  _familyMemberships.isNotEmpty,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         )),
           ),
         ],
@@ -2603,6 +2612,18 @@ class _DeleteAccountConfirmationDialogState
     extends State<_DeleteAccountConfirmationDialog> {
   final _passwordController = TextEditingController();
 
+  Future<void> _manageSubscriptions() async {
+    final service = AppleSubscriptionService();
+    try {
+      await service.openManageSubscriptions(refreshAfter: false);
+      if (service.error != null) {
+        throw StateError('Could not open subscriptions');
+      }
+    } finally {
+      service.dispose();
+    }
+  }
+
   @override
   void dispose() {
     _passwordController.dispose();
@@ -2617,25 +2638,29 @@ class _DeleteAccountConfirmationDialogState
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Delete account permanently?'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'This permanently deletes your account, vault, memories, media, and family-tree links. This cannot be undone.',
-          ),
-          const SizedBox(height: 12),
-          const Text('Enter your password to confirm this is you.'),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _passwordController,
-            autofocus: true,
-            obscureText: true,
-            textInputAction: TextInputAction.done,
-            decoration: const InputDecoration(labelText: 'Password'),
-            onSubmitted: (_) => FocusManager.instance.primaryFocus?.unfocus(),
-          ),
-        ],
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This permanently deletes your account, vault, memories, media, and family-tree links. This cannot be undone.',
+            ),
+            const SizedBox(height: 12),
+            AccountDeletionBillingNotice(onManage: _manageSubscriptions),
+            const SizedBox(height: 12),
+            const Text('Enter your password to confirm this is you.'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _passwordController,
+              autofocus: true,
+              obscureText: true,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(labelText: 'Password'),
+              onSubmitted: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(

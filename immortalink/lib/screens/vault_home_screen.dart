@@ -4440,57 +4440,63 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             : Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 920),
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                    children: [
-                      _vaultAvatarHeader(),
-                      _memoryComposerCard(),
-                      _socialHighlightsSection(),
-                      _vaultSectionPicker(),
-                      if (_selectedVaultSection == 0) ...[
-                        if (_memories.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.all(28),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.55),
-                              borderRadius: BorderRadius.circular(22),
-                            ),
-                            child: Column(
-                              children: [
-                                const Icon(
-                                  Icons.auto_stories_outlined,
-                                  size: 42,
-                                ),
-                                const SizedBox(height: 12),
-                                const Text(
-                                  'Your story starts here',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
+                  child: RefreshIndicator(
+                    onRefresh: _refreshVault,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                      children: [
+                        _vaultAvatarHeader(),
+                        _memoryComposerCard(),
+                        _socialHighlightsSection(),
+                        _vaultSectionPicker(),
+                        if (_selectedVaultSection == 0) ...[
+                          if (_memories.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(28),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.55),
+                                borderRadius: BorderRadius.circular(22),
+                              ),
+                              child: Column(
+                                children: [
+                                  const Icon(
+                                    Icons.auto_stories_outlined,
+                                    size: 42,
                                   ),
-                                ),
-                                const SizedBox(height: 6),
-                                const Text(
-                                  'Preserve a moment for the people you love.',
-                                ),
-                                const SizedBox(height: 14),
-                                FilledButton.icon(
-                                  onPressed: () => _openAddMemory(),
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('Share your first memory'),
-                                ),
-                              ],
-                            ),
-                          )
-                        else
-                          ..._memories.map(_socialMemoryCard),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'Your story starts here',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  const Text(
+                                    'Preserve a moment for the people you love.',
+                                  ),
+                                  const SizedBox(height: 14),
+                                  FilledButton.icon(
+                                    onPressed: () => _openAddMemory(),
+                                    icon: const Icon(Icons.add),
+                                    label: const Text(
+                                      'Share your first memory',
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            ..._memories.map(_socialMemoryCard),
+                        ],
+                        if (_selectedVaultSection == 1) ...[
+                          _aboutMeSection(),
+                          _coreVoiceSection(),
+                        ],
+                        if (_selectedVaultSection == 2) _mediaSection(),
                       ],
-                      if (_selectedVaultSection == 1) ...[
-                        _aboutMeSection(),
-                        _coreVoiceSection(),
-                      ],
-                      if (_selectedVaultSection == 2) _mediaSection(),
-                    ],
+                    ),
                   ),
                 ),
               ),

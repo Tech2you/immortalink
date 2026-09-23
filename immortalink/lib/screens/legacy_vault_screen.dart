@@ -3194,19 +3194,23 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 980),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _headerCard(),
-              _legacyComposerCard(),
-              const SizedBox(height: 14),
-              _photosCard(),
-              const SizedBox(height: 14),
-              _sectionPicker(),
-              _activeSection(),
-            ],
+        child: RefreshIndicator(
+          onRefresh: _load,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _headerCard(),
+                _legacyComposerCard(),
+                const SizedBox(height: 14),
+                _photosCard(),
+                const SizedBox(height: 14),
+                _sectionPicker(),
+                _activeSection(),
+              ],
+            ),
           ),
         ),
       ),
