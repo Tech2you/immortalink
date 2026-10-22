@@ -3,7 +3,143 @@
 Public paid launch: **NO-GO until the gates below are verified**.
 This is the current work ledger; earlier recovery notes are historical evidence.
 
-## Latest checkpoint - 21 October 2026
+## Latest checkpoint - 22 October 2026
+
+### Memory creation permission regression fixed and deployed
+
+- The owner hit "You do not have permission to complete this action" while
+  preserving a new personal memory with a photo. Live Postgres logs identified
+  three failed inserts at 21:24 UTC against `safety_memory_read` on `memories`.
+  There were zero moderation restrictions, so this was not an account suspension
+  or a report-limit failure. The insert failed before the app uploaded attachments.
+- Root cause: the 21 October restrictive SELECT policy called the STABLE
+  `memory_visible(id)` helper, which rereads `memories`. During the app's
+  `insert(...).select('id').single()` request, that helper's statement snapshot
+  cannot see the newly inserted row; the RETURNING check rejects the whole insert.
+  The prior tests seeded existing rows and missed this creation path.
+- Added the exact failing insert-returning regression first and observed the same
+  policy/42501 error locally. Migration `20261022213230_memory_insert_returning_safety`
+  now evaluates the candidate row's vault visibility and exact-memory restriction
+  directly. It changes only this restrictive SELECT policy; ownership/write
+  grants, attachment policies, helpers, payments and screening are unchanged.
+  A new helper or a broad read/write grant was not introduced.
+- The owner explicitly approved live deployment and disposable rollback-only
+  verification. Applied the tested policy, read it back as RESTRICTIVE SELECT
+  for `authenticated`, and aligned the local migration filename to the server's
+  recorded version above. No phone rebuild or installation was needed.
+- All 34 focused database tests pass (12 personal-memory, eight preview, seven
+  foundation safety, seven alert cases). Coverage includes insert/update returning,
+  photo/voice metadata, foreign/viewer/anonymous write denial, hidden memory/vault
+  denial, suspension/reinstatement and exact hide/restore with sibling preservation.
+- Live `supabase/verification/memory_insert_returning_rollback_qa.sql` passed owner
+  insert/update, family read, foreign/viewer write denial, exact hide/restore,
+  outsider read denial and suspension. All fixtures and restrictions rolled back.
+  Before/after counts matched: six Auth users, five families, five vaults, four
+  memories, ten Storage objects, zero restrictions. No real account or memory
+  was changed. This SQL check does not claim real Storage upload/playback proof.
+- Security-advisor baseline is unchanged: 18 deny-by-default-table INFO entries,
+  36 callable-definer warnings, public `vector` and disabled leaked-password
+  protection. Existing [RPC review](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable),
+  [extension schema](https://supabase.com/docs/guides/database/database-linter?lint=0014_extension_in_public)
+  and [password protection](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection)
+  gates remain, not new findings from this fix.
+- Phone acceptance: the owner replied "worked" to the same-draft Preserve check
+  asking whether the memory saved and its photo appeared. This is owner-confirmed
+  device acceptance, not an independent device inspection. No app update was needed.
+- Hide acceptance: the owner confirmed hiding the disposable photo memory and
+  then confirmed it was hidden in Heiro. The supplied Safari snapshot shows
+  report `4a08c3fa-94ea-410a-8002-4ae28c17b268` resolved, no open reports, and
+  the exact photo still available in the restricted reviewer preview. This is
+  owner-reported phone acceptance plus supplied UI evidence, not a fresh backend
+  audit or independent device inspection. Unrelated-memory visibility was not
+  explicitly confirmed; cached-copy revocation was not tested by this result.
+- Restore acceptance: the owner confirmed the memory returned with its photo.
+  A subsequent read-only live audit for the exact report confirms `hide` at
+  21:41:21 UTC, `restore` at 21:51:01 UTC, status `resolved` and no current
+  exact-target restriction. This completes owner-operated hide/restore acceptance
+  for this disposable memory; it does not prove cache revocation or all media types.
+- Retention/readback: the live review function only adds/removes a restriction;
+  it does not delete memory/media or expire the restriction. Live storage usage
+  sums the stored media objects without excluding hidden content. The console
+  lists only open/reviewing reports, but exact-reference lookup can reopen a
+  resolved case. Closing the browser or dismissing a case does not lift a hide.
+- Resume: verify the owner can reopen this resolved case by its email reference
+  after ending/restarting the private session, then cover audio/blocking and the
+  known cached-media takedown gap. Define deliberate moderation retention/deletion
+  and appeal handling instead of leaving hidden files unmanaged or silently
+  auto-deleting family memories. Filtering and broader Apple gates remain open.
+
+### Exact-memory report received; alert located in Outlook Junk
+
+- The owner reported the updated app testable through TestFlight and submitted a
+  memory report. Live read-only metadata confirms reference
+  `b753bf90-5318-4668-ac81-51fe59dd608c`, kind `memory`, status `open`, received
+  at 11:39:21 South African time. No report narrative or family media was read.
+- The alert outbox records one attempt, provider acceptance at 11:40:01 and
+  provider ID `01a162fb-571d-7a7b-a4f7-a1367d741e56`. Resend's original
+  `rossstrauss1` workspace shows today's matching recipient/subject as Delivered.
+  Outlook then independently shows the exact report reference in
+  `linebreakers@outlook.com` > Junk Email at 11:40, with the revised Mac-launcher
+  instructions. The older 18 October Inbox email was not today's alert.
+  The agent did not resend, move mail, change spam rules or make a report decision.
+- Live function and permission checks confirm authenticated, family-authorized
+  reporting; a per-account transaction lock; duplicate open/reviewing target
+  deduplication; and a rolling limit of 10 new reports per hour. Direct client
+  table insertion and anonymous RPC execution are denied. The enabled queue
+  trigger and scheduler are healthy, with zero pending/sending/failed alerts.
+- The global email budget remains 40 attempts per UTC day, including retries.
+  This caps alert costs, not report intake: saved reports can wait for an email
+  budget reset. These controls are not comprehensive multi-account/DDoS defense;
+  operators must also check the private queue rather than rely only on email.
+- The owner subsequently confirmed that the correct test memory and photo opened
+  in the private console and that the harmless QA report changed to Dismissed.
+  Photo-preview and dismissal acceptance are owner-confirmed, not a fresh backend
+  audit readback. This completes the report/alert/photo-preview/dismissal path;
+  it does not prove hide/restore, suspension, audio preview or cache revocation.
+- No source/runtime/deployment change was required. Next: exact-memory
+  hide/restore acceptance using only the disposable fixture, including another
+  member's already-open/cached view, then address the known cached-media takedown
+  limitation. Proportionate filtering, final-candidate security and Apple
+  submission gates remain open. This evidence supersedes the report-receipt/email
+  uncertainty below, but is not an independent phone build-version readback or
+  public-launch clearance.
+
+### Build 23 uploaded for cable-free TestFlight delivery
+
+- The owner requested TestFlight delivery because no phone cable is available.
+  No direct device installation or public App Store submission is authorized by
+  this request. Payments, backend, private media and screening settings unchanged.
+- Source HEAD is `d66dcf4` (`report option`), clean before the build. Rebuilt using
+  `scripts/build_ios_testflight_purchases.sh --no-pub --build-number=23
+  --build-name=1.0.0`, preserving the existing billing defines and product IDs.
+  All ten reporting widget/service/shared-vault screen tests passed again.
+- Archive: `build/ios/archive/Runner.xcarchive`. Distribution IPA:
+  `build/ios/ipa/Heiro.ipa`, 33.4 MB; SHA-256
+  `401009ff19b1ea572518aae7ae58dcd2970696c4eeb1b8142ebcca5183cff1af`.
+  Verified Heiro `1.0.0 (23)`, bundle `com.everroots.app`, team `DNLP6MCWMN`,
+  Apple Distribution signing, production push, beta reports enabled and debugger
+  disabled. Do not use the older `Ever Roots.ipa` left in the output directory.
+- Xcode's App Store Connect export/upload succeeded at 11:20 South African time.
+  Independent App Store Connect readback progressed from Processing to Complete
+  and build `1.0.0 (23)` Ready to Submit after the Missing Compliance gate cleared.
+  The owner then confirmed: "sorted its testable on my phone". TestFlight
+  availability is owner-confirmed; exact installed-version readback and the new
+  memory-report acceptance remain unverified. Existing `Internal Beta` group has
+  one tester (Ross) and automatic distribution enabled. The agent added no new
+  testers/public links and did not submit an encryption answer; the gate cleared
+  outside its actions. Exact declaration answers and final build/group assignment
+  were not independently read back and remain part of final-candidate checks.
+  The App Store Connect listing still says Ever Roots; the installed display name
+  in the uploaded build is Heiro. Store metadata renaming remains outstanding.
+- Flutter warns that the launch image is the default placeholder. This does not
+  block the successful beta upload, but final-candidate branding needs inspection.
+- Next: use TestFlight without deleting the app, verify version `1.0.0 (23)`,
+  and report one disposable harmless photo memory using its
+  own three-dot menu. Verify the revised alert and exact case/photo through
+  `Heiro Safety Review.command`. Phone acceptance and public-launch gates remain
+  open; no public submission has occurred.
+
+## Previous checkpoint - 21 October 2026
 
 ### Personal-memory reporting deployed; phone installation deferred
 

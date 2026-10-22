@@ -1,6 +1,6 @@
 # Content safety launch runbook
 
-Status: 21 October 2026. Report/block/review foundation and Heiro Resend alerts deployed.
+Status: 22 October 2026. Report/block/review foundation and Heiro Resend alerts deployed.
 A text/photo screening adapter is tested locally, disabled and not wired into uploads.
 An operator-only case-preview backend is deployed, with a local review console.
 Complete item-level reporting, urgent cache takedown, adequate filtering and
@@ -14,11 +14,17 @@ case-bound `memory` report backend from local migration
 read back and verified. Tests passed: 139 default Flutter tests (50 configured
 skips), 79 separately configured billing tests, 23 database safety/preview tests,
 17 reviewer/alert/operator tests and one desktop/mobile browser test.
-Build 23 is signed and ready, but NOT installed or uploaded to TestFlight. The
-device connection failed before installation, and the owner deferred installation
-until a cable is available. Wait for them to reconnect and resume; install in place
-and independently verify version 23. Do not ask the tester to find the new menu in
-build 22. The screenshots that exposed this gap were a personal shared vault and
+22 October delivery update: the owner requested TestFlight because no cable is
+available. Distribution build 23 was rebuilt with unchanged billing configuration,
+ten focused reporting tests passed again, and Xcode uploaded it successfully.
+App Store Connect independently shows upload Complete and build 23 Ready to
+Submit after its compliance gate cleared outside the agent's actions. The owner
+confirmed it is testable on the phone. Existing Internal Beta includes Ross and
+has automatic distribution enabled. Exact declaration answers and final group
+assignment were not independently read back. No installed-version verification
+or memory-report acceptance is claimed. Update in TestFlight and verify version
+23 without deleting the app. Do not ask the tester to find the new
+menu in build 22. The screenshots that exposed this gap were a personal shared vault and
 Family Feed, not a legacy profile. After installation, report the disposable
 memory using its own three-dot menu and verify the exact photo preview and revised
 alert email. A vault/member report cannot substitute for that test or authorize
@@ -186,6 +192,27 @@ No command permanently deletes content or changes billing. Do not infer an autho
 for historical unattributed content; account actions must have an identified user.
 Ask for approval before a destructive or broader action outside these controls.
 
+### Hidden content and resolved reports
+
+Report status and content restrictions are separate. `hide` marks a report
+resolved and adds the target restriction. Closing the browser, ending a session,
+or recording `dismiss` does not lift that restriction. `restore` removes only the
+target restriction and also leaves the report resolved. If investigation is still
+ongoing after a hide, `review` returns the report to the queue without unhiding it.
+
+The queue lists only open/reviewing reports. To revisit a resolved/dismissed case,
+launch a fresh private session if needed, paste its reference from the alert email
+into **Report reference**, and choose **Open case**. No new member report is needed.
+Restoration requires the original content still to exist and does not lift other
+applicable member/vault restrictions.
+
+Hiding has no deletion timer or automatic expiry. It retains the existing file,
+not a second moderation copy, and those bytes still count in the family's normal
+storage calculation. Live function/schema readback confirmed this on 22 October.
+The moderator console has no permanent-delete action. A defined retention,
+appeal and deliberate purge process remains to be designed and approved; do not
+silently auto-delete retained family memories or promise unlimited retention.
+
 ## Alert operations
 
 The `content-report-alerts` cron job runs each minute and dispatches only due work.
@@ -347,6 +374,38 @@ detected. Member reports and human escalation remain necessary.
 [OpenAI moderation guide](https://developers.openai.com/api/docs/guides/moderation).
 
 ## Acceptance evidence
+
+- **22 October memory-create regression:** fixed the restrictive memory SELECT
+  policy rejecting INSERT RETURNING because its STABLE helper reread the not-yet-
+  visible memory. Deployed approved migration
+  `20261022213230_memory_insert_returning_safety`; same moderation/ownership
+  restrictions, no additional grants. All 34 focused database tests pass, including
+  a reproduction of the original failure. Live disposable rollback-only checks
+  passed insert/update, family access, unauthorized-write denial, hide/restore,
+  outsider-read denial and suspension; baseline row counts were unchanged. The
+  owner then confirmed the same draft saved and its photo appeared on the phone
+  ("worked"); this is owner-reported device acceptance.
+
+- **22 October disposable photo-memory hide/restore:** the owner confirmed the memory
+  was hidden in Heiro after applying Hide reported target. The supplied Safari
+  snapshot shows report `4a08c3fa-94ea-410a-8002-4ae28c17b268` resolved with
+  no open reports; the restricted reviewer preview still shows the photo, as
+  intended. The owner then confirmed it returned with its photo after Restore.
+  Subsequent read-only live audit confirms `hide` at 21:41:21 UTC and `restore`
+  at 21:51:01 UTC, status `resolved`, and no current exact-target restriction.
+  Device visibility is owner-reported. Explicit sibling visibility, audio preview,
+  cached-copy revocation and reopening across reviewer sessions are not established
+  by this result. No agent moderation action was applied.
+
+- **22 October owner-operated memory report:** live metadata confirms the exact
+  personal-memory report received at 11:39 South African time. Resend shows
+  Delivered; Outlook Junk Email contains the matching report reference at 11:40
+  and the revised Mac-launcher instructions. The owner confirmed the correct
+  memory/photo preview and subsequent Dismissed status. The latter two are
+  owner-reported acceptance, not fresh backend audit readback. No agent moderation
+  action was applied. Hide/restore on this final-candidate path, audio preview,
+  cached-media takedown and filtering remain unverified or unresolved. This
+  supersedes the earlier memory-report acceptance uncertainty above.
 
 - **18 October restricted review:** migration
   `20261018210222_content_report_case_preview.sql` deployed and local filename

@@ -6,6 +6,7 @@ const migration = async (name) => readFile(new URL(`../migrations/${name}.sql`, 
 const foundation = await migration('20261013104043_family_content_safety');
 const previews = await migration('20261018210222_content_report_case_preview');
 const personal = await migration('20261021102247_personal_memory_reports');
+const insertSafety = await migration('20261022213230_memory_insert_returning_safety');
 const references = await migration('20261007213340_media_reference_authorization');
 const scope = references.split('create function public.guard_media_reference_scope()')[0];
 const ids = Array.from({length: 20}, (_, n) => `00000000-0000-4000-8000-${String(n+1).padStart(12,'0')}`);
@@ -16,7 +17,7 @@ const audioPath = `${owner}/${vault}/memories/${memory}/voice.m4a`;
 const siblingPath = `${owner}/${vault}/memories/${sibling}/other.jpg`;
 const legacyPath = `${owner}/${family}/legacy/${legacy}/memories/${legacyMemory}/photo.jpg`;
 
-async function fixture() {
+async function fixture({applyInsertFix=true}={}) {
   const db = new PGlite();
   await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
     create schema auth; create schema storage;
@@ -68,6 +69,7 @@ async function fixture() {
       create policy fixture_read on ${table} for select to authenticated using(true);`);
   }
   await db.exec(foundation + scope + previews + personal);
+  if (applyInsertFix) await db.exec(insertSafety);
   await asUser(db, viewer);
   return db;
 }
@@ -86,6 +88,97 @@ async function decision(db, reportId, action) {
   const data = await preview(db, reportId);
   await db.query("select review_content_report_checked($1,$2,'QA operator','Harmless QA test',$3)", [reportId,action,data.revision]);
 }
+
+async function enableOwnerWrites(db) {
+  await db.exec(`reset role;
+    alter table memories alter column id set default gen_random_uuid();
+    grant insert,update on memories to authenticated;
+    create policy fixture_insert_owner on memories for insert to authenticated
+      with check(exists(select 1 from vaults v where v.id=vault_id and v.owner_id=auth.uid()));
+    create policy fixture_update_owner on memories for update to authenticated
+      using(exists(select 1 from vaults v where v.id=vault_id and v.owner_id=auth.uid()))
+      with check(exists(select 1 from vaults v where v.id=vault_id and v.owner_id=auth.uid()));`);
+  await asUser(db,owner);
+}
+
+// PostgREST requests a RETURNING row for Dart's insert(...).select('id').single().
+async function insertReturning(db, targetVault=vault) {
+  return (await db.query(`with pgrst_source as (
+    insert into memories(vault_id,prompt_text,body) values($1,'QA','Harmless memory') returning id
+  ) select id from pgrst_source`,[targetVault])).rows;
+}
+
+test('pre-fix SELECT policy reproduces and rolls back the insert-returning failure', async () => {
+  const db=await fixture({applyInsertFix:false}); try {
+    await enableOwnerWrites(db);
+    await assert.rejects(insertReturning(db),/row-level security policy "safety_memory_read"/);
+    await db.exec('reset role');
+    assert.equal((await db.query('select count(*)::int n from memories')).rows[0].n,3);
+  } finally {await db.close();}
+});
+
+test('owners can create a memory and return its generated ID in the same statement', async () => {
+  const db=await fixture(); try {
+    await enableOwnerWrites(db);
+    const rows=await insertReturning(db);
+    assert.equal(rows.length,1);
+    assert.ok(rows[0].id);
+    assert.equal((await db.query('select body from memories where id=$1',[rows[0].id])).rows[0].body,'Harmless memory');
+    const updated=await db.query("update memories set body='Edited QA' where id=$1 returning id,body",[rows[0].id]);
+    assert.equal(updated.rows[0].body,'Edited QA');
+    for (const table of ['memory_photos','memory_voice_notes']) {
+      await db.exec(`reset role; grant insert on ${table} to authenticated;
+        create policy fixture_insert_owner on ${table} for insert to authenticated
+          with check(exists(select 1 from vaults v where v.id=vault_id and v.owner_id=auth.uid()));`);
+      await asUser(db,owner);
+      assert.equal((await db.query(`insert into ${table}(vault_id,memory_id,path)
+        values($1,$2,$3) returning id`,[vault,rows[0].id,`${owner}/${vault}/memories/${rows[0].id}/qa`])).rows.length,1);
+    }
+    await asUser(db,viewer);
+    assert.ok(await report(db,rows[0].id));
+  } finally {await db.close();}
+});
+
+test('insert-returning fix grants no writes to relatives, outsiders or anonymous users', async () => {
+  const db=await fixture(); try {
+    await enableOwnerWrites(db);
+    await assert.rejects(insertReturning(db,otherVault),/row-level security/);
+    for (const user of [viewer,outsider]) {
+      await asUser(db,user);
+      await assert.rejects(insertReturning(db),/row-level security/);
+      assert.equal((await db.query("update memories set body='forged' where id=$1 returning id",[memory])).rows.length,0);
+    }
+    await db.exec('reset role; set role anon');
+    await assert.rejects(insertReturning(db),/permission denied/);
+  } finally {await db.close();}
+});
+
+test('insert-returning fix keeps hidden memory IDs, vaults and suspended contributors restricted', async () => {
+  const db=await fixture(); try {
+    const id=await report(db);
+    await decision(db,id,'hide');
+    await enableOwnerWrites(db);
+    assert.equal((await db.query("update memories set body='hidden edit' where id=$1 returning id",[memory])).rows.length,0);
+    // A prior restriction cannot be bypassed by recreating its target ID.
+    await db.exec('reset role');
+    await db.query("insert into content_safety.restrictions(target_kind,target_id) values('memory',$1)",[ids[19]]);
+    await asUser(db,owner);
+    await assert.rejects(db.query('insert into memories(id,vault_id,body) values($1,$2,$3) returning id',
+      [ids[19],vault,'restricted ID']),/row-level security/);
+    await decision(db,id,'restore');
+    await asUser(db,owner);
+    assert.equal((await db.query("update memories set body='Restored QA' where id=$1 returning id",[memory])).rows.length,1);
+    await db.exec('reset role');
+    await db.query("insert into content_safety.restrictions(target_kind,target_id) values('vault',$1)",[vault]);
+    await asUser(db,owner);await assert.rejects(insertReturning(db),/row-level security/);
+    await db.exec('reset role');
+    await db.query("delete from content_safety.restrictions where target_kind='vault' and target_id=$1",[vault]);
+    await decision(db,id,'suspend');
+    await asUser(db,owner);await assert.rejects(insertReturning(db),/SAFETY_ACCOUNT_RESTRICTED/);
+    await decision(db,id,'reinstate');
+    await asUser(db,owner);assert.equal((await insertReturning(db)).length,1);
+  } finally {await db.close();}
+});
 
 test('personal reports bind exact memory, author and family; duplicates and permissions remain enforced', async () => {
   const db=await fixture(); try {
