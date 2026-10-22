@@ -2,6 +2,10 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { productValidationError } from "./product_validation.ts";
 import { productMap } from "../_shared/apple_subscription_products.ts";
+import { appleVerificationDiagnostic, createNotificationVerifier } from "../apple_subscription_notifications/notification_verifier.ts";
+import { AppleEnvironment, AppleTransactionLookupError, lookupAppleTransaction } from "../_shared/apple_environment.ts";
+import { transactionEnvironment } from "./transaction_environment.ts";
+import { ownershipDiagnostic } from "./ownership_diagnostic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,11 +15,17 @@ const corsHeaders = {
 };
 
 const bundleId = Deno.env.get("APPLE_BUNDLE_ID") || "com.everroots.app";
-const configuredEnvironment =
-  (Deno.env.get("APPLE_IAP_ENVIRONMENT") || "sandbox").toLowerCase() ===
-    "production"
-    ? "production"
-    : "sandbox";
+const appAppleId = Deno.env.get("APPLE_APP_ID") || "6802720270";
+const verifiers = new Map<AppleEnvironment, ReturnType<typeof createNotificationVerifier>>();
+
+function getVerifier(environment: AppleEnvironment) {
+  let verifier = verifiers.get(environment);
+  if (!verifier) {
+    verifier = createNotificationVerifier(environment, bundleId, appAppleId);
+    verifiers.set(environment, verifier);
+  }
+  return verifier;
+}
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -36,23 +46,6 @@ function base64UrlEncode(input: string | ArrayBuffer) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function base64UrlDecodeJson(segment: string) {
-  const normalized = segment.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(
-    normalized.length + ((4 - (normalized.length % 4)) % 4),
-    "=",
-  );
-  return JSON.parse(new TextDecoder().decode(
-    Uint8Array.from(atob(padded), (char) => char.charCodeAt(0)),
-  ));
-}
-
-function decodeJwsPayload(jws: string) {
-  const parts = jws.split(".");
-  if (parts.length !== 3) throw new Error("Invalid Apple JWS payload");
-  return base64UrlDecodeJson(parts[1]);
 }
 
 function decodePrivateKey(privateKey: string) {
@@ -100,125 +93,21 @@ async function createAppleServerToken() {
   return `${unsigned}.${base64UrlEncode(signature)}`;
 }
 
-async function fetchAppleTransaction(transactionId: string) {
+async function fetchAppleTransaction(transactionId: string, environment?: AppleEnvironment) {
   const token = await createAppleServerToken();
-  const host = configuredEnvironment === "production"
-    ? "https://api.storekit.itunes.apple.com"
-    : "https://api.storekit-sandbox.itunes.apple.com";
-  const response = await fetch(
-    `${host}/inApps/v1/transactions/${encodeURIComponent(transactionId)}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Apple transaction lookup failed ${response.status}: ${text}`);
-  }
-  const payload = await response.json();
-  return decodeJwsPayload(String(payload.signedTransactionInfo || ""));
+  return await lookupAppleTransaction({ transactionId, token, environment,
+    verify: (signed, environment) => getVerifier(environment)
+      .verifyAndDecodeTransaction(signed),
+  });
 }
 
-function entitlementStatus(transaction: any) {
-  if (transaction.revocationDate) return "refunded";
-  const expiresDate = Number(transaction.expiresDate || 0);
-  if (!expiresDate || expiresDate <= Date.now()) return "expired";
-  return "active";
-}
-
-async function applyEntitlement({
-  admin,
-  familyId,
-  userId,
-  transaction,
-  source,
-  notificationType,
-  subtype,
-}: {
-  admin: any;
-  familyId: string;
-  userId: string | null;
-  transaction: any;
-  source: "client_validation" | "server_notification";
-  notificationType?: string;
-  subtype?: string;
-}) {
-  if (transaction.bundleId !== bundleId) {
-    throw new Error("Apple transaction bundle id does not match this app");
-  }
-
-  const productId = clean(transaction.productId);
-  const plan = productMap().get(productId);
-  if (!plan) throw new Error("Unsupported Apple subscription product");
-
-  const status = entitlementStatus(transaction);
-  const originalTransactionId = clean(transaction.originalTransactionId);
-  const transactionId = clean(transaction.transactionId);
-  if (!originalTransactionId || !transactionId) {
-    throw new Error("Apple transaction is missing required identifiers");
-  }
-
-  const currentPeriodEnd = Number(transaction.expiresDate || 0)
-    ? new Date(Number(transaction.expiresDate)).toISOString()
-    : null;
-
-  const { error: eventError } = await admin
-    .from("apple_subscription_events")
-    .insert({
-      family_id: familyId || null,
-      user_id: userId,
-      event_source: source,
-      apple_environment: configuredEnvironment,
-      apple_product_id: productId,
-      apple_original_transaction_id: originalTransactionId,
-      apple_transaction_id: transactionId,
-      notification_type: notificationType || null,
-      subtype: subtype || null,
-      entitlement_status: status,
-      raw_payload: transaction,
-    });
-  if (eventError) throw new Error(eventError.message);
-
-  const { error } = await admin.from("family_entitlements").upsert(
-    {
-      family_id: familyId,
-      plan: status === "active" ? plan : "free",
-      status,
-      provider: "apple",
-      provider_entitlement_id: transactionId,
-      provider_subscription_id: originalTransactionId,
-      billing_owner_user_id: userId,
-      current_period_end: currentPeriodEnd,
-      apple_original_transaction_id: originalTransactionId,
-      apple_product_id: productId,
-      apple_environment: configuredEnvironment,
-      offer_type: transaction.offerType ? String(transaction.offerType) : null,
-      offer_identifier: transaction.offerIdentifier
-        ? String(transaction.offerIdentifier)
-        : null,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "family_id" },
-  );
-  if (error) throw new Error(error.message);
-
-  return { plan, status, product_id: productId, current_period_end: currentPeriodEnd };
-}
-
-async function assertOwner(admin: any, familyId: string, userId: string) {
-  const { data, error } = await admin
-    .from("family_members")
-    .select("family_id, user_id, role")
-    .eq("family_id", familyId)
-    .eq("user_id", userId)
-    .eq("role", "owner")
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Only a family owner can buy this family plan");
-}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
+  let verifiedEnvironment: string | undefined;
+  let ownership: Awaited<ReturnType<typeof ownershipDiagnostic>> | undefined;
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -240,8 +129,26 @@ serve(async (req) => {
     if (!familyId) return json(400, { error: "Missing family_id" });
     if (!transactionId) return json(400, { error: "Missing Apple transaction id" });
 
-    await assertOwner(admin, familyId, user.id);
-    const transaction = await fetchAppleTransaction(transactionId);
+    const { data: membership, error: membershipError } = await admin.from("family_members")
+      .select("family_id").eq("family_id", familyId).eq("user_id", user.id).maybeSingle();
+    if (membershipError || !membership) {
+      return json(403, { code: "FAMILY_MEMBERSHIP_REQUIRED", error: "Join this family before sponsoring it." });
+    }
+    const environment = await transactionEnvironment({
+      transactionId,
+      signedTransaction: body.server_verification_data,
+      verify: (signed, selected) => getVerifier(selected)
+        .verifyAndDecodeTransaction(signed),
+      previousEnvironments: async () => {
+        const { data, error } = await admin.from("apple_subscription_events")
+          .select("apple_environment").eq("apple_transaction_id", transactionId)
+          .in("apple_environment", ["sandbox", "production"]);
+        if (error) throw error;
+        return (data ?? []).map((event) => event.apple_environment);
+      },
+    });
+    const transaction = await fetchAppleTransaction(transactionId, environment);
+    verifiedEnvironment = transaction.environment?.toLowerCase();
     const validationError = productValidationError({
       transaction,
       bundleId,
@@ -250,17 +157,51 @@ serve(async (req) => {
       supportedProducts: productMap(),
     });
     if (validationError) return json(400, validationError);
-    const result = await applyEntitlement({
-      admin,
-      familyId,
-      userId: user.id,
-      transaction,
-      source: "client_validation",
+    const originalTransactionId = clean(transaction.originalTransactionId);
+    if (!originalTransactionId) {
+      return json(400, { code: "APPLE_TRANSACTION_INVALID", error: "Could not verify this purchase." });
+    }
+    const { data: result, error } = await admin.rpc("apply_verified_family_subscription", {
+      p_transaction: transaction,
+      p_family_id: familyId,
+      p_user_id: user.id,
+      p_source: "client_validation",
     });
+    if (error) {
+      if (["APPLE_PURCHASE_ALREADY_BOUND", "APPLE_PURCHASER_MISMATCH"].includes(error.message)) {
+        ownership = await ownershipDiagnostic({ transaction, userId: user.id, familyId,
+          lookupBinding: async (originalId) => {
+            const { data, error: lookupError } = await admin.from("apple_sponsor_bindings")
+              .select("purchaser_id,family_id,environment,retired")
+              .eq("original_transaction_id", originalId).maybeSingle();
+            if (lookupError) throw lookupError;
+            return data;
+          },
+        });
+      }
+      throw error;
+    }
+    if (!result?.applied) return json(409, { code: result?.code || "APPLE_VALIDATION_FAILED",
+      environment: verifiedEnvironment,
+      error: "This purchase could not be applied. Do not purchase again; contact support or manage the subscription with Apple." });
 
     return json(200, { ok: true, entitlement: result });
   } catch (e) {
-    console.error(e);
-    return json(400, { error: e instanceof Error ? e.message : String(e) });
+    const message = e && typeof e === "object" && "message" in e ? String(e.message) : "";
+    const allowed = ["FAMILY_MEMBERSHIP_REQUIRED", "APPLE_PURCHASE_ALREADY_BOUND", "APPLE_PURCHASER_MISMATCH",
+      "APPLE_PURCHASER_UNVERIFIED", "APPLE_ENVIRONMENT_MISMATCH"];
+    const code = allowed.includes(message) ? message
+      : e instanceof AppleTransactionLookupError && e.status === 401
+      ? "APPLE_API_AUTHENTICATION_FAILED" : "APPLE_VALIDATION_FAILED";
+    const lookupStatus = /^Apple transaction lookup failed (\d{3})/.exec(message)?.[1];
+    console.error("Apple validation rejected", { code,
+      ...appleVerificationDiagnostic(e),
+      ...ownership,
+      ...(lookupStatus ? { apple_http_status: Number(lookupStatus) } : {}),
+      ...(e instanceof AppleTransactionLookupError ? { lookup_environment: e.environment } : {}),
+    });
+    return json(code === "APPLE_API_AUTHENTICATION_FAILED" ? 502 : 400, { code,
+      ...(allowed.includes(message) && verifiedEnvironment ? { environment: verifiedEnvironment } : {}),
+      error: "Could not verify this purchase for this account and family. Do not purchase again; retry restore or contact support." });
   }
 });

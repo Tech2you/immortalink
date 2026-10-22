@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Ever Roots</string>
+	<string>Heiro</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Ever Roots</string>
+	<string>Heiro</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleURLTypes</key>
@@ -38,11 +38,11 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Ever Roots uses your microphone when you choose to record a voice memory.</string>
+	<string>Heiro uses your microphone when you choose to record a voice memory.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Ever Roots uses your photo library when you choose photos for memories and highlights.</string>
+	<string>Heiro uses your photo library when you choose photos for memories and highlights.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Ever Roots can save photos to your library when you choose to export a memory.</string>
+	<string>Heiro can save photos to your library when you choose to export a memory.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

@@ -16,15 +16,35 @@ void main() {
     },
   );
 
-  test('draft App Store Connect names are stable and non-empty', () {
+  test('Heiro display names retain the existing purchase identifiers', () {
+    expect(AppleSubscriptionConfig.appName, 'Heiro');
+    expect(AppleSubscriptionConfig.bundleId, 'com.everroots.app');
+    expect(AppleSubscriptionConfig.sku, 'everroots-ios');
+    expect(AppleSubscriptionConfig.tiers.map((tier) => tier.title), [
+      'Free Family',
+      'Heiro Family',
+      'Heiro Legacy',
+    ]);
     expect(
       AppleSubscriptionConfig.draftSubscriptionGroupReferenceName,
-      'Ever Roots Plans',
+      'Heiro Plans',
     );
-    expect(AppleSubscriptionConfig.draftFamilyMonthlyProductId, isNotEmpty);
-    expect(AppleSubscriptionConfig.draftFamilyAnnualProductId, isNotEmpty);
-    expect(AppleSubscriptionConfig.draftLegacyMonthlyProductId, isNotEmpty);
-    expect(AppleSubscriptionConfig.draftLegacyAnnualProductId, isNotEmpty);
+    expect(
+      AppleSubscriptionConfig.draftFamilyMonthlyProductId,
+      'everroots.family.monthly',
+    );
+    expect(
+      AppleSubscriptionConfig.draftFamilyAnnualProductId,
+      'everroots.family.annual',
+    );
+    expect(
+      AppleSubscriptionConfig.draftLegacyMonthlyProductId,
+      'everroots.legacy.monthly',
+    );
+    expect(
+      AppleSubscriptionConfig.draftLegacyAnnualProductId,
+      'everroots.legacy.annual',
+    );
     expect(
       AppleSubscriptionConfig.draftFamilyMonthlyProductId,
       isNot(AppleSubscriptionConfig.draftFamilyAnnualProductId),

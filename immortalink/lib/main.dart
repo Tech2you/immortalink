@@ -102,7 +102,7 @@ void _handleUncaughtError(Object error, StackTrace stackTrace) {
     FlutterErrorDetails(
       exception: error,
       stack: stackTrace,
-      library: 'Ever Roots',
+      library: 'Heiro',
     ),
   );
 }
@@ -123,7 +123,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Ever Roots',
+      title: 'Heiro',
       navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(

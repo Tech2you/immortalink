@@ -14,10 +14,13 @@ import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
 import 'vaults_screen.dart';
 import '../services/family_leave_service.dart';
+import '../services/apple_subscription_service.dart';
+import '../widgets/account_deletion_billing_notice.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import '../utils/family_invite_share.dart';
 import '../utils/family_profile_actions.dart';
 import '../widgets/family_tree_settings_menu.dart';
+import '../widgets/family_account_successor_dialog.dart';
 
 enum _RelativeKind { parent, spouse, sibling, child }
 
@@ -536,11 +539,39 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                 ? 'Permanently delete family tree?'
                 : 'Leave family?',
           ),
-          content: Text(
-            impact.requiresDestructiveConfirmation
-                ? (impact.message ??
-                      'You are the last member of this family. Leaving will permanently delete this family tree, including its legacy profiles and relationships. Do you want to continue?')
-                : 'This removes your account and vault from this family tree. You can join a family again later with an invite code.',
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  impact.requiresDestructiveConfirmation
+                      ? (impact.message ??
+                            'You are the last member of this family. Leaving will permanently delete this family tree, including its legacy profiles and relationships. Do you want to continue?')
+                      : 'This removes your account and vault from this family tree. You can join a family again later with an invite code.',
+                ),
+                const SizedBox(height: 12),
+                AccountDeletionBillingNotice(
+                  leavingFamily: true,
+                  onManage: () async {
+                    final service = AppleSubscriptionService(
+                      supabase: _supabase,
+                    );
+                    try {
+                      await service.openManageSubscriptions(
+                        refreshAfter: false,
+                      );
+                      if (service.error != null) {
+                        throw StateError(
+                          'Apple subscription settings unavailable',
+                        );
+                      }
+                    } finally {
+                      service.dispose();
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -592,6 +623,10 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         return;
       case FamilyTreeAction.leave:
         await _leaveFamily();
+        return;
+      case FamilyTreeAction.successor:
+        if (!_canRenameFamily) return;
+        await showFamilyAccountSuccessor(context, widget.familyId);
         return;
       case FamilyTreeAction.photo:
       case FamilyTreeAction.name:

@@ -12,17 +12,19 @@ void main() {
   test('builds web invite links that chat apps can auto-link', () {
     expect(
       familyInviteWebUri(' abcd 1234 ').toString(),
-      'https://everroots.org/invite/ABCD1234',
+      'https://heiro.app/invite/ABCD1234',
     );
   });
 
   test('puts manual invite code before app link in share text', () {
     final message = familyInviteMessage(' abcd 1234 ');
 
+    expect(message, contains('join our family on Heiro'));
+    expect(message, contains('Open Heiro'));
     expect(message, contains('enter this invite code:\nABCD1234'));
     expect(
       message.indexOf('ABCD1234'),
-      lessThan(message.indexOf('https://everroots.org/invite/ABCD1234')),
+      lessThan(message.indexOf('https://heiro.app/invite/ABCD1234')),
     );
   });
 
@@ -35,11 +37,16 @@ void main() {
     );
   });
 
-  test('parses future web invite links', () {
-    expect(
-      familyInviteCodeFromUri(Uri.parse('https://everroots.org/invite/xy%20z')),
-      'XYZ',
-    );
+  test('parses Heiro and legacy web invite links', () {
+    for (final host in ['heiro.app', 'everroots.org']) {
+      for (final path in [
+        '/invite/xy%20z',
+        '/invite?code=xy%20z',
+        '/join?code=xy%20z',
+      ]) {
+        expect(familyInviteCodeFromUri(Uri.parse('https://$host$path')), 'XYZ');
+      }
+    }
   });
 
   test('ignores unrelated links', () {
@@ -55,6 +62,10 @@ void main() {
       'https://www.everroots.app/invite/ABCD1234',
       'http://everroots.org/invite/ABCD1234',
       'https://everroots.org.example.com/invite/ABCD1234',
+      'http://heiro.app/invite/ABCD1234',
+      'https://heiro.app.example.com/invite/ABCD1234',
+      'https://heiro.app@evil.example/invite/ABCD1234',
+      'https://www.heiro.app/invite/ABCD1234',
     ]) {
       expect(familyInviteCodeFromUri(Uri.parse(link)), '', reason: link);
     }

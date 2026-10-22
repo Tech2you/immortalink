@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/ai_chat_reminder_service.dart';
+import '../widgets/ai_processing_consent.dart';
 
 class VaultCompanionScreen extends StatefulWidget {
   final String? vaultId;
@@ -62,6 +63,10 @@ class _VaultCompanionScreenState extends State<VaultCompanionScreen> {
   }
 
   Future<void> _showDisclaimer({bool force = false}) async {
+    if (!await requestAiProcessingConsent(context) || !mounted) {
+      if (mounted && !force) Navigator.maybePop(context);
+      return;
+    }
     final userId = _client.auth.currentUser?.id ?? '';
     var shouldShow = true;
     if (!force) {

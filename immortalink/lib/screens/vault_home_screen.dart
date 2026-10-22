@@ -1,5 +1,6 @@
 // lib/screens/vault_home_screen.dart
 import 'dart:async';
+import '../widgets/ai_processing_consent.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import '../services/recent_cache.dart';
@@ -560,6 +561,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _indexCoreVoiceNote() async {
+    if (!mounted || !await requestAiProcessingConsent(context) || !mounted) return;
     final token = _client.auth.currentSession?.accessToken.trim();
     if (token == null || token.isEmpty) {
       throw Exception('Missing session token. Please sign in again.');
@@ -2912,7 +2914,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
 
-      if (memoryVoiceNoteId.isNotEmpty) {
+      if (memoryVoiceNoteId.isNotEmpty && mounted &&
+          await requestAiProcessingConsent(context) && mounted) {
         final token = _client.auth.currentSession?.accessToken.trim();
         if (token == null || token.isEmpty) {
           throw Exception('Missing session token. Please sign in again.');
@@ -2989,7 +2992,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
           final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
 
-          if (memoryVoiceNoteId.isNotEmpty) {
+          if (memoryVoiceNoteId.isNotEmpty && mounted &&
+              await requestAiProcessingConsent(context) && mounted) {
             final token = _client.auth.currentSession?.accessToken.trim();
             if (token == null || token.isEmpty) {
               throw Exception('Missing session token. Please sign in again.');

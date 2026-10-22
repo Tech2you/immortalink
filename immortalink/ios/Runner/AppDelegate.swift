@@ -17,6 +17,35 @@ import StoreKit
       )
       subscriptionChannel = channel
       channel.setMethodCallHandler { call, result in
+        if call.method == "latestSubscriptionTransaction" {
+          guard #available(iOS 15.0, *), let productIds = call.arguments as? [String] else {
+            result(FlutterMethodNotImplemented)
+            return
+          }
+          Task { @MainActor in
+            var latest: (transaction: StoreKit.Transaction, signed: String)?
+            for await verification in StoreKit.Transaction.all {
+              guard case .verified(let transaction) = verification,
+                    productIds.contains(transaction.productID) else { continue }
+              if latest == nil || transaction.purchaseDate > latest!.transaction.purchaseDate {
+                latest = (transaction, verification.jwsRepresentation)
+              }
+            }
+            guard let latest else {
+              result(nil)
+              return
+            }
+            result([
+              "id": String(latest.transaction.id),
+              "productId": latest.transaction.productID,
+              "purchaseDate": String(Int64(latest.transaction.purchaseDate.timeIntervalSince1970 * 1000)),
+              "receiptData": latest.signed,
+              "jsonRepresentation": String(data: latest.transaction.jsonRepresentation, encoding: .utf8) ?? "",
+              "appAccountToken": latest.transaction.appAccountToken?.uuidString as Any? ?? NSNull()
+            ])
+          }
+          return
+        }
         guard call.method == "manageSubscriptions" else {
           result(FlutterMethodNotImplemented)
           return

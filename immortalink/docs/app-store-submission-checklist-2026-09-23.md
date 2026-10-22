@@ -2,6 +2,128 @@
 
 Prepared 22 September 2026. Target submission: 23 September 2026.
 
+## Current direction - 18 October
+
+Member-report submission, restricted review/dismissal and user-confirmed alert
+delivery now pass. The owner can open the review console with the Mac launcher;
+reload recovery is verified. Corrected reference-only email instructions are
+deployed (worker version 4). A specific memory/photo/audio report and the revised
+email still need live acceptance; this is not complete content-safety clearance.
+
+Restricted case-preview functions are now deployed with a Mac-local operator
+console; database/access-control and fixture browser tests pass. This is not yet
+complete report-to-takedown or final-device proof: exact-item reporting gaps,
+real media review acceptance, cached copies and the filtering strategy remain.
+See the latest launch ledger rather than treating historical gates as resolved.
+
+The launch ledger is authoritative for newer device, domain and billing evidence.
+The owner has requested a lower-cost, privacy-preserving content-safety approach.
+Cloud screening remains local-only, disconnected and disabled. Apple requires
+effective filtering/reporting/blocking and privacy safeguards, not paid AI or
+blanket cloud scanning. Secure case-based review and a tested filtering approach
+remain incomplete; reporting alone is not sufficient. Do not submit yet or enable
+new paid audio screening. See the latest entry in
+[the launch ledger](launch-status-2026-10-01.md) and the
+[safety runbook](content-safety-launch-runbook.md).
+
+## Historical checkpoint - 13 October
+
+The user-confirmed payment sequence now passes: purchase, shared access,
+cancellation with paid coverage retained, expiry to 500 MB, another member's
+replacement sponsorship and retained photos/voice notes. Preserve that behavior.
+Report/block/review backend controls and shared-media deletion regression tests
+pass; new Resend report alerts are deployed, delivered and retry-tested without
+changing sign-up email. Automated screening and its disclosures, secure review/
+urgent takedown operations, final-device safety/core-flow tests and Apple release
+configuration are still open. See [the current launch record](launch-status-2026-10-01.md)
+for precise implementation, deployment and device evidence. This is not approval
+to skip the final TestFlight candidate or submit an unfinished build.
+
+### Name and Apple readback - 13 October
+
+- **Chosen name: Heiro.** Local mobile/web display names, plan labels and sign-in
+  artwork are updated. Apple and the public website still use Ever Roots; no
+  public rename or domain/email migration has been performed. Preserve the
+  existing bundle/product/group IDs and working links. Name clearance is separate.
+- **No replacement domain owned yet:** confirmed by the user on 13 October.
+  `heiro.app` has no registration record in the fresh official registry lookup;
+  registrar availability and initial/renewal prices remain unverified. Do not
+  change working links, DNS or email based only on a registry Not Found response.
+- **Live Apple audit:** TestFlight's newest listed build is 13; version 1.0 has
+  no selected build. Store description, keywords, support URL, copyright and
+  reviewer access/contact are empty. Category, age rating, content rights and
+  App Privacy are incomplete; privacy policy URL is unset.
+- **Billing configuration correction pending:** put annual/monthly Legacy at
+  the same service level and annual/monthly Family at the same lower level.
+  The current four distinct levels can change upgrade timing. Product IDs and
+  the working purchaser-bound entitlement flow must not change.
+- **Business readback:** agreements, banking and listed tax forms are Active.
+  EU trader compliance remains incomplete; resolve before EU distribution.
+  Automatic release is currently selected; switch to manual before submission.
+- **Still unverified:** final assets/screenshots, all four products' individual
+  review metadata/regions, app-level availability, export compliance and final
+  TestFlight regression. No Apple settings were changed during this audit.
+
+## Historical checkpoint - 7 October
+
+The old target date and unchecked findings below are historical, not a claim
+that fixes are still absent. Use [the current launch record](launch-status-2026-10-01.md)
+for deployment and verification evidence. Build 1.0.0 (18) is installed and
+launched on the connected iPhone by cable, but has not been uploaded to Apple.
+Membership protection, AI consent enforcement and safe legacy-preserving account
+deletion are deployed; deletion passed disposable-account live testing. Media
+reference authorization, family-scoped avatar reads and bounded/idempotent
+transcription are now deployed. In-app legal links are present and the updated
+privacy page is published; App Privacy answers and legal review remain unverified.
+
+Remaining work: candidate payment lifecycle and core-flow device tests; UGC
+report/block/moderation; accurate App Privacy answers; final brand/country decision;
+backup, spending and security follow-through; fresh App Store Connect checks for
+agreements, products, metadata and reviewer access; then a distribution build,
+TestFlight validation and App Review submission. Do not treat this local install
+as TestFlight or public release readiness.
+
+## Launch scope decision - 29 September
+
+- **User decision:** defer pooled storage and multiple simultaneous sponsors
+  until after launch. Keep one active purchaser-bound sponsor per family.
+- Do not add overlapping sponsor purchases or a prepaid future-handover queue.
+  Another member may subscribe once existing coverage ends; there is no extra
+  waiting period. Make the remaining annual-coverage restriction explicit.
+- Preserve existing tree, private-vault and collaborative legacy permissions.
+- Focus remaining work on purchase lifecycle/device verification, shared-media
+  account-deletion safety, and the existing brand, production, security/cost and
+  App Store release gates. Deferring features does not waive these checks.
+- Delivery recheck: build 2026092904 is present, but the paired iPhone still
+  reports unavailable. Installation remains unconfirmed; reconnect and unlock
+  the phone before continuing the device tests. No new build or deployment was
+  made for this scope decision.
+
+## Billing reconciliation - 29 September
+
+- **Deployed and verified:** purchaser/family binding, Linebreakers' fresh active
+  sandbox purchase, Apple cancellation notification, expiry and return to 500 MB.
+- **Implemented and deployed; device test needed:** safe returning-sponsor checkout
+  after previous paid coverage ends. Purchases remain bound to their original
+  purchaser, with one active sponsor per family.
+- **Implemented and tested locally:** purchaser-only family-plan management,
+  paid-through messaging, automatic current-plan/storage refresh. Build 2026092904
+  is built; phone installation was interrupted and is not confirmed.
+- **Still blocking public launch:** full lifecycle/device evidence, safe shared
+  media deletion, final brand/domain/email/legal work and production Apple review.
+
+See [current billing evidence](purchase-recovery-2026-09-29.md). Earlier unchecked
+billing entries below describe historical findings, not a claim the fixes are absent.
+
+## Reconciliation update - 23 September
+
+Read the [current evidence/status reconciliation](launch-reconciliation-2026-09-23.md)
+before treating an unchecked item below as missing. Unchecked means **needs
+testing/verification unless the reconciliation explicitly confirms a gap**.
+The checklist combines implementation, deployment, testing and business tasks;
+it is not a list of features that have never been built. Build 12 was delivered
+to Apple on 23 September; that does not deploy Supabase functions.
+
 ## Decision today
 
 **NO-GO on current evidence.** Resolve the deletion and purchase-validation
@@ -54,7 +176,8 @@ See [targeted review](security-review-2026-09-22.md). Re-run after final changes
 
 ## 2. Brand and domain migration
 
-- [ ] Choose a new name and launch countries. Obtain an IP professional's
+- [x] Choose the new name: **Heiro**, confirmed 13 October 2026.
+- [ ] Confirm launch countries. Obtain an IP professional's
   clearance/risk opinion for relevant markets. Search similar names and related
   products, not just exact spellings. Domain and App Store availability do not
   establish trademark clearance. Start with [CIPC](https://iponline.cipc.co.za/).

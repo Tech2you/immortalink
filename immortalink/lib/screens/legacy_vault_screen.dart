@@ -1,4 +1,6 @@
 import 'dart:async';
+import '../widgets/content_safety_actions.dart';
+import '../widgets/ai_processing_consent.dart';
 import '../services/recent_cache.dart';
 import '../services/vault_snapshot.dart';
 import '../widgets/vault_media.dart';
@@ -2126,6 +2128,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   }
 
   Future<void> _indexLegacyMemoryVoice(String voiceId) async {
+    if (!mounted || !await requestAiProcessingConsent(context) || !mounted) return;
     final token = _supabase.auth.currentSession?.accessToken.trim();
     if (token == null || token.isEmpty) return;
 
@@ -3072,9 +3075,13 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                   onSelected: (value) {
                     if (value == 'edit') _editMemory(m);
                     if (value == 'delete') _deleteMemory(m);
+                    if (value == 'report') {
+                      showContentReport(context, kind: 'legacy_memory', targetId: memoryId);
+                    }
                   },
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'edit', child: Text('Edit memory')),
+                    PopupMenuItem(value: 'report', child: Text('Report memory or media')),
                     PopupMenuDivider(),
                     PopupMenuItem(
                       value: 'delete',
@@ -3225,6 +3232,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       appBar: AppBar(
         title: Text(title),
         actions: [
+          IconButton(
+            tooltip: 'Report profile or media',
+            onPressed: _loading || _error != null ? null : () => showContentReport(
+              context, kind: 'legacy_profile', targetId: widget.legacyMemberId),
+            icon: const Icon(Icons.flag_outlined),
+          ),
           IconButton(
             tooltip: 'Refresh',
             onPressed: _loading ? null : _load,

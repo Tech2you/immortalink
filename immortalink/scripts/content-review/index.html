@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Heiro | Safety review</title><link rel="stylesheet" href="/review.css"><script src="/review.js" defer></script></head>
+<body><header><div><strong>Heiro</strong><span>Safety review</span></div><div><span id="reviewer"></span><button id="logout">End session</button></div></header>
+<p id="status" role="status">Opening private session...</p>
+<main><aside><h1>Reports</h1><button id="refresh">Refresh queue</button><p id="health"></p>
+<form id="lookup"><label for="reference">Report reference</label><input id="reference" required maxlength="36"><button>Open case</button></form>
+<ul id="queue"></ul></aside><section id="case"><h2>Select a report</h2></section></main>
+<template id="case-template"><div class="case-heading"><h2></h2><span class="state"></span></div><p class="reference"></p>
+<dl class="details"></dl><h3>Reporter's statement</h3><p class="statement"></p><p class="scope notice"></p>
+<h3>Current content</h3><div class="content"></div><div class="attachments"></div>
+<p class="notice">If you suspect child sexual abuse material, stop previewing and use the restricted escalation process. Do not download, forward or submit it to an AI service.</p>
+<form class="decision"><h3>Review decision</h3><label for="decision-action">Action</label><select id="decision-action" name="action" required>
+<option value="review">Mark under review</option><option value="dismiss">Dismiss report</option>
+<option value="hide">Hide reported target</option><option value="restore">Restore reported target</option>
+<option value="suspend">Suspend identified contributor</option><option value="reinstate">Reinstate identified contributor</option>
+</select><label for="decision-notes">Reason</label><textarea id="decision-notes" name="notes" required maxlength="2000" rows="3"></textarea>
+<label for="decision-confirm">Confirm report reference</label><input id="decision-confirm" name="confirm" required maxlength="36" autocomplete="off">
+<p class="notice">Hiding restricts new access; previously downloaded or cached copies may remain. Account actions are separate from content removal. No action here deletes memories or changes subscriptions.</p>
+<button type="submit">Record decision</button></form></template></body></html>

@@ -5,7 +5,9 @@ import '../widgets/vault_load_failure.dart';
 import 'dart:convert';
 import '../services/recent_cache.dart';
 import 'recently_viewed_screen.dart';
+import 'content_safety_screen.dart';
 import '../widgets/vault_media.dart';
+import '../widgets/content_safety_actions.dart';
 
 import 'package:audioplayers/audioplayers.dart';
 import '../widgets/account_deletion_billing_notice.dart';
@@ -20,6 +22,8 @@ import 'first_account_setup_screen.dart';
 import '../services/apple_subscription_config.dart';
 import '../services/apple_subscription_service.dart';
 import '../services/push_notification_service.dart';
+import '../widgets/ai_processing_consent.dart';
+import '../widgets/legal_links.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import 'vault_home_screen.dart';
 import 'relationship_tree_screen.dart';
@@ -31,6 +35,11 @@ enum _VaultSettingsAction {
   joinFamily,
   createFamily,
   manageSubscription,
+  aiPermission,
+  safety,
+  privacy,
+  terms,
+  support,
   changePassword,
   deleteAccount,
   signOut,
@@ -183,6 +192,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
     setState(() {
       _vault = null;
       _vaultAvatarUrl = null;
+      _familyFeed = [];
+      _avatarUrlCache.clear();
+      _feedPhotosByMemoryId.clear();
+      _feedVoiceByMemoryId.clear();
     });
   }
 
@@ -397,6 +410,25 @@ class _VaultsScreenState extends State<VaultsScreen> {
       case _VaultSettingsAction.changePassword:
         await _changePassword();
         return;
+      case _VaultSettingsAction.aiPermission:
+        await requestAiProcessingConsent(context, settings: true);
+        return;
+      case _VaultSettingsAction.safety:
+        await Navigator.push(
+          context,
+          MaterialPageRoute<void>(builder: (_) => const ContentSafetyScreen()),
+        );
+        if (mounted) await _loadVault();
+        return;
+      case _VaultSettingsAction.privacy:
+        await openLegalLink(context, LegalDestination.privacy);
+        return;
+      case _VaultSettingsAction.terms:
+        await openLegalLink(context, LegalDestination.terms);
+        return;
+      case _VaultSettingsAction.support:
+        await openLegalLink(context, LegalDestination.support);
+        return;
       case _VaultSettingsAction.deleteAccount:
         await _deleteAccount();
         return;
@@ -407,36 +439,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   Future<void> _showSubscriptionSettings() async {
-    Map<String, dynamic>? usage;
-    Object? usageError;
     final familyId = _activeFamilyId?.trim();
-
-    if (familyId != null && familyId.isNotEmpty) {
-      try {
-        final result = await _supabase.rpc(
-          'get_family_entitlements_and_usage',
-          params: {'p_family_id': familyId},
-        );
-        if (result is Map) {
-          usage = Map<String, dynamic>.from(result);
-        }
-      } catch (e) {
-        usageError = e;
-      }
-    }
-
-    if (!mounted) return;
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Family plan'),
-        content: _FamilyPlanStatusContent(
-          usage: usage,
-          usageError: usageError,
-          hasFamily: familyId != null && familyId.isNotEmpty,
-          familyId: familyId ?? '',
-        ),
+        content: FamilyPlanStatusContent(familyId: familyId ?? ''),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -452,7 +461,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Sign out?'),
-        content: const Text('You will be signed out of Ever Roots.'),
+        content: const Text('You will be signed out of Heiro.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -489,7 +498,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
   Future<void> _deleteAccount() async {
     final password = await showDialog<String>(
       context: context,
-      builder: (ctx) => const _DeleteAccountConfirmationDialog(),
+      builder: (ctx) => const AccountDeletionConfirmationDialog(),
     );
 
     if (password == null) return;
@@ -515,6 +524,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
       if (res.status < 200 || res.status >= 300) {
         throw Exception(res.data?.toString() ?? 'Delete account failed.');
       }
+      if (res.data is! Map || res.data['ok'] != true) {
+        throw Exception('Account deletion was not confirmed. Please retry.');
+      }
 
       await _supabase.auth.signOut();
       if (!mounted) return;
@@ -528,6 +540,22 @@ class _VaultsScreenState extends State<VaultsScreen> {
         _activeFamilyId = null;
       });
       _toast('Account deleted.');
+    } on FunctionException catch (e) {
+      final details = e.details;
+      final code = details is Map ? details['code'] : null;
+      if (code == 'ACCOUNT_DELETION_PENDING') {
+        _toast(
+          'Deletion is in progress. Confirm Delete account again to continue.',
+        );
+      } else if (code == 'ACCOUNT_DELETION_BUSY') {
+        _toast('Deletion is already in progress. Please wait a moment.');
+      } else if (code == 'RECENT_PASSWORD_REQUIRED') {
+        _toast('Confirm your password again before deleting your account.');
+      } else {
+        _toast(
+          'Account deletion could not finish safely. Please retry or contact support.',
+        );
+      }
     } on AuthException {
       _toast('Password confirmation failed.');
     } on TimeoutException {
@@ -969,6 +997,11 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Future<void> _loadFamilyFeed() async {
     final familyId = _activeFamilyId?.trim();
+    final cacheEpoch = RecentCache.instance.generation;
+    bool current() => mounted && cacheEpoch == RecentCache.instance.generation
+        && familyId == _activeFamilyId?.trim();
+    final nextPhotos = <String, List<_MemPhoto>>{};
+    final nextVoices = <String, List<_VoiceNote>>{};
 
     if (familyId == null || familyId.isEmpty) {
       if (!mounted) return;
@@ -1031,7 +1064,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
       final vaultList = List<Map<String, dynamic>>.from(vaultRows);
       if (vaultList.isEmpty) {
-        if (!mounted) return;
+        if (!current()) return;
         setState(() {
           _familyFeed = [];
           _loadingFeed = false;
@@ -1054,7 +1087,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       }
 
       if (vaultIds.isEmpty) {
-        if (!mounted) return;
+        if (!current()) return;
         setState(() {
           _familyFeed = [];
           _loadingFeed = false;
@@ -1132,7 +1165,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         );
         for (final photo in photoEntries) {
           if (photo == null) continue;
-          _feedPhotosByMemoryId
+          nextPhotos
               .putIfAbsent(photo.memoryId, () => [])
               .add(photo);
         }
@@ -1165,7 +1198,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
         );
         for (final entry in voiceEntries) {
           if (entry == null) continue;
-          _feedVoiceByMemoryId
+          nextVoices
               .putIfAbsent(entry.key, () => [])
               .add(entry.value);
         }
@@ -1184,8 +1217,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
             ? (vaultMeta['display_name'] ?? '').toString().trim()
             : (vaultMeta['name'] ?? 'Family member').toString();
 
-        final photos = _feedPhotosByMemoryId[memoryId] ?? const <_MemPhoto>[];
-        final voices = _feedVoiceByMemoryId[memoryId] ?? const <_VoiceNote>[];
+        final photos = nextPhotos[memoryId] ?? const <_MemPhoto>[];
+        final voices = nextVoices[memoryId] ?? const <_VoiceNote>[];
 
         items.add(
           _FeedItem(
@@ -1200,8 +1233,14 @@ class _VaultsScreenState extends State<VaultsScreen> {
         );
       }
 
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
+        _feedPhotosByMemoryId
+          ..clear()
+          ..addAll(nextPhotos);
+        _feedVoiceByMemoryId
+          ..clear()
+          ..addAll(nextVoices);
         _avatarUrlCache
           ..clear()
           ..addAll(nextAvatarUrlCache);
@@ -1209,13 +1248,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
         _loadingFeed = false;
       });
     } on PostgrestException catch (e) {
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
         _feedError = publicErrorMessage(e);
         _loadingFeed = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!current()) return;
       setState(() {
         _feedError = publicErrorMessage(e);
         _loadingFeed = false;
@@ -1767,6 +1806,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                           ],
                         ),
                       ),
+                      MemoryReportMenu(memoryId: memoryId),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
                         icon: const Icon(Icons.close),
@@ -2177,7 +2217,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                   ],
                                 ),
                               ),
-                              _typeChip(item),
+                              MemoryReportMenu(memoryId: item.memoryId),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -2247,6 +2287,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
                             spacing: 8,
                             runSpacing: 8,
                             children: [
+                              _typeChip(item),
                               if (item.photoCount > 0)
                                 _metaBadge(
                                   Icons.photo_library_outlined,
@@ -2379,11 +2420,46 @@ class _VaultsScreenState extends State<VaultsScreen> {
                 ),
               ),
               PopupMenuItem(
+                value: _VaultSettingsAction.aiPermission,
+                child: ListTile(
+                  leading: Icon(Icons.privacy_tip_outlined),
+                  title: Text('AI data permission'),
+                ),
+              ),
+              PopupMenuItem(
                 value: _VaultSettingsAction.deleteAccount,
                 child: ListTile(
                   leading: Icon(Icons.delete_forever_outlined),
                   title: Text('Delete account'),
                   subtitle: Text('Permanent'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _VaultSettingsAction.privacy,
+                child: ListTile(
+                  leading: Icon(Icons.policy_outlined),
+                  title: Text('Privacy Policy'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _VaultSettingsAction.terms,
+                child: ListTile(
+                  leading: Icon(Icons.description_outlined),
+                  title: Text('Terms of Use'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _VaultSettingsAction.safety,
+                child: ListTile(
+                  leading: Icon(Icons.shield_outlined),
+                  title: Text('Safety and blocked members'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _VaultSettingsAction.support,
+                child: ListTile(
+                  leading: Icon(Icons.help_outline),
+                  title: Text('Contact support'),
                 ),
               ),
               PopupMenuDivider(),
@@ -2600,17 +2676,43 @@ class _CreateFamilyDialogState extends State<_CreateFamilyDialog> {
   }
 }
 
-class _DeleteAccountConfirmationDialog extends StatefulWidget {
-  const _DeleteAccountConfirmationDialog();
+class AccountDeletionConfirmationDialog extends StatefulWidget {
+  const AccountDeletionConfirmationDialog({
+    super.key,
+    this.checkActiveSubscription,
+    this.onManage,
+  });
+
+  final Future<bool> Function()? checkActiveSubscription;
+  final Future<void> Function()? onManage;
 
   @override
-  State<_DeleteAccountConfirmationDialog> createState() =>
+  State<AccountDeletionConfirmationDialog> createState() =>
       _DeleteAccountConfirmationDialogState();
 }
 
 class _DeleteAccountConfirmationDialogState
-    extends State<_DeleteAccountConfirmationDialog> {
+    extends State<AccountDeletionConfirmationDialog> {
   final _passwordController = TextEditingController();
+
+  Future<bool> _checkActiveSubscription() async {
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) return false;
+    // Check every accessible family, not just the currently selected one.
+    final rows = await client
+        .from('family_entitlements')
+        .select('current_period_end')
+        .eq('billing_owner_user_id', userId)
+        .eq('provider', 'apple')
+        .inFilter('status', ['active', 'grace_period']);
+    if (client.auth.currentUser?.id != userId) return false;
+    final now = DateTime.now();
+    return rows.any((row) {
+      final end = DateTime.tryParse(row['current_period_end']?.toString() ?? '');
+      return end == null || end.isAfter(now);
+    });
+  }
 
   Future<void> _manageSubscriptions() async {
     final service = AppleSubscriptionService();
@@ -2637,35 +2739,36 @@ class _DeleteAccountConfirmationDialogState
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      scrollable: true,
       title: const Text('Delete account permanently?'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'This permanently deletes your account, vault, memories, media, and family-tree links. This cannot be undone.',
-            ),
-            const SizedBox(height: 12),
-            AccountDeletionBillingNotice(onManage: _manageSubscriptions),
-            const SizedBox(height: 12),
-            const Text('Enter your password to confirm this is you.'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _passwordController,
-              autofocus: true,
-              obscureText: true,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(labelText: 'Password'),
-              onSubmitted: (_) => FocusManager.instance.primaryFocus?.unfocus(),
-            ),
-          ],
-        ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AccountDeletionBillingNotice(
+            onManage: widget.onManage ?? _manageSubscriptions,
+            checkActiveSubscription:
+                widget.checkActiveSubscription ?? _checkActiveSubscription,
+          ),
+          const Divider(height: 24),
+          const AccountDeletionDataNotice(),
+          const SizedBox(height: 12),
+          const Text('Enter your password to confirm this is you.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _passwordController,
+            autofocus: false,
+            obscureText: true,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(labelText: 'Password'),
+            onSubmitted: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+          ),
+        ],
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
+          child: const Text('Keep account'),
         ),
         ElevatedButton(
           style: ElevatedButton.styleFrom(
@@ -2852,62 +2955,155 @@ String _changePasswordErrorMessage(AuthException error) {
   return 'Could not change the password. Please try again.';
 }
 
-class _FamilyPlanStatusContent extends StatelessWidget {
-  final Map<String, dynamic>? usage;
-  final Object? usageError;
-  final bool hasFamily;
+class FamilyPlanStatusContent extends StatefulWidget {
   final String familyId;
+  final AppleSubscriptionService? service;
 
-  const _FamilyPlanStatusContent({
-    required this.usage,
-    required this.usageError,
-    required this.hasFamily,
+  const FamilyPlanStatusContent({
+    super.key,
     required this.familyId,
+    this.service,
   });
 
   @override
-  Widget build(BuildContext context) {
-    if (!hasFamily) {
-      return const SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Join or create a family to see shared storage and choose a '
-              'family plan.',
-            ),
-            SizedBox(height: 16),
-            _TierList(currentPlan: 'free', familyId: ''),
-          ],
-        ),
-      );
-    }
+  State<FamilyPlanStatusContent> createState() =>
+      _FamilyPlanStatusContentState();
+}
 
-    if (usageError != null || usage == null) {
+class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
+    with WidgetsBindingObserver {
+  late final AppleSubscriptionService _service;
+  Timer? _refreshTimer;
+  Timer? _expiryTimer;
+  DateTime? _scheduledExpiry;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _service = widget.service ?? AppleSubscriptionService();
+    _service.addListener(_scheduleExpiryRefresh);
+    unawaited(_service.initialize(familyId: widget.familyId));
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        _refresh();
+      }
+    });
+  }
+
+  void _refresh() {
+    if (!_service.purchasePending && !_service.billingRefreshing) {
+      unawaited(_service.refreshSponsorship());
+    }
+    if (_service.hasPricingDiagnostics) {
+      unawaited(_service.refreshStorefront());
+    }
+  }
+
+  Future<void> _refreshManually() async {
+    if (_service.purchasePending ||
+        _service.billingRefreshing ||
+        _service.loading) {
+      return;
+    }
+    await _service.refreshSponsorship();
+    await _service.refreshProducts();
+  }
+
+  void _scheduleExpiryRefresh() {
+    final expiry = _service.paidUntil;
+    if (expiry == _scheduledExpiry) return;
+    _scheduledExpiry = expiry;
+    _expiryTimer?.cancel();
+    if (expiry == null || !expiry.isAfter(DateTime.now())) return;
+    _expiryTimer = Timer(
+      expiry.difference(DateTime.now()) + const Duration(seconds: 1),
+      _refresh,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant FamilyPlanStatusContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.familyId != oldWidget.familyId) {
+      unawaited(_service.initialize(familyId: widget.familyId));
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refresh();
+      unawaited(_service.refreshStorefront());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    _expiryTimer?.cancel();
+    _service.removeListener(_scheduleExpiryRefresh);
+    if (widget.service == null) _service.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _service,
+    builder: (context, _) => _buildContent(context),
+  );
+
+  Widget _buildContent(BuildContext context) {
+    final usage = _service.familyUsage;
+    final familyId = widget.familyId;
+    if (familyId.isEmpty) {
       return SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Storage usage could not be loaded right now. You can still '
-              'review the available plans.',
+              'Join or create a family to see shared storage and choose a '
+              'family plan.',
             ),
             const SizedBox(height: 16),
-            _TierList(currentPlan: 'free', familyId: familyId),
+            _AppleAccountManagementButton(service: _service),
+          ],
+        ),
+      );
+    }
+
+    if (usage == null) {
+      return SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _service.billingRefreshing
+                  ? 'Checking your family plan...'
+                  : 'Could not refresh the family plan. Try again before making changes.',
+            ),
+            const SizedBox(height: 16),
+            _PurchaseAwareTierList(
+              currentPlan: null,
+              familyId: familyId,
+              service: _service,
+              onRefresh: _refreshManually,
+            ),
           ],
         ),
       );
     }
 
     final limits = Map<String, dynamic>.from(
-      (usage!['limits'] as Map?) ?? const {},
+      (usage['limits'] as Map?) ?? const {},
     );
     final currentUsage = Map<String, dynamic>.from(
-      (usage!['usage'] as Map?) ?? const {},
+      (usage['usage'] as Map?) ?? const {},
     );
-    final plan = (usage!['plan'] ?? 'free').toString();
+    final plan = usage['plan'].toString();
     final usedBytes = (currentUsage['storage_bytes'] as num?) ?? 0;
     final limitBytes = (limits['storage_bytes'] as num?) ?? 0;
     final progress = limitBytes <= 0
@@ -2917,10 +3113,10 @@ class _FamilyPlanStatusContent extends StatelessWidget {
     final isNearFull = progress >= 0.8;
 
     final status = isFull
-        ? 'Storage is full. Uploads may fail until older media is deleted or '
-              'a family organizer upgrades the family plan.'
+        ? 'Existing memories remain available. Free up space or renew your '
+              'family plan to add more media.'
         : isNearFull
-        ? 'Storage is almost full. A family organizer can upgrade this family '
+        ? 'Storage is almost full. Your family sponsor can upgrade this family '
               'plan for more shared storage.'
         : 'Upgrade when your family needs more room for memories and media.';
 
@@ -2951,7 +3147,12 @@ class _FamilyPlanStatusContent extends StatelessWidget {
               ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 10),
-            _TierList(currentPlan: plan, familyId: familyId),
+            _PurchaseAwareTierList(
+              currentPlan: plan,
+              familyId: familyId,
+              service: _service,
+              onRefresh: _refreshManually,
+            ),
           ],
         ),
       ),
@@ -2966,72 +3167,18 @@ class _FamilyPlanStatusContent extends StatelessWidget {
   }
 }
 
-class _TierList extends StatelessWidget {
-  final String currentPlan;
+class _PurchaseAwareTierList extends StatelessWidget {
+  final String? currentPlan;
   final String familyId;
-
-  const _TierList({required this.currentPlan, required this.familyId});
-
-  @override
-  Widget build(BuildContext context) {
-    return _PurchaseAwareTierList(currentPlan: currentPlan, familyId: familyId);
-  }
-}
-
-class _PurchaseAwareTierList extends StatefulWidget {
-  final String currentPlan;
-  final String familyId;
+  final AppleSubscriptionService _subscriptionService;
+  final VoidCallback onRefresh;
 
   const _PurchaseAwareTierList({
     required this.currentPlan,
     required this.familyId,
-  });
-
-  @override
-  State<_PurchaseAwareTierList> createState() => _PurchaseAwareTierListState();
-}
-
-class _PurchaseAwareTierListState extends State<_PurchaseAwareTierList>
-    with WidgetsBindingObserver {
-  late final AppleSubscriptionService _subscriptionService;
-  Timer? _priceRetry;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _subscriptionService = AppleSubscriptionService();
-    unawaited(_subscriptionService.initialize(familyId: widget.familyId));
-    _priceRetry = Timer.periodic(const Duration(seconds: 20), (_) {
-      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
-          _subscriptionService.hasPricingDiagnostics) {
-        unawaited(_subscriptionService.refreshStorefront());
-      }
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant _PurchaseAwareTierList oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.familyId != oldWidget.familyId) {
-      unawaited(_subscriptionService.initialize(familyId: widget.familyId));
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      unawaited(_subscriptionService.refreshStorefront());
-    }
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _priceRetry?.cancel();
-    _subscriptionService.dispose();
-    super.dispose();
-  }
+    required AppleSubscriptionService service,
+    required this.onRefresh,
+  }) : _subscriptionService = service;
 
   @override
   Widget build(BuildContext context) {
@@ -3039,65 +3186,196 @@ class _PurchaseAwareTierListState extends State<_PurchaseAwareTierList>
       animation: _subscriptionService,
       builder: (context, _) {
         final error = _subscriptionService.error;
+        final sharedPlanMismatch =
+            _subscriptionService.purchaseAccountMismatch &&
+            _subscriptionService.hasActiveSponsor &&
+            !_subscriptionService.canManageFamilyPlan &&
+            currentPlan != null &&
+            currentPlan != 'free' &&
+            (_subscriptionService.paidUntil?.isAfter(DateTime.now()) ?? false);
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (_subscriptionService.sponsorName != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text('Sponsored by ${_subscriptionService.sponsorName}'),
+              ),
+            if (_subscriptionService.hasActiveSponsor) ...[
+              if (_subscriptionService.paidUntil case final DateTime paidUntil)
+                Text(
+                  'Paid coverage until ${_coverageDate(context, paidUntil)}.',
+                ),
+              const SizedBox(height: 8),
+              Text(
+                _subscriptionService.canManageFamilyPlan
+                    ? 'Cancelling renewal keeps your family covered until the paid period ends.'
+                    : 'The original purchaser manages this subscription. Once its paid coverage ends, any family member can sponsor using their own Apple account.',
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_subscriptionService.message != null) ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_subscriptionService.purchasePending) ...[
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(_subscriptionService.message!),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (error != null) ...[
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  sharedPlanMismatch
+                      ? 'Your family plan is already available through its sponsor. '
+                            'The Apple purchase checked belongs to another app account '
+                            'or family and was not restored to this account.'
+                      : error,
+                  style: TextStyle(
+                    color: sharedPlanMismatch
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
+              if (_subscriptionService.sandboxAccountMismatch &&
+                  !sharedPlanMismatch) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Apple returned a sandbox purchase. TestFlight and development '
+                  'builds can use different Apple purchase accounts.',
+                ),
+              ],
+              const SizedBox(height: 12),
+            ],
             ...AppleSubscriptionConfig.tiers.map(
               (tier) => _PlanTierTile(
                 tier: tier,
-                isCurrent: tier.plan == widget.currentPlan,
+                isCurrent: tier.plan == currentPlan,
                 service: _subscriptionService,
-                hasFamily: widget.familyId.trim().isNotEmpty,
+                hasFamily: familyId.trim().isNotEmpty && currentPlan != null,
               ),
             ),
-            if (_subscriptionService.message != null) ...[
-              const SizedBox(height: 4),
-              Text(_subscriptionService.message!),
-            ],
-            if (error != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                error,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
             if (_subscriptionService.hasPricingDiagnostics) ...[
               const SizedBox(height: 10),
               if (kDebugMode)
                 _StoreKitDiagnostics(service: _subscriptionService),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: _subscriptionService.loading
-                      ? null
-                      : _subscriptionService.refreshProducts,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Check prices again'),
-                ),
-              ),
             ],
             const SizedBox(height: 4),
             Align(
               alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: AppleSubscriptionConfig.purchaseFlowEnabled
-                    ? _subscriptionService.restore
-                    : null,
-                child: const Text('Restore purchases'),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  IconButton(
+                    tooltip: 'Apple billing details',
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Apple billing details'),
+                        content: SelectableText(
+                          'Storefront: ${_subscriptionService.storefrontCountryCode ?? "Unavailable"}\n'
+                          'Currency: ${_subscriptionService.products.map((p) => p.currencyCode).toSet().join(", ")}\n'
+                          'Products returned: ${_subscriptionService.foundProductIds.length}\n'
+                          'Result: ${_subscriptionService.rawError ?? "No billing error"}',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    icon: const Icon(Icons.info_outline),
+                  ),
+                  IconButton(
+                    tooltip: 'Refresh plan and prices',
+                    onPressed:
+                        _subscriptionService.billingRefreshing ||
+                            _subscriptionService.purchasePending ||
+                            _subscriptionService.loading
+                        ? null
+                        : onRefresh,
+                    icon: const Icon(Icons.refresh),
+                  ),
+                  TextButton(
+                    onPressed:
+                        AppleSubscriptionConfig.purchaseFlowEnabled &&
+                            !_subscriptionService.purchasePending &&
+                            !_subscriptionService.loading
+                        ? _subscriptionService.restore
+                        : null,
+                    child: const Text('Restore purchases'),
+                  ),
+                ],
               ),
             ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: _subscriptionService.openManageSubscriptions,
-                child: const Text('Manage with Apple'),
-              ),
-            ),
+            _AppleAccountManagementButton(service: _subscriptionService),
+            const LegalLinks(),
           ],
         );
       },
     );
   }
+
+  static String _coverageDate(BuildContext context, DateTime value) {
+    final local = value.toLocal();
+    final labels = MaterialLocalizations.of(context);
+    return '${labels.formatMediumDate(local)}, ${labels.formatTimeOfDay(TimeOfDay.fromDateTime(local), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}';
+  }
+}
+
+class _AppleAccountManagementButton extends StatefulWidget {
+  final AppleSubscriptionService service;
+
+  const _AppleAccountManagementButton({required this.service});
+
+  @override
+  State<_AppleAccountManagementButton> createState() =>
+      _AppleAccountManagementButtonState();
+}
+
+class _AppleAccountManagementButtonState
+    extends State<_AppleAccountManagementButton> {
+  bool _opening = false;
+
+  Future<void> _open() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      // Apple authorizes its account, independently of Heiro family sponsorship.
+      await widget.service.openManageSubscriptions();
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerRight,
+    child: TextButton.icon(
+      onPressed: _opening ? null : _open,
+      icon: const Icon(Icons.open_in_new),
+      label: const Text('Manage Apple subscriptions'),
+    ),
+  );
 }
 
 class _StoreKitDiagnostics extends StatelessWidget {
@@ -3181,12 +3459,14 @@ class _PlanTierTile extends StatelessWidget {
         : service.productFor(tier.annualProductId);
     final canBuyMonthly =
         hasFamily &&
+        service.canSponsor &&
         tier.canPurchase &&
         monthlyProduct != null &&
         !service.loading &&
         !service.purchasePending;
     final canBuyAnnual =
         hasFamily &&
+        service.canSponsor &&
         tier.canPurchase &&
         annualProduct != null &&
         !service.loading &&
@@ -3261,11 +3541,16 @@ class _PlanTierTile extends StatelessWidget {
               ),
             )
           else if (isCurrent)
-            OutlinedButton.icon(
-              onPressed: service.openManageSubscriptions,
-              icon: const Icon(Icons.manage_accounts_outlined),
-              label: const Text('Change or cancel plan'),
-            )
+            if (service.canManageFamilyPlan)
+              OutlinedButton.icon(
+                onPressed: service.purchasePending
+                    ? null
+                    : service.openFamilyPlanManagement,
+                icon: const Icon(Icons.manage_accounts_outlined),
+                label: const Text('Change or cancel plan'),
+              )
+            else
+              const Text('Included through your family sponsor')
           else
             Wrap(
               alignment: WrapAlignment.end,

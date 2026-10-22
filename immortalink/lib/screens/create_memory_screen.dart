@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../widgets/ai_processing_consent.dart';
 import '../services/connection_status.dart';
 import '../utils/public_error.dart';
 import '../utils/vault_media_upload.dart';
@@ -417,6 +418,8 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   }
 
   Future<void> _uploadVoice(String userId, String memoryId) async {
+    final transcribe = _voices.isNotEmpty && mounted &&
+        await requestAiProcessingConsent(context) && mounted;
     for (var index = 0; index < _voices.length; index++) {
       final audio = _voices[index].audio;
       MediaUploadPolicy.validateListOrThrow(
@@ -451,7 +454,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
           .maybeSingle();
 
       final voiceId = (inserted?['id'] ?? '').toString();
-      if (voiceId.isEmpty) continue;
+      if (voiceId.isEmpty || !transcribe) continue;
       final token = _client.auth.currentSession?.accessToken.trim();
       if (token == null || token.isEmpty) continue;
       unawaited(() async {

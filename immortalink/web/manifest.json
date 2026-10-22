@@ -1,11 +1,11 @@
 {
-    "name": "Ever Roots",
-    "short_name": "Ever Roots",
+    "name": "Heiro",
+    "short_name": "Heiro",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "Ever Roots helps families preserve memories, voice notes, photos, and family stories.",
+    "description": "Heiro helps families preserve memories, voice notes, photos, and family stories.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

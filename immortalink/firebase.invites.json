@@ -1,6 +1,7 @@
 {
   "hosting": {
     "site": "immortal-ink-ba580-invites",
+    "predeploy": ["node scripts/prepare_invite_hosting.mjs"],
     "public": "invite-hosting/public",
     "ignore": ["**/node_modules/**"],
     "headers": [

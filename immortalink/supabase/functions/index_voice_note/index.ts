@@ -1,4 +1,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { hasAiProcessingConsent } from "../_shared/ai_processing_consent.ts";
+import { MAX_AUDIO_BYTES, validateAudio } from "./audio_validation.ts";
+import { runTranscriptionJob, TranscriptionError } from "./transcription_job.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -63,13 +66,13 @@ function chunkText(text: string, maxChars = 900) {
   return chunks;
 }
 
-async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
-  return (await Promise.race([
-    p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
-    ),
-  ])) as T;
+async function withTimeout<T>(p: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([p, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    })]);
+  } finally { clearTimeout(timer); }
 }
 
 function guessFileForPath(storagePath: string): { filename: string; mime: string } {
@@ -85,16 +88,16 @@ function guessFileForPath(storagePath: string): { filename: string; mime: string
 }
 
 async function downloadVoiceNoteBytes({
-  admin,
+  userClient,
   storagePath,
 }: {
-  admin: any;
+  userClient: any;
   storagePath: string;
 }): Promise<Uint8Array> {
   // ✅ Your actual bucket for memory voice notes
   const bucket = "memory_voice";
 
-  const { data, error } = await admin.storage
+  const { data, error } = await userClient.storage
     .from(bucket)
     .createSignedUrl(storagePath, 60 * 60);
 
@@ -102,12 +105,25 @@ async function downloadVoiceNoteBytes({
     throw new Error(`Signed URL failed for bucket="${bucket}" path="${storagePath}": ${error?.message || "No signedUrl"}`);
   }
 
-  const resp = await fetch(data.signedUrl);
+  const resp = await fetch(data.signedUrl, { signal: AbortSignal.timeout(15000) });
   if (!resp.ok) throw new Error(`Fetch audio failed ${resp.status}`);
-
-  const buf = new Uint8Array(await resp.arrayBuffer());
-  if (!buf.length) throw new Error("Empty audio file");
-  return buf;
+  if (Number(resp.headers.get("content-length")) > MAX_AUDIO_BYTES) throw new Error("AUDIO_SIZE_INVALID");
+  const reader = resp.body!.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > MAX_AUDIO_BYTES) throw new Error("AUDIO_SIZE_INVALID");
+      parts.push(value);
+    }
+  } finally { await reader.cancel(); }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const part of parts) { bytes.set(part, offset); offset += part.length; }
+  return bytes;
 }
 
 async function transcribeWithOpenAI({
@@ -123,13 +139,14 @@ async function transcribeWithOpenAI({
   form.append("model", "gpt-4o-mini-transcribe");
 
   const { filename, mime } = guessFileForPath(storagePath);
-  const file = new File([audioBytes], filename, { type: mime });
+  const file = new File([new Uint8Array(audioBytes)], filename, { type: mime });
   form.append("file", file);
 
   const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
+    signal: AbortSignal.timeout(30000),
   });
 
   if (!resp.ok) {
@@ -139,6 +156,42 @@ async function transcribeWithOpenAI({
 
   const data = await resp.json().catch(() => ({}));
   return textClean((data?.text ?? "").toString());
+}
+
+async function verifiedTranscription({ admin, userClient, userId, apiKey, storagePath, familyId, vaultId, legacyId, memoryId }: any) {
+  const { data: allowed, error: scopeError } = await admin.rpc("media_object_matches_scope", {
+    p_bucket: "memory_voice", p_path: storagePath, p_family: familyId || null,
+    p_vault: vaultId || null, p_legacy: legacyId || null, p_memory: memoryId,
+  });
+  if (scopeError || allowed !== true) throw new TranscriptionError(403, "MEDIA_SCOPE", "This recording does not belong to this memory.");
+  const audioBytes = await downloadVoiceNoteBytes({ userClient, storagePath });
+  let audio;
+  try { audio = await validateAudio(audioBytes); }
+  catch { throw new TranscriptionError(422, "AUDIO_INVALID", "The recording is saved. Transcription needs a valid recording no longer than two minutes."); }
+  const token = crypto.randomUUID();
+  const scope = familyId || vaultId;
+  return await runTranscriptionJob({
+    claim: async () => {
+      const { data, error } = await admin.rpc("claim_voice_transcription", {
+        p_scope: scope, p_hash: audio.hash, p_user: userId, p_token: token, p_seconds: audio.seconds,
+      });
+      if (error) throw new TranscriptionError(503, "TRANSCRIPTION_UNAVAILABLE", "The recording is saved. Transcription is temporarily unavailable.");
+      return data;
+    },
+    consume: () => consumeVoiceTranscriptionUsage({ userClient, familyId, vaultId, seconds: audio.seconds }),
+    transcribe: () => transcribeWithOpenAI({ apiKey, audioBytes, storagePath }),
+    finish: async (status, transcript) => {
+      const { error } = await admin.from("voice_transcription_jobs").update({ status, transcript: transcript ?? null })
+        .eq("scope_id", scope).eq("content_hash", audio.hash).eq("token", token);
+      if (error) throw new Error("Could not save transcription result");
+    },
+    release: async () => {
+      const { error } = await admin.rpc("release_voice_transcription", {
+        p_scope: scope, p_hash: audio.hash, p_token: token,
+      });
+      if (error) throw new Error("Could not release transcription job");
+    },
+  });
 }
 
 serve(async (req) => {
@@ -174,6 +227,9 @@ serve(async (req) => {
     // Verify JWT (this is why your Flutter invoke MUST send Authorization header)
     const { data: u, error: uErr } = await userClient.auth.getUser();
     if (uErr || !u?.user) return json(401, { error: "Invalid/missing JWT" });
+    if (!await hasAiProcessingConsent(userClient)) {
+      return json(403, { code: "AI_CONSENT_REQUIRED", error: "Recording saved. Open AI data permission settings to enable transcription." });
+    }
 
     const payload = await req.json().catch(() => ({}));
 
@@ -212,24 +268,12 @@ serve(async (req) => {
       if (!legacyMemoryId) return json(400, { error: "legacy_memory_id is empty on legacy_memory_voice_notes row" });
       if (!storagePath) return json(400, { error: "path is empty on legacy_memory_voice_notes row" });
 
-      const quotaError = await consumeVoiceTranscriptionUsage({
-        userClient,
-        familyId: textClean(legacyVn.family_id || familyId || ""),
-        seconds: Number(legacyVn.duration_seconds || 120),
-      });
-      if (quotaError) return json(429, { error: quotaError });
-
-      const audioBytes = await withTimeout(
-        downloadVoiceNoteBytes({ admin, storagePath }),
-        15000,
-        "download audio"
-      );
-
-      const transcript = await withTimeout(
-        transcribeWithOpenAI({ apiKey: OPENAI_API_KEY, audioBytes, storagePath }),
-        30000,
-        "transcription"
-      );
+      const { data: parent } = await userClient.from("legacy_memories").select("id")
+        .eq("id", legacyMemoryId).eq("legacy_member_id", legacyVn.legacy_member_id).eq("family_id", legacyVn.family_id).maybeSingle();
+      if (!parent) return json(403, { error: "This recording does not belong to this memory." });
+      const transcript = await verifiedTranscription({ admin, userClient, userId: u.user.id,
+        apiKey: OPENAI_API_KEY, storagePath, familyId: legacyVn.family_id,
+        legacyId: legacyVn.legacy_member_id, memoryId: legacyMemoryId });
 
       if (!transcript) {
         return json(200, {
@@ -241,10 +285,11 @@ serve(async (req) => {
         });
       }
 
-      await admin
+      const { error: saveError } = await admin
         .from("legacy_memory_voice_notes")
         .update({ transcript })
-        .eq("id", legacyMemoryVoiceNoteId);
+        .eq("id", legacyMemoryVoiceNoteId).eq("path", storagePath);
+      if (saveError) throw new Error("Could not save voice transcript");
 
       return json(200, {
         ok: true,
@@ -279,26 +324,11 @@ serve(async (req) => {
     if (!memoryId) return json(400, { error: "memory_id is empty on memory_voice_notes row" });
     if (!storagePath) return json(400, { error: "path is empty on memory_voice_notes row" });
 
-    const quotaError = await consumeVoiceTranscriptionUsage({
-      userClient,
-      vaultId,
-      seconds: Number(vn.duration_seconds || 120),
-    });
-    if (quotaError) return json(429, { error: quotaError });
-
-    // 1) Download audio
-    const audioBytes = await withTimeout(
-      downloadVoiceNoteBytes({ admin, storagePath }),
-      15000,
-      "download audio"
-    );
-
-    // 2) Transcribe
-    const transcript = await withTimeout(
-      transcribeWithOpenAI({ apiKey: OPENAI_API_KEY, audioBytes, storagePath }),
-      30000,
-      "transcription"
-    );
+    const { data: parent } = await userClient.from("memories").select("id")
+      .eq("id", memoryId).eq("vault_id", vaultId).maybeSingle();
+    if (!parent) return json(403, { error: "This recording does not belong to this memory." });
+    const transcript = await verifiedTranscription({ admin, userClient, userId: u.user.id,
+      apiKey: OPENAI_API_KEY, storagePath, vaultId, memoryId });
 
     if (!transcript) {
       return json(200, {
@@ -310,10 +340,11 @@ serve(async (req) => {
       });
     }
 
-    await admin
+    const { error: saveError } = await admin
       .from("memory_voice_notes")
       .update({ transcript })
-      .eq("id", memoryVoiceNoteId);
+      .eq("id", memoryVoiceNoteId).eq("path", storagePath);
+    if (saveError) throw new Error("Could not save voice transcript");
 
     // 3) Rebuild the complete memory context so a new voice note never
     // replaces the written memory or an earlier voice note.
@@ -379,6 +410,7 @@ serve(async (req) => {
       chunk_count: payloadChunks.length,
     });
   } catch (e) {
+    if (e instanceof TranscriptionError) return json(e.status, { code: e.code, error: e.message });
     console.error("index_voice_note failed:", e);
     return json(500, { error: "Voice note indexing failed." });
   }

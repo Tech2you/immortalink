@@ -88,7 +88,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Choose a password only you know, then you can continue back into Ever Roots.',
+                    'Choose a password only you know, then you can continue back into Heiro.',
                     style: theme.textTheme.bodyLarge?.copyWith(
                       color: Colors.black.withValues(alpha: 0.62),
                       height: 1.35,

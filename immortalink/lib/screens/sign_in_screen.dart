@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/ai_chat_reminder_service.dart';
 import '../services/onboarding_invite_state.dart';
 import '../services/first_account_setup.dart';
+import '../widgets/legal_links.dart';
 
 enum _AuthMode { signIn, signUp }
 
@@ -151,7 +152,7 @@ class _SignInScreenState extends State<SignInScreen> {
             content: Text(
               _pendingInviteCode.isEmpty
                   ? 'Account created. If email confirmation is enabled, check your inbox.'
-                  : 'Account created. Confirm your email, then Ever Roots will take you to your family invite.',
+                  : 'Account created. Confirm your email, then Heiro will take you to your family invite.',
             ),
           ),
         );
@@ -457,7 +458,7 @@ class _SignInScreenState extends State<SignInScreen> {
                                     Transform.scale(
                                       scale: logoScale,
                                       child: Image.asset(
-                                        'assets/images/sign_in_logo.png',
+                                        'assets/images/sign_in_logo_heiro.png',
                                         height: logoHeight,
                                         fit: BoxFit.contain,
                                       ),
@@ -549,7 +550,7 @@ class _SignInScreenState extends State<SignInScreen> {
                                     ),
                                   ),
                                   child: const Text(
-                                    'Family invite ready. After this, Ever Roots will open the join step.',
+                                    'Family invite ready. After this, Heiro will open the join step.',
                                     style: TextStyle(
                                       color: Color(0xFF174E52),
                                       fontWeight: FontWeight.w700,
@@ -748,6 +749,7 @@ class _SignInScreenState extends State<SignInScreen> {
                                       : 'I already have an account',
                                 ),
                               ),
+                              const LegalLinks(),
                             ],
                           ),
                         ),

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum FamilyTreeAction { recenter, refresh, leave, photo, name }
+enum FamilyTreeAction { recenter, refresh, leave, photo, name, successor }
 
 class FamilyTreeSettingsMenu extends StatelessWidget {
   const FamilyTreeSettingsMenu({
@@ -45,6 +45,13 @@ class FamilyTreeSettingsMenu extends StatelessWidget {
         canEditName,
       ),
       const PopupMenuDivider(),
+      if (canEditName)
+        _item(
+          FamilyTreeAction.successor,
+          Icons.manage_accounts_outlined,
+          'Account successor',
+          true,
+        ),
       _item(
         FamilyTreeAction.leave,
         Icons.group_remove_outlined,

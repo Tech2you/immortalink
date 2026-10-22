@@ -1,4 +1,4 @@
-/// Apple subscription identifiers used by the Ever Roots billing bridge.
+/// Apple subscription identifiers used by the Heiro billing bridge.
 ///
 /// Keep these values aligned with App Store Connect. The empty default values
 /// are intentional so local builds do not accidentally look for draft products.
@@ -25,10 +25,10 @@ class AppleSubscriptionConfig {
     'APPLE_EVER_ROOTS_LEGACY_ANNUAL_PRODUCT_ID',
   );
 
-  static const appName = 'Ever Roots';
+  static const appName = 'Heiro';
   static const bundleId = 'com.everroots.app';
   static const sku = 'everroots-ios';
-  static const draftSubscriptionGroupReferenceName = 'Ever Roots Plans';
+  static const draftSubscriptionGroupReferenceName = 'Heiro Plans';
   static const draftFamilyMonthlyProductId = 'everroots.family.monthly';
   static const draftFamilyAnnualProductId = 'everroots.family.annual';
   static const draftLegacyMonthlyProductId = 'everroots.legacy.monthly';
@@ -48,7 +48,7 @@ class AppleSubscriptionConfig {
     ),
     AppleSubscriptionTier(
       plan: 'everroot_family',
-      title: 'Ever Roots Family',
+      title: 'Heiro Family',
       subtitle: 'For families saving more photos, stories, and voice notes.',
       storageLabel: '10 GB shared storage',
       included:
@@ -61,7 +61,7 @@ class AppleSubscriptionConfig {
     ),
     AppleSubscriptionTier(
       plan: 'everroot_legacy',
-      title: 'Ever Roots Legacy',
+      title: 'Heiro Legacy',
       subtitle: 'For larger archives and heavier AI/transcription use.',
       storageLabel: '50 GB shared storage',
       included: 'More room for long-term family archives as your family grows.',

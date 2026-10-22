@@ -13,7 +13,8 @@
 // - ✅ NEW: relationship works even when viewer slot_key is NULL (family root) by using owner slot_key
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { hasAiProcessingConsent } from "../_shared/ai_processing_consent.ts";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { boundedEmbeddingCandidates, MAX_QUESTION_CHARACTERS } from "../_shared/ai_cost_limits.ts";
 
 const corsHeaders = {
@@ -50,7 +51,7 @@ async function consumeAiUsage({
   familyId,
   vaultId,
 }: {
-  supabase: any;
+  supabase: SupabaseClient;
   familyId?: string;
   vaultId?: string;
 }) {
@@ -129,7 +130,7 @@ async function rankContextByMeaning(
   }
 }
 
-async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+async function withTimeout<T>(p: PromiseLike<T>, ms: number, label: string): Promise<T> {
   const res = await Promise.race([
     p,
     new Promise<T>((_, reject) =>
@@ -759,7 +760,7 @@ async function buildIcebreakerContext({
   legacyMemberId,
   familyId,
 }: {
-  supabase: any;
+  supabase: SupabaseClient;
   isLegacyChat: boolean;
   vaultId: string;
   legacyMemberId: string;
@@ -890,6 +891,9 @@ serve(async (req) => {
     if (userErr || !userData?.user) return json({ error: "Not authenticated" }, 401);
 
     const viewerUserId = userData.user.id;
+    if (!await hasAiProcessingConsent(supabase)) {
+      return json({ code: "AI_CONSENT_REQUIRED", error: "Open AI data permission settings before using AI." }, 403);
+    }
 
     const payload = await req.json().catch(() => ({}));
     const vaultId = textClean(payload?.vaultId || payload?.vault_id || "");

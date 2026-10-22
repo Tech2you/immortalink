@@ -3,18 +3,19 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 const String _defaultEverRootFamilyUpgradeMessage =
-    'Ever Roots Family increases storage for photos, voice notes, memories, '
+    'Heiro Family increases storage for photos, voice notes, memories, '
     'AI, transcription, and larger family capacity. Subscriptions will be '
     'available after App Store billing is connected.';
 
 const String _storageLimitUpgradeMessage =
-    'This family has reached its storage allowance. A family organizer can '
-    'upgrade the family plan once App Store billing is connected, or free up '
-    'space by deleting older media.';
+    'This family has reached its storage allowance. Check the family plan '
+    'with your sponsor, or free up space by deleting older media. '
+    'Any member can sponsor a family without an active plan.';
 
 bool isEverRootFamilyUpgradeError(Object error) {
   final text = error.toString();
-  return text.contains('ERR_EVERROOT_STORAGE_LIMIT') ||
+  return text.contains('ERR_EVERROOT_READ_ONLY') ||
+      text.contains('ERR_EVERROOT_STORAGE_LIMIT') ||
       text.contains('ERR_EVERROOT_PHOTO_LIMIT') ||
       text.contains('ERR_EVERROOT_VOICE_LIMIT') ||
       text.contains('ERR_EVERROOT_MEMORY_LIMIT') ||
@@ -30,6 +31,15 @@ bool isEverRootQuotaError(Object error) {
 String everRootQuotaMessageFromError(Object error) {
   final text = error.toString();
   final message = _friendlyQuotaMessage(text);
+
+  if (text.contains('ERR_EVERROOT_USAGE_BURST')) {
+    return 'Please wait a minute before requesting more AI or transcription.';
+  }
+
+  if (text.contains('ERR_EVERROOT_READ_ONLY')) {
+    return 'Your family is over the free plan limits. Existing memories are '
+        'still available. Renew your plan or reduce usage to add more.';
+  }
 
   if (text.contains('ERR_EVERROOT_STORAGE_LIMIT')) {
     return message ?? _storageLimitUpgradeMessage;
@@ -60,7 +70,7 @@ String everRootQuotaMessageFromError(Object error) {
     return 'Family invites are being enabled for free families. Please update the app and try again.';
   }
 
-  return message ?? 'This Ever Roots action reached a family allowance.';
+  return message ?? 'This Heiro action reached a family allowance.';
 }
 
 String? _friendlyQuotaMessage(String text) {
@@ -80,7 +90,7 @@ Future<void> showEverRootFamilyUpgradePrompt(
   return showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Ever Roots plans'),
+      title: const Text('Heiro plans'),
       content: Text(body),
       actions: [
         TextButton(
@@ -146,7 +156,7 @@ String? cleanEverRootUpgradeMessage(String? rawMessage) {
     if (decoded is Map) {
       final message = decoded['message']?.toString().trim();
       if (message != null && message.isNotEmpty) {
-        return _normalizeEverRootsName(message);
+        return _normalizePlanDisplayName(message);
       }
     }
   } on FormatException {
@@ -157,7 +167,7 @@ String? cleanEverRootUpgradeMessage(String? rawMessage) {
   if (quotedMessage != null) {
     final message = quotedMessage.group(1)?.trim();
     if (message != null && message.isNotEmpty) {
-      return _normalizeEverRootsName(message);
+      return _normalizePlanDisplayName(message);
     }
   }
 
@@ -165,16 +175,18 @@ String? cleanEverRootUpgradeMessage(String? rawMessage) {
   if (plainMessage != null) {
     final message = plainMessage.group(1)?.trim();
     if (message != null && message.isNotEmpty) {
-      return _normalizeEverRootsName(message);
+      return _normalizePlanDisplayName(message);
     }
   }
 
-  return _normalizeEverRootsName(text);
+  return _normalizePlanDisplayName(text);
 }
 
-String _normalizeEverRootsName(String text) {
+String _normalizePlanDisplayName(String text) {
+  // Older servers may still return the former display names.
   return text
-      .replaceAll('EverRoot Family', 'Ever Roots Family')
-      .replaceAll('EverRoot Free', 'Ever Roots Free')
-      .replaceAll('Start EverRoot', 'Start Ever Roots');
+      .replaceAll('EverRoot Family', 'Heiro Family')
+      .replaceAll('EverRoot Free', 'Heiro Free')
+      .replaceAll('Start EverRoot', 'Start Heiro')
+      .replaceAll('Ever Roots', 'Heiro');
 }

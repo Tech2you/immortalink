@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
 import { Buffer } from "node:buffer";
 import {
-  Environment,
   SignedDataVerifier,
   VerificationException,
   VerificationStatus,
-} from "npm:@apple/app-store-server-library@3.1.0";
+} from "../_shared/apple_vendor/jws_verification.ts";
+import { Environment } from "npm:@apple/app-store-server-library@3.1.0";
 import {
   createNotificationVerifier,
   notificationErrorStatus,

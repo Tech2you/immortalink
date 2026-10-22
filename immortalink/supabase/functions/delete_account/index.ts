@@ -1,225 +1,106 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { removeStoragePrefix } from "./storage_cleanup.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
+import { DeletionFile, recentPasswordSession, runDeletion } from "./deletion_workflow.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-function json(status: number, body: unknown) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
-
-function clean(value: unknown) {
-  return (value ?? "").toString().trim();
-}
-
-function missingRelation(error: any) {
-  const message = `${error?.message ?? ""}`;
-  return error?.code === "42P01" ||
-    message.includes("does not exist") ||
-    message.includes("schema cache") ||
-    message.includes("Could not find the table");
-}
-
-function optionalSchemaError(error: any) {
-  return missingRelation(error) || error?.code === "42703";
-}
-
-async function optionalDelete(query: PromiseLike<{ error: any }>) {
-  const { error } = await query;
-  if (error && !missingRelation(error)) throw error;
-}
-
-async function optionalProfileDelete(query: PromiseLike<{ error: any }>) {
-  const { error } = await query;
-  if (error && !optionalSchemaError(error)) throw error;
-}
-
-async function optionalSelect(
-  query: PromiseLike<{ data: any[] | null; error: any }>,
-) {
-  const { data, error } = await query;
-  if (error && !optionalSchemaError(error)) throw error;
-  return (data || []) as any[];
-}
+const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
+  status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+});
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json(405, { error: "Use POST" });
-
-  let step = "start";
-
+  let step = "authenticate";
   try {
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SERVICE_ROLE_KEY) {
-      return json(500, { error: "Delete account function is not configured." });
-    }
-
-    const authHeader =
-      req.headers.get("authorization") || req.headers.get("Authorization") || "";
-
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
+    const url = Deno.env.get("SUPABASE_URL")!;
+    const header = req.headers.get("authorization") || "";
+    const userClient = createClient(url, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: header } },
     });
-    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-
-    const { data: authData, error: authError } = await userClient.auth.getUser();
-    if (authError || !authData?.user) {
-      return json(401, { error: "Invalid or missing session." });
-    }
-
-    const userId = authData.user.id;
-
-    const runStep = async (label: string, action: () => Promise<void>) => {
-      step = label;
-      await action();
+    const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data, error } = await userClient.auth.getUser();
+    if (error || !data.user) return json(401, { error: "Invalid or missing session." });
+    const userId = data.user.id;
+    const sessionId = recentPasswordSession(header.replace(/^Bearer\s+/i, ""));
+    const rpc = async (name: string, args: Record<string, unknown>) => {
+      step = name;
+      const result = await admin.rpc(name, args);
+      if (result.error) throw result.error;
+      return result.data;
     };
-
-    const { data: vaultRows, error: vaultError } = await admin
-      .from("vaults")
-      .select("id, family_id")
-      .eq("owner_id", userId);
-    if (vaultError && !missingRelation(vaultError)) throw vaultError;
-
-    const vaultIds = (vaultRows || [])
-      .map((row: any) => clean(row.id))
-      .filter(Boolean);
-
-    let memoryIds: string[] = [];
-    if (vaultIds.length) {
-      const { data: memoryRows, error: memoryError } = await admin
-        .from("memories")
-        .select("id")
-        .in("vault_id", vaultIds);
-      if (memoryError && !missingRelation(memoryError)) throw memoryError;
-      memoryIds = (memoryRows || [])
-        .map((row: any) => clean(row.id))
-        .filter(Boolean);
+    if (!sessionId || !await rpc("account_deletion_session_current", { p_user_id: userId, p_session_id: sessionId })) {
+      return json(403, { code: "RECENT_PASSWORD_REQUIRED", error: "Confirm your password again before deleting your account." });
     }
-
-    if (vaultIds.length) {
-      await runStep("delete account invites", async () => {
-        await optionalProfileDelete(
-          admin.from("family_invites").delete().eq("created_by", userId),
-        );
-        await optionalProfileDelete(
-          admin.from("family_invites").delete().in("inviter_vault_id", vaultIds),
-        );
-      });
-    } else {
-      await runStep("delete account invites", async () => {
-        await optionalProfileDelete(
-          admin.from("family_invites").delete().eq("created_by", userId),
-        );
-      });
-    }
-
-    for (const vaultId of vaultIds) {
-      await runStep("delete vault family links", async () => {
-        await optionalDelete(
-          admin
-            .from("family_relationships")
-            .delete()
-            .eq("parent_type", "vault")
-            .eq("parent_id", vaultId),
-        );
-        await optionalDelete(
-          admin
-            .from("family_relationships")
-            .delete()
-            .eq("child_type", "vault")
-            .eq("child_id", vaultId),
-        );
-      });
-    }
-
-    if (memoryIds.length) {
-      await runStep("delete memory media", async () => {
-        await optionalDelete(
-          admin.from("memory_voice_notes").delete().in("memory_id", memoryIds),
-        );
-        await optionalDelete(
-          admin.from("memory_photos").delete().in("memory_id", memoryIds),
-        );
-        await optionalDelete(
-          admin.from("memory_chunks").delete().in("memory_id", memoryIds),
-        );
-      });
-    }
-
-    if (vaultIds.length) {
-      await runStep("delete vault data", async () => {
-        await optionalDelete(
-          admin.from("vault_highlight_photos").delete().in("vault_id", vaultIds),
-        );
-        await optionalDelete(
-          admin.from("vault_about_photos").delete().in("vault_id", vaultIds),
-        );
-        await optionalDelete(
-          admin.from("vault_core_voice_note").delete().in("vault_id", vaultIds),
-        );
-        await optionalDelete(
-          admin
-            .from("family_feed_hidden_vaults")
-            .delete()
-            .in("hidden_vault_id", vaultIds),
-        );
-        await optionalDelete(admin.from("memories").delete().in("vault_id", vaultIds));
-        await optionalDelete(admin.from("vaults").delete().in("id", vaultIds));
-      });
-    }
-
-    await runStep("delete account rows", async () => {
-      await optionalDelete(
-        admin.from("family_feed_hidden_vaults").delete().eq("user_id", userId),
-      );
-      await optionalDelete(admin.from("family_members").delete().eq("user_id", userId));
-      await optionalProfileDelete(admin.from("profiles").delete().eq("id", userId));
-      await optionalProfileDelete(
-        admin.from("profiles").delete().eq("user_id", userId),
-      );
-    });
-
-    await optionalDelete(
-      admin.from("legacy_member_photos").delete().like("path", `${userId}/%`),
-    );
-    await optionalDelete(
-      admin.from("legacy_memory_photos").delete().like("path", `${userId}/%`),
-    );
-    await optionalDelete(
-      admin.from("legacy_memory_voice_notes").delete().like("path", `${userId}/%`),
-    );
-
-    await runStep("delete storage objects", async () => {
-      await Promise.all([
-        removeStoragePrefix(admin, "avatars", userId),
-        removeStoragePrefix(admin, "vault_photos", userId),
-        removeStoragePrefix(admin, "vault_voice", userId),
-        removeStoragePrefix(admin, "memory_photos", userId),
-        removeStoragePrefix(admin, "memory_voice", userId),
-      ]);
-    });
-
-    await runStep("delete auth user", async () => {
-      const { error: deleteUserError } = await admin.auth.admin.deleteUser(userId);
-      if (deleteUserError) throw deleteUserError;
-    });
-
-    return json(200, { ok: true });
-  } catch (error) {
-    return json(500, {
-      error: "Could not delete account.",
-      step,
-    });
+    const lease = crypto.randomUUID();
+    const args = { p_user_id: userId, p_lease_token: lease };
+    const complete = await runDeletion({
+      claim: async () => await rpc("claim_account_deletion", args),
+      files: async function* () {
+        for (let offset = 0; ; offset += 100) {
+          const result = await admin.from("account_deletion_files")
+            .select("bucket_id,source_path,target_path,keep_source").eq("user_id", userId)
+            .order("bucket_id").order("source_path").range(offset, offset + 99);
+          if (result.error) throw result.error;
+          for (const file of result.data as DeletionFile[]) yield file;
+          if (result.data.length < 100) break;
+        }
+      },
+      copyReady: async (file) => await rpc("account_deletion_copy_ready", {
+        p_user_id: userId, p_bucket: file.bucket_id, p_source: file.source_path, p_original: file.keep_source ?? false,
+      }) === true,
+      copy: async (file) => {
+        const storage = admin.storage.from(file.bucket_id);
+        const ready = await rpc("account_deletion_copy_ready", {
+          p_user_id: userId, p_bucket: file.bucket_id, p_source: file.source_path,
+        });
+        if (!ready) {
+          step = "copy_shared_media";
+          const result = await storage.copy(file.source_path, file.target_path!);
+          if (result.error) throw result.error;
+        }
+        if (file.keep_source) {
+          // Fixed family-avatar URLs must keep their path. The durable copy
+          // survives an interruption between removing and re-creating the source.
+          step = "rehome_family_avatar";
+          const removed = await storage.remove([file.source_path]);
+          if (removed.error) throw removed.error;
+          const copied = await storage.copy(file.target_path!, file.source_path);
+          if (copied.error) throw copied.error;
+        }
+      },
+      finalizeData: async () => { await rpc("finalize_account_deletion_data", args); },
+      remove: async (file) => {
+        step = "remove_private_media";
+        const result = await admin.storage.from(file.bucket_id).remove([file.keep_source ? file.target_path! : file.source_path]);
+        if (result.error) throw result.error;
+      },
+      storageClean: async () => await rpc("account_deletion_storage_clean", args) === true,
+      deleteAuth: async () => {
+        step = "delete_auth_user";
+        const result = await admin.auth.admin.deleteUser(userId);
+        if (result.error) throw result.error;
+      },
+      finish: async () => {
+        const result = await admin.from("account_deletion_jobs").delete().eq("user_id", userId).eq("lease_token", lease);
+        if (result.error) throw result.error;
+      },
+      release: async () => {
+        const result = await admin.from("account_deletion_jobs").update({ lease_until: new Date().toISOString() })
+          .eq("user_id", userId).eq("lease_token", lease);
+        if (result.error) throw result.error;
+      },
+    }, Date.now() + 25000);
+    return complete ? json(200, { ok: true }) : json(409, { ok: false, code: "ACCOUNT_DELETION_PENDING",
+      error: "Deletion is in progress. Confirm Delete account again to continue safely." });
+  } catch (e) {
+    const busy = e && typeof e === "object" && "message" in e && e.message === "ACCOUNT_DELETION_BUSY";
+    console.error("Account deletion deferred", { step, reason: busy ? "BUSY" : "PRESERVATION_OR_CLEANUP_FAILED" });
+    return json(busy ? 409 : 503, { code: busy ? "ACCOUNT_DELETION_BUSY" : "ACCOUNT_DELETION_RETRY",
+      error: busy ? "Deletion is already in progress. Please wait a moment."
+        : "Account deletion could not finish safely. Please retry or contact support." });
   }
 });

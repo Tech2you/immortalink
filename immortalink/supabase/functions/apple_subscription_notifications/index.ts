@@ -1,23 +1,25 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { productMap } from "../_shared/apple_subscription_products.ts";
+import { AppleEnvironment, lookupAppleTransaction } from "../_shared/apple_environment.ts";
 import {
   createNotificationVerifier,
+  appleVerificationDiagnostic,
   notificationErrorStatus,
   verifyNotification,
+  selectNotificationEnvironment,
 } from "./notification_verifier.ts";
 
 const bundleId = Deno.env.get("APPLE_BUNDLE_ID") || "com.everroots.app";
-const configuredEnvironment =
-  (Deno.env.get("APPLE_IAP_ENVIRONMENT") || "sandbox").trim().toLowerCase();
-let verifier: ReturnType<typeof createNotificationVerifier> | undefined;
+const verifiers = new Map<AppleEnvironment, ReturnType<typeof createNotificationVerifier>>();
 
-function getVerifier() {
-  return verifier ??= createNotificationVerifier(
-    configuredEnvironment,
-    bundleId,
-    Deno.env.get("APPLE_APP_ID"),
-  );
+function getVerifier(environment: AppleEnvironment) {
+  let verifier = verifiers.get(environment);
+  if (!verifier) {
+    verifier = createNotificationVerifier(environment, bundleId, Deno.env.get("APPLE_APP_ID") || "6802720270");
+    verifiers.set(environment, verifier);
+  }
+  return verifier;
 }
 
 function json(status: number, body: unknown) {
@@ -92,32 +94,11 @@ async function createAppleServerToken() {
   return `${unsigned}.${base64UrlEncode(signature)}`;
 }
 
-async function fetchAppleTransaction(transactionId: string) {
+async function fetchAppleTransaction(transactionId: string, environment: AppleEnvironment) {
   const token = await createAppleServerToken();
-  const host = configuredEnvironment === "production"
-    ? "https://api.storekit.itunes.apple.com"
-    : "https://api.storekit-sandbox.itunes.apple.com";
-  const response = await fetch(
-    `${host}/inApps/v1/transactions/${encodeURIComponent(transactionId)}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  if (!response.ok) {
-    throw new Error(`Apple transaction lookup failed ${response.status}`);
-  }
-  const payload = await response.json();
-  return await getVerifier().verifyAndDecodeTransaction(
-    String(payload.signedTransactionInfo || ""),
-  );
-}
-
-function entitlementStatus(transaction: any, notificationType: string) {
-  if (transaction.revocationDate || notificationType === "REFUND") {
-    return "refunded";
-  }
-  if (notificationType === "REVOKE") return "revoked";
-  const expiresDate = Number(transaction.expiresDate || 0);
-  if (!expiresDate || expiresDate <= Date.now()) return "expired";
-  return "active";
+  return await lookupAppleTransaction({ transactionId, token, environment,
+    verify: (signed, selected) => getVerifier(selected).verifyAndDecodeTransaction(signed),
+  });
 }
 
 export async function handleNotification(req: Request) {
@@ -125,13 +106,13 @@ export async function handleNotification(req: Request) {
 
   try {
     const body = await req.json().catch(() => ({}));
+    const environment = selectNotificationEnvironment(body?.signedPayload);
     const { notification, transaction: notificationTransaction } =
       await verifyNotification(
         body?.signedPayload,
-        getVerifier(),
+        getVerifier(environment),
       );
     const notificationType = clean(notification.notificationType);
-    const subtype = clean(notification.subtype);
     if (!notificationTransaction) {
       return json(202, { ok: true, ignored: "No signed transaction" });
     }
@@ -141,7 +122,7 @@ export async function handleNotification(req: Request) {
       return json(202, { ok: true, ignored: "No transaction id" });
     }
 
-    const transaction = await fetchAppleTransaction(transactionId);
+    const transaction = await fetchAppleTransaction(transactionId, environment);
     if (transaction.bundleId !== bundleId) {
       throw new Error("Apple transaction bundle id does not match this app");
     }
@@ -167,82 +148,27 @@ export async function handleNotification(req: Request) {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const { data: existing, error: existingError } = await admin
-      .from("family_entitlements")
-      .select("family_id, billing_owner_user_id")
-      .eq("apple_original_transaction_id", originalTransactionId)
-      .maybeSingle();
-    if (existingError) throw new Error(existingError.message);
-
-    const familyId = clean(existing?.family_id);
-    if (!familyId) {
-      const { error: eventError } = await admin.from(
-        "apple_subscription_events",
-      ).insert({
-        event_source: "server_notification",
-        apple_environment: configuredEnvironment,
-        apple_product_id: productId,
-        apple_original_transaction_id: originalTransactionId,
-        apple_transaction_id: clean(transaction.transactionId),
-        notification_type: notificationType || null,
-        subtype: subtype || null,
-        entitlement_status: "unmatched",
-        raw_payload: notification,
-      });
-      if (eventError) throw new Error(eventError.message);
-      return json(202, { ok: true, ignored: "No matching family entitlement" });
+    const { data: result, error } = await admin.rpc("apply_verified_family_subscription", {
+      p_transaction: transaction,
+      p_family_id: null,
+      p_user_id: null,
+      p_source: "server_notification",
+      p_notification_type: notificationType || null,
+    });
+    if (error) throw error;
+    // The notification can arrive before the app submits its first verified
+    // purchase. Keep the recovery record and ask Apple to retry after binding.
+    if (result?.code === "APPLE_PURCHASE_UNMATCHED") {
+      return json(503, { error: "Purchase assignment pending" });
     }
-
-    const status = entitlementStatus(transaction, notificationType);
-    const currentPeriodEnd = Number(transaction.expiresDate || 0)
-      ? new Date(Number(transaction.expiresDate)).toISOString()
-      : null;
-
-    const { error: eventError } = await admin
-      .from("apple_subscription_events")
-      .insert({
-        family_id: familyId,
-        user_id: existing?.billing_owner_user_id || null,
-        event_source: "server_notification",
-        apple_environment: configuredEnvironment,
-        apple_product_id: productId,
-        apple_original_transaction_id: originalTransactionId,
-        apple_transaction_id: clean(transaction.transactionId),
-        notification_type: notificationType || null,
-        subtype: subtype || null,
-        entitlement_status: status,
-        raw_payload: notification,
-      });
-    if (eventError) throw new Error(eventError.message);
-
-    const { error } = await admin
-      .from("family_entitlements")
-      .update({
-        plan: status === "active" ? plan : "free",
-        status,
-        provider: "apple",
-        provider_entitlement_id: clean(transaction.transactionId),
-        provider_subscription_id: originalTransactionId,
-        current_period_end: currentPeriodEnd,
-        apple_product_id: productId,
-        apple_environment: configuredEnvironment,
-        offer_type: transaction.offerType
-          ? String(transaction.offerType)
-          : null,
-        offer_identifier: transaction.offerIdentifier
-          ? String(transaction.offerIdentifier)
-          : null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("family_id", familyId);
-    if (error) throw new Error(error.message);
-
-    return json(200, { ok: true, status, family_id: familyId });
+    // Retired sponsor chains must never overwrite the replacement entitlement.
+    return json(200, { ok: true, applied: result?.applied, code: result?.code });
   } catch (e) {
     const status = notificationErrorStatus(e);
     console.error("Apple notification rejected", {
       status,
       reason: e instanceof Error ? e.name : "Unknown",
+      ...appleVerificationDiagnostic(e),
     });
     return json(status, {
       error: status === 400

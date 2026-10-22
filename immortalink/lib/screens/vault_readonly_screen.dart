@@ -1,6 +1,8 @@
 // lib/screens/vault_readonly_screen.dart
 import 'dart:async';
 import '../services/recent_cache.dart';
+import '../widgets/content_safety_actions.dart';
+import '../utils/public_error.dart';
 import '../services/vault_snapshot.dart';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -426,14 +428,14 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       await cache.remove(snapshotKey);
       if (!mounted) return;
       setState(() {
-        _error = e.message;
+        _error = publicErrorMessage(e);
         _loading = false;
       });
     } catch (e) {
       if (e is AuthException) await cache.remove(snapshotKey);
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = publicErrorMessage(e);
         _loading = false;
       });
     }
@@ -1558,6 +1560,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      MemoryReportMenu(memoryId: memoryId),
                       IconButton(
                         onPressed: () => Navigator.pop(ctx),
                         icon: const Icon(Icons.close),
@@ -2086,7 +2089,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                       ],
                     ),
                   ),
-                  const Icon(Icons.chevron_right),
+                  MemoryReportMenu(memoryId: memoryId),
                 ],
               ),
               const SizedBox(height: 14),
@@ -2351,6 +2354,23 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
       appBar: AppBar(
         title: Text((_displayName ?? _vaultName).trim()),
         actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Safety options',
+            enabled: !_loading && _error == null,
+            onSelected: (action) async {
+              if (action == 'report') {
+                await showContentReport(context, kind: 'vault', targetId: widget.vaultId);
+              } else if (_ownerId != null) {
+                final blocked = await confirmMemberBlock(context,
+                  memberId: _ownerId!, memberName: _displayName ?? _vaultName, blocked: true);
+                if (blocked && context.mounted) Navigator.pop(context);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'report', child: Text('Report vault or media')),
+              PopupMenuItem(value: 'block', child: Text('Block member')),
+            ],
+          ),
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),

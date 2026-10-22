@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../widgets/companion_prompt_button.dart';
+import '../widgets/ai_processing_consent.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -48,6 +49,10 @@ class _LegacyVaultCompanionScreenState
   }
 
   Future<void> _showDisclaimer() async {
+    if (!await requestAiProcessingConsent(context) || !mounted) {
+      if (mounted) Navigator.maybePop(context);
+      return;
+    }
     bool localAccept = false;
 
     await showDialog<void>(

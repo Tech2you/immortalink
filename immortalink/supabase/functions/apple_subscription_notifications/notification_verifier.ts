@@ -1,10 +1,19 @@
 import { Buffer } from "node:buffer";
 import {
-  Environment,
   SignedDataVerifier,
   VerificationException,
   VerificationStatus,
-} from "npm:@apple/app-store-server-library@3.1.0";
+} from "../_shared/apple_vendor/jws_verification.ts";
+import { Environment } from "npm:@apple/app-store-server-library@3.1.0";
+import { notificationEnvironment } from "../_shared/apple_environment.ts";
+
+export function selectNotificationEnvironment(signedPayload: unknown) {
+  try {
+    return notificationEnvironment(signedPayload);
+  } catch {
+    throw new VerificationException(VerificationStatus.INVALID_ENVIRONMENT);
+  }
+}
 
 // Apple Root CA G3, from https://www.apple.com/certificateauthority/AppleRootCA-G3.cer.
 // Pin the trust anchor locally; never trust a root supplied in a notification.
@@ -79,4 +88,23 @@ export function notificationErrorStatus(error: unknown): number {
   }
   // Configuration, Apple API and database failures must remain retryable.
   return 503;
+}
+
+// Log only fixed categories, never receipts, JWTs, keys or arbitrary exception text.
+export function appleVerificationDiagnostic(error: unknown) {
+  const status = error instanceof VerificationException
+    ? VerificationStatus[error.status] ?? "UNKNOWN"
+    : "PROCESSING_FAILURE";
+  const cause = error instanceof Error && error.cause instanceof Error
+    ? error.cause
+    : error;
+  const message = cause instanceof Error ? cause.message : "";
+  const causeType = /not implemented|not supported/i.test(message)
+    ? "RUNTIME_UNSUPPORTED"
+    : /certificate|asn1|asn\.1/i.test(message)
+    ? "CERTIFICATE_PROCESSING"
+    : /fetch|network|timeout|timed out/i.test(message)
+    ? "NETWORK_FAILURE"
+    : cause instanceof TypeError ? "TYPE_ERROR" : "OTHER";
+  return { verification_status: status, cause_type: causeType };
 }

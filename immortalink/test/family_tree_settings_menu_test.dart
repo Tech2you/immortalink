@@ -29,6 +29,7 @@ void main() {
       'Leave family',
       'Change family photo',
       'Change family name',
+      'Account successor',
     ];
     const actions = [
       FamilyTreeAction.recenter,
@@ -36,6 +37,7 @@ void main() {
       FamilyTreeAction.leave,
       FamilyTreeAction.photo,
       FamilyTreeAction.name,
+      FamilyTreeAction.successor,
     ];
     for (var i = 0; i < labels.length; i++) {
       await tester.tap(find.byTooltip('Family tree settings'));
@@ -87,6 +89,7 @@ void main() {
       ),
     );
     expect(item.enabled, isFalse);
+    expect(find.text('Account successor'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

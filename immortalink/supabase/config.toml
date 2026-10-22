@@ -34,3 +34,7 @@ verify_jwt = true
 
 [functions.apple_subscription_notifications]
 verify_jwt = false
+
+# Single-use report authorization is validated by a service-role-only claim RPC.
+[functions.send_content_report_alert]
+verify_jwt = false

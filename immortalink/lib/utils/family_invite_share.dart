@@ -15,15 +15,15 @@ Uri familyInviteUri(String code) {
 
 Uri familyInviteWebUri(String code) {
   final normalized = normalizeInviteCode(code);
-  return Uri.https('everroots.org', '/invite/$normalized');
+  return Uri.https('heiro.app', '/invite/$normalized');
 }
 
 String familyInviteMessage(String code) {
   final normalized = normalizeInviteCode(code);
   return [
-    "I've invited you to join our family on Ever Roots.",
+    "I've invited you to join our family on Heiro.",
     '',
-    'Open Ever Roots and enter this invite code:',
+    'Open Heiro and enter this invite code:',
     normalized,
     '',
     'Invite link:',
@@ -35,13 +35,13 @@ String familyInviteCodeFromUri(Uri uri) {
   final scheme = uri.scheme.toLowerCase();
   final host = uri.host.toLowerCase();
   final path = uri.path.toLowerCase();
-  final isEverRootsHost = host == 'everroots.org';
+  final isOwnedHost = host == 'heiro.app' || host == 'everroots.org';
 
   final isAppJoinLink =
       scheme == 'com.everroots.app' && (host == 'join' || path == '/join');
   final isWebJoinLink =
       scheme == 'https' &&
-      isEverRootsHost &&
+      isOwnedHost &&
       (path == '/join' || path == '/invite' || path.startsWith('/invite/'));
 
   if (!isAppJoinLink && !isWebJoinLink) return '';
@@ -75,7 +75,7 @@ Future<void> shareInvite(String code) async {
   await SharePlus.instance.share(
     ShareParams(
       text: familyInviteMessage(normalized),
-      subject: 'Join my family on Ever Roots',
+      subject: 'Join my family on Heiro',
     ),
   );
 }
@@ -127,7 +127,7 @@ Future<void> showFamilyInviteDialog({
               Text(slotLabel.trim()),
               const SizedBox(height: 12),
             ],
-            const Text('Ask them to open Ever Roots and enter this code.'),
+            const Text('Ask them to open Heiro and enter this code.'),
             const SizedBox(height: 14),
             Container(
               width: double.infinity,

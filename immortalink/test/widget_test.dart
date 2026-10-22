@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -30,6 +31,11 @@ void main() {
     await tester.pumpWidget(const MyApp());
     await tester.pumpAndSettle();
 
+    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title, 'Heiro');
+    expect(
+      find.image(const AssetImage('assets/images/sign_in_logo_heiro.png')),
+      findsOneWidget,
+    );
     expect(find.text('Create account'), findsWidgets);
     expect(find.text('Sign in'), findsOneWidget);
     expect(
@@ -54,7 +60,7 @@ void main() {
     expect(find.text('Create account'), findsWidgets);
     expect(
       find.text(
-        'Family invite ready. After this, Ever Roots will open the join step.',
+        'Family invite ready. After this, Heiro will open the join step.',
       ),
       findsOneWidget,
     );
