@@ -4,6 +4,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../services/recent_cache.dart';
+import '../services/batched_signed_urls.dart';
+import '../services/family_directory.dart';
 
 import 'package:flutter/material.dart';
 import '../utils/family_placeholder.dart';
@@ -12,7 +14,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'legacy_vault_screen.dart';
 import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
-import 'vaults_screen.dart';
 import '../services/family_leave_service.dart';
 import '../services/apple_subscription_service.dart';
 import '../widgets/account_deletion_billing_notice.dart';
@@ -54,7 +55,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   Timer? _cacheExpiryTimer;
   bool _familySettingsBusy = false;
   bool _isFamilyMember = false;
-  bool _canRenameFamily = false;
+  bool _isFamilyOwner = false;
   String? _error;
   List<_TreePerson> _people = [];
   List<_TreeRelationship> _relationships = [];
@@ -140,7 +141,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         _focusHistory.clear();
         if (_focus != null) _focusHistory.add(_focus!);
         _isFamilyMember = false;
-        _canRenameFamily = false;
+        _isFamilyOwner = false;
       });
       return true;
     } catch (_) {
@@ -183,17 +184,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     );
   }
 
-  Future<String?> _signedUrl(String bucket, String path) async {
-    if (path.trim().isEmpty) return null;
-    try {
-      return await _supabase.storage
-          .from(bucket)
-          .createSignedUrl(path, 60 * 60);
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _load({String? keepFocusKey}) async {
     if (widget.cachedOnly) {
       await _loadSnapshot();
@@ -208,13 +198,8 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     }
 
     try {
-      final rawMemberRows = await _supabase
-          .from('family_members')
-          .select('user_id, slot_key, role, is_primary')
-          .eq('family_id', widget.familyId)
-          .timeout(const Duration(seconds: 8));
+      final memberRows = await loadFamilyMembers(_supabase, widget.familyId);
       if (epoch != _cache.generation) return;
-      final memberRows = (rawMemberRows as List).cast<Map<String, dynamic>>();
       final membership = memberRows.where(
         (row) => row['user_id'] == _supabase.auth.currentUser?.id,
       );
@@ -223,40 +208,60 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         await _cache.clear();
         throw StateError('You no longer have access to this family.');
       }
-      _canRenameFamily = membership.any((row) => row['role'] == 'owner');
+      _isFamilyOwner = membership.any((row) => row['role'] == 'owner');
       final memberUserIds = memberRows
           .map((row) => (row['user_id'] ?? '').toString().trim())
           .where((id) => id.isNotEmpty)
           .toList();
 
       final results = await Future.wait([
-        memberUserIds.isEmpty
-            ? Future<List<Map<String, dynamic>>>.value([])
-            : _supabase
-                  .from('vaults')
-                  .select(
-                    'id, name, display_name, owner_id, family_id, avatar_path',
-                  )
-                  .inFilter('owner_id', memberUserIds),
-        _supabase
-            .from('legacy_family_members')
-            .select(
-              'id, family_id, slot_key, name, display_name, avatar_path, replaced_by_vault_id',
-            )
-            .eq('family_id', widget.familyId),
-        _supabase
-            .from('family_relationships')
-            .select(
-              'id, parent_type, parent_id, child_type, child_id, relationship_kind, created_at',
-            )
-            .eq('family_id', widget.familyId)
-            .order('created_at', ascending: true),
-      ]).timeout(const Duration(seconds: 8));
+        loadFamilyVaults(_supabase, memberUserIds),
+        pagedFamilyRows(
+          (from, to) => _supabase
+              .from('legacy_family_members')
+              .select(
+                'id, family_id, slot_key, name, display_name, avatar_path, replaced_by_vault_id',
+              )
+              .eq('family_id', widget.familyId)
+              .order('id')
+              .range(from, to)
+              .timeout(const Duration(seconds: 12)),
+        ),
+        pagedFamilyRows(
+          (from, to) => _supabase
+              .from('family_relationships')
+              .select(
+                'id, parent_type, parent_id, child_type, child_id, relationship_kind, created_at',
+              )
+              .eq('family_id', widget.familyId)
+              .order('created_at', ascending: true)
+              .order('id')
+              .range(from, to)
+              .timeout(const Duration(seconds: 12)),
+        ),
+      ]);
 
       final vaultRows = (results[0] as List).cast<Map<String, dynamic>>();
       final legacyRows = (results[1] as List).cast<Map<String, dynamic>>();
       final relationshipRows = (results[2] as List)
           .cast<Map<String, dynamic>>();
+
+      final avatarUrls = await Future.wait([
+        batchedSignedUrls(
+          _supabase,
+          _vaultAvatarBucket,
+          vaultRows.map((row) => (row['avatar_path'] ?? '').toString()),
+        ),
+        batchedSignedUrls(
+          _supabase,
+          _legacyAvatarBucket,
+          legacyRows
+              .where(
+                (row) => (row['replaced_by_vault_id'] ?? '').toString().isEmpty,
+              )
+              .map((row) => (row['avatar_path'] ?? '').toString()),
+        ),
+      ]);
 
       final slotByUser = <String, String?>{};
       for (final row in memberRows) {
@@ -279,7 +284,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
             name: _nameFromRow(row, 'Family member'),
             ownerId: ownerId.isEmpty ? null : ownerId,
             slotKey: slotByUser[ownerId],
-            avatarUrl: await _signedUrl(_vaultAvatarBucket, avatarPath),
+            avatarUrl: avatarUrls[0][avatarPath],
             isPlaceholder: false,
           ),
         );
@@ -299,7 +304,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
             name: name,
             ownerId: null,
             slotKey: (row['slot_key'] ?? '').toString().trim(),
-            avatarUrl: await _signedUrl(_legacyAvatarBucket, avatarPath),
+            avatarUrl: avatarUrls[1][avatarPath],
             isPlaceholder: isUnfilledFamilyProfile(name),
           ),
         );
@@ -596,8 +601,9 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         confirmedDestructiveLeave: impact.requiresDestructiveConfirmation,
       );
       if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const VaultsScreen()),
+      // The root route owns session changes; a bare vault screen does not.
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        '/',
         (route) => false,
       );
     } catch (e) {
@@ -625,13 +631,12 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         await _leaveFamily();
         return;
       case FamilyTreeAction.successor:
-        if (!_canRenameFamily) return;
+        if (!_isFamilyOwner) return;
         await showFamilyAccountSuccessor(context, widget.familyId);
         return;
       case FamilyTreeAction.photo:
       case FamilyTreeAction.name:
         if (!_isFamilyMember) return;
-        if (action == FamilyTreeAction.name && !_canRenameFamily) return;
         setState(() => _familySettingsBusy = true);
         try {
           if (action == FamilyTreeAction.photo) {
@@ -661,14 +666,14 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
               ),
             ),
           );
-        } catch (_) {
+        } catch (error) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
                 action == FamilyTreeAction.photo
                     ? 'Could not update the family photo. Please try again.'
-                    : 'Could not rename the family. Only a family owner can change its name.',
+                    : publicErrorMessage(error),
               ),
             ),
           );
@@ -2567,7 +2572,8 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
             onSelected: _handleFamilySetting,
             canRecenter: _viewer != null,
             canLeave: _isFamilyMember && !_offline,
-            canEditName: _canRenameFamily && !_offline,
+            canEditName: _isFamilyMember && !_offline,
+            canManageSuccessor: _isFamilyOwner && !_offline,
             enabled: !_loading && !_familySettingsBusy,
           ),
         ],

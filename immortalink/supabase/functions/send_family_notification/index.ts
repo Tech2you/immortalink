@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
+import { claimNotification, readNotificationPayload, recipientTokens, sendBounded } from "./dispatch_guard.mjs";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,11 +18,6 @@ function json(status: number, body: unknown) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-function cleanText(value: unknown, fallback = "") {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  return text || fallback;
 }
 
 function base64UrlEncode(input: string | ArrayBuffer) {
@@ -79,6 +75,7 @@ async function createFirebaseAccessToken(serviceAccount: any) {
       grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
       assertion,
     }),
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
@@ -154,12 +151,12 @@ async function sendToFirebase({
           },
         },
       }),
+      signal: AbortSignal.timeout(10000),
     },
   );
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(`FCM send failed ${response.status}: ${errorText}`);
+    throw new Error(`FCM send failed ${response.status}`);
   }
 }
 
@@ -182,104 +179,32 @@ serve(async (req) => {
     const user = auth?.user;
     if (authError || !user) return json(401, { error: "Invalid or missing JWT" });
 
-    const payload = await req.json().catch(() => ({}));
-    const type = cleanText(payload.type);
-
-    let familyId = "";
-    let title = "New family update";
-    let body = "Open Ever Roots to see the family feed.";
-
-    if (type === "memory_added") {
-      const memoryId = cleanText(payload.memory_id);
-      if (!memoryId) return json(400, { error: "Missing memory_id" });
-
-      const { data: memory, error: memoryError } = await userClient
-        .from("memories")
-        .select("id, vault_id, share_to_family_feed")
-        .eq("id", memoryId)
-        .maybeSingle();
-      if (memoryError) return json(500, { error: memoryError.message });
-      if (!memory?.share_to_family_feed) {
-        return json(403, { error: "Memory is not shared to the family feed" });
-      }
-
-      const { data: vault, error: vaultError } = await admin
-        .from("vaults")
-        .select("id, owner_id, family_id")
-        .eq("id", memory.vault_id)
-        .maybeSingle();
-      if (vaultError) return json(500, { error: vaultError.message });
-      if (!vault || vault.owner_id !== user.id || !vault.family_id) {
-        return json(403, { error: "Not allowed to notify this family" });
-      }
-
-      familyId = vault.family_id;
-      title = "A new memory was added";
-      body = "Open Ever Roots to see it in your family feed.";
-    } else if (type === "family_joined") {
-      familyId = cleanText(payload.family_id);
-      if (!familyId) return json(400, { error: "Missing family_id" });
-
-      const { data: membership, error: membershipError } = await admin
-        .from("family_members")
-        .select("family_id, user_id")
-        .eq("family_id", familyId)
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (membershipError) return json(500, { error: membershipError.message });
-      if (!membership) return json(403, { error: "Not a member of this family" });
-
-      title = "Someone joined your family";
-      body = "Open Ever Roots to welcome them.";
-    } else {
-      return json(400, { error: "Unsupported notification type" });
+    let event;
+    try { event = await readNotificationPayload(req); }
+    catch { return json(400, { error: "Invalid notification request" }); }
+    const audience = await claimNotification(admin, event, user.id);
+    if (audience.code === "DENIED") return json(403, { error: "Notification not available" });
+    if (audience.code === "RATE_LIMIT") return json(429, { error: "Notification rate limit reached" });
+    if (audience.code !== "CLAIMED") return json(200, { sent: 0, failed: 0, skipped: audience.code });
+    const familyId = audience.familyId;
+    const recipientIds = audience.recipientIds;
+    if (typeof familyId !== "string" || !Array.isArray(recipientIds)) {
+      throw new Error("Invalid notification audience");
     }
-
-    const { data: members, error: membersError } = await admin
-      .from("family_members")
-      .select("user_id")
-      .eq("family_id", familyId)
-      .neq("user_id", user.id);
-    if (membersError) return json(500, { error: membersError.message });
-
-    const recipientIds = [...new Set((members || []).map((row: any) => row.user_id))];
+    const title = event.type === "memory_added" ? "A new memory was added" : "Someone joined your family";
+    const body = event.type === "memory_added" ? "Open Heiro to see it in your family feed." : "Open Heiro to welcome them.";
     if (recipientIds.length === 0) return json(200, { sent: 0, failed: 0 });
 
-    const { data: tokenRows, error: tokensError } = await admin
-      .from("user_push_tokens")
-      .select("token")
-      .in("user_id", recipientIds);
-    if (tokensError) return json(500, { error: tokensError.message });
-
-    const tokens = [...new Set((tokenRows || []).map((row: any) => row.token))]
-      .filter(Boolean);
+    const tokens = await recipientTokens(admin, recipientIds);
     if (tokens.length === 0) return json(200, { sent: 0, failed: 0 });
 
     const firebase = await getFirebaseConfig();
-    let sent = 0;
-    let failed = 0;
-
-    await Promise.all(
-      tokens.map(async (token) => {
-        try {
-          await sendToFirebase({
-            ...firebase,
-            token,
-            title,
-            body: body.length > 120 ? `${body.slice(0, 117)}...` : body,
-            familyId,
-          });
-          sent += 1;
-        } catch (error) {
-          failed += 1;
-          console.error(String(error));
-        }
-      }),
-    );
-
-    return json(200, { sent, failed });
-  } catch (error) {
-    console.error(error);
-    return json(500, { error: String(error) });
+    const result = await sendBounded(tokens, (token: string) => sendToFirebase({
+      ...firebase, token, title, body, familyId,
+    }));
+    return json(200, result);
+  } catch {
+    console.error("Family notification failed; no provider response or recipient data logged.");
+    return json(503, { error: "Notification service unavailable" });
   }
 });

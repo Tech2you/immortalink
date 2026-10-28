@@ -29,8 +29,7 @@ test('health uses the read-only operator RPC and preserves warning state', async
 test('queue is bounded and does not include report narrative or media', async () => {
   let path;
   await runCommand(parseCommand(['queue']), async (value) => { path = value; return []; });
-  assert.match(path, /limit=50/);
-  assert.match(path, /status=in\.\(open,reviewing\)/);
+  assert.equal(path, '/rest/v1/rpc/content_review_queue');
   assert.doesNotMatch(path, /details|reporter_id/);
 });
 
@@ -41,7 +40,7 @@ test('moderation uses the audited RPC and verifies its result', async () => {
     if (body) return null;
     return [{ id, status: calls.length === 1 ? 'open' : 'resolved', reviewed_at: calls.length === 1 ? null : '2026-10-13T12:00:00Z' }];
   });
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
   assert.equal(calls[1].path, '/rest/v1/rpc/review_content_report');
   assert.equal(calls[1].body.p_report_id, id);
   assert.equal(calls[1].body.p_action, 'hide');

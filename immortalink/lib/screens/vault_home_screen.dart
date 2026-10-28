@@ -1,5 +1,11 @@
 // lib/screens/vault_home_screen.dart
 import 'dart:async';
+import '../services/memory_media_batch.dart';
+import '../widgets/memory_media_upload_screen.dart';
+import '../widgets/content_placeholder.dart';
+import '../services/batched_signed_urls.dart';
+import '../widgets/content_screening_permission.dart';
+import '../widgets/memory_sharing_status.dart';
 import '../widgets/ai_processing_consent.dart';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -55,6 +61,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   bool _loading = true;
   bool _cachedView = false;
+  bool _hasContent = false;
+  bool _openingVault = true;
+  bool get _readOnly =>
+      !_hasContent || widget.cachedOnly || _cachedView || _connection.offline;
+  bool get _showOffline =>
+      widget.cachedOnly || (!_openingVault && _connection.offline);
+  bool _accessDenied(Object error) =>
+      (error is AuthException && !isConnectionFailure(error)) ||
+      (error is PostgrestException &&
+          const ['42501', '401', '403'].contains(error.code));
   Timer? _cacheExpiryTimer;
   final _connection = ConnectionStatus.instance;
   String get _snapshotKey =>
@@ -174,11 +190,20 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     setState(() {
       _memories = [];
       _memoryPhotosById.clear();
+      _memoryVoiceById.clear();
+      _featuredPhotos = [];
+      _aboutPhotos = [];
+      _coreVoice = null;
       _avatarUrl = null;
+      _avatarPath = null;
+      _familyId = null;
+      _slotKey = null;
       _displayName = null;
       _vaultName = 'Your Vault';
       _aboutMeController.clear();
       _cachedView = true;
+      _hasContent = false;
+      _loading = false;
       _error = 'Reconnect to view this vault.';
     });
   }
@@ -194,8 +219,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _openVault() async {
-    await _restoreSnapshot();
-    await _refreshVault();
+    try {
+      await _restoreSnapshot();
+      await _refreshVault();
+    } finally {
+      if (mounted) setState(() => _openingVault = false);
+    }
   }
 
   bool _refreshing = false;
@@ -205,13 +234,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       return;
     }
     if (_refreshing || !mounted) return;
-    _refreshing = true;
+    setState(() => _refreshing = true);
     final cache = _cache;
     final epoch = cache.generation;
     try {
       if (!await _connection.check()) return;
+      // Validate this vault before enabling edits or refreshing its children.
+      await _loadVaultMeta();
+      if (!mounted || epoch != cache.generation) return;
       await Future.wait([
-        _loadVaultMeta(),
         _loadMemories(),
         _loadFeaturedPhotos(),
         _loadCoreVoice(),
@@ -231,6 +262,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           jsonEncode({
             'name': _displayName ?? _vaultName,
             'avatar': _avatarUrl,
+            'avatarPath': _avatarPath,
+            'familyId': _familyId,
+            'featuredPhotos': _featuredPhotos,
+            'aboutPhotos': _aboutPhotos,
             'memories': _memories,
             'about': _aboutMeController.text,
             'photos': _memoryPhotosById.values
@@ -254,10 +289,20 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (mounted && epoch == cache.generation) {
         setState(() => _cachedView = false);
       }
+    } catch (e) {
+      _connection.report(e);
+      if (!isConnectionFailure(e) && epoch == cache.generation) {
+        if (_accessDenied(e)) await cache.clear();
+        if (mounted) setState(() => _error = publicErrorMessage(e));
+      }
     } finally {
-      _refreshing = false;
       if (_connection.offline) await _restoreSnapshot();
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _refreshing = false;
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -275,6 +320,16 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       setState(() {
         _displayName = data['name'] as String?;
         _avatarUrl = data['avatar'] as String?;
+        _avatarPath = data['avatarPath'] as String?;
+        _familyId = data['familyId'] as String? ?? widget.familyId;
+        _featuredPhotos = [
+          for (final photo in data['featuredPhotos'] as List? ?? [])
+            Map<String, String>.from(photo as Map),
+        ];
+        _aboutPhotos = [
+          for (final photo in data['aboutPhotos'] as List? ?? [])
+            Map<String, String>.from(photo as Map),
+        ];
         _memories = List<Map<String, dynamic>>.from(data['memories'] as List);
         _aboutMeController.text = data['about'] as String? ?? '';
         _memoryPhotosById.clear();
@@ -288,7 +343,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           _memoryPhotosById.putIfAbsent(photo.memoryId, () => []).add(photo);
         }
         _cachedView = true;
+        _hasContent = true;
         _loading = false;
+        _loadingPhotos = false;
+        _loadingAboutMe = false;
+        _loadingAboutPhotos = false;
+        _loadingMemoryPhotos = false;
+        _loadingMemoryVoice = false;
+        _loadingCoreVoice = false;
         _error = null;
       });
     } catch (_) {
@@ -297,80 +359,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  Widget _offlineVault() => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        child: Column(
-          children: [
-            CircleAvatar(
-              radius: 40,
-              child: _avatarUrl == null
-                  ? const Icon(Icons.person_outline, size: 36)
-                  : ClipOval(
-                      child: VaultMedia.network(
-                        _avatarUrl!,
-                        cachedOnly: true,
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
-                            const Icon(Icons.person_outline, size: 36),
-                      ),
-                    ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _displayName ?? _vaultName,
-              textAlign: TextAlign.center,
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-      ),
-      if (_error != null)
-        Padding(padding: const EdgeInsets.all(16), child: Text(_error!)),
-      _vaultSectionPicker(),
-      if (_selectedVaultSection == 1)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Text(
-            _aboutMeController.text.isEmpty
-                ? 'No about details saved.'
-                : _aboutMeController.text,
-          ),
-        ),
-      if (_selectedVaultSection == 0) ..._memories.map(_socialMemoryCard),
-      if (_selectedVaultSection == 2)
-        GridView.extent(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          maxCrossAxisExtent: 240,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          children: [
-            for (final photo in _memoryPhotosById.values.expand(
-              (photos) => photos,
-            ))
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: ColoredBox(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: VaultMedia.network(
-                    photo.url,
-                    cachedOnly: true,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: double.infinity,
-                  ),
-                ),
-              ),
-          ],
-        ),
-    ],
+  Widget _readOnlySection(Widget child) => ExcludeFocus(
+    excluding: _readOnly,
+    child: IgnorePointer(ignoring: _readOnly, child: child),
   );
 
   @override
@@ -557,11 +548,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       ),
     );
 
-    await _loadVaultMeta();
+    await _refreshVault();
   }
 
   Future<void> _indexCoreVoiceNote() async {
-    if (!mounted || !await requestAiProcessingConsent(context) || !mounted) return;
+    if (!mounted || !await requestAiProcessingConsent(context) || !mounted)
+      return;
     final token = _client.auth.currentSession?.accessToken.trim();
     if (token == null || token.isEmpty) {
       throw Exception('Missing session token. Please sign in again.');
@@ -780,6 +772,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _loadVaultMeta() async {
+    final epoch = _cache.generation;
     try {
       final res = await _client
           .from('vaults')
@@ -787,16 +780,22 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .eq('id', widget.vaultId)
           .maybeSingle();
 
-      if (!mounted) return;
+      if (!mounted || epoch != _cache.generation) return;
+      if (res == null) {
+        throw const PostgrestException(
+          message: 'Vault unavailable',
+          code: '42501',
+        );
+      }
 
-      final path = (res?['avatar_path'] as String?)?.trim();
+      final path = (res['avatar_path'] as String?)?.trim();
       final dn =
-          (res?['display_name'] as String?) ??
-          (res?['name'] as String?) ??
+          (res['display_name'] as String?) ??
+          (res['name'] as String?) ??
           _vaultName;
       // vaults.family_id is the account owner's selected home family.
       // Prefer it over the family the vault happened to be opened from.
-      final homeFamilyId = (res?['family_id'] as String?)?.trim();
+      final homeFamilyId = (res['family_id'] as String?)?.trim();
       final openedFromFamilyId = widget.familyId?.trim();
       final familyId = homeFamilyId != null && homeFamilyId.isNotEmpty
           ? homeFamilyId
@@ -824,7 +823,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         signedUrl = await _signedUrl(_avatarBucket, path);
       }
 
-      if (!mounted) return;
+      if (!mounted || epoch != _cache.generation) return;
 
       setState(() {
         _avatarPath = path;
@@ -833,7 +832,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         _slotKey = slotKey;
         _displayName = dn.trim().isEmpty ? _vaultName : dn.trim();
       });
-    } catch (_) {}
+    } catch (e) {
+      _connection.report(e);
+      rethrow;
+    }
   }
 
   Future<void> _pickAndUploadAvatar() async {
@@ -964,6 +966,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     : ClipOval(
                         child: VaultMedia.network(
                           _avatarUrl!,
+                          cachedOnly: _readOnly,
                           width: 96,
                           height: 96,
                           fit: BoxFit.cover,
@@ -978,7 +981,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   shape: const CircleBorder(),
                   child: IconButton(
                     tooltip: 'Change profile photo',
-                    onPressed: _savingAvatar ? null : _pickAndUploadAvatar,
+                    onPressed: _readOnly || _savingAvatar
+                        ? null
+                        : _pickAndUploadAvatar,
                     icon: _savingAvatar
                         ? const SizedBox.square(
                             dimension: 16,
@@ -1016,18 +1021,18 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             runSpacing: 10,
             children: [
               FilledButton.icon(
-                onPressed: _openAskAI,
+                onPressed: _readOnly ? null : _openAskAI,
                 icon: const Icon(Icons.auto_awesome_outlined, size: 18),
                 label: const Text('Ask my AI'),
               ),
               if (canOpenFamilyTree)
                 OutlinedButton.icon(
-                  onPressed: _openHomeFamilyTree,
+                  onPressed: _readOnly ? null : _openHomeFamilyTree,
                   icon: const Icon(Icons.account_tree_outlined, size: 18),
                   label: const Text('Family tree'),
                 ),
               OutlinedButton.icon(
-                onPressed: _renameVault,
+                onPressed: _readOnly ? null : _renameVault,
                 icon: const Icon(Icons.edit_outlined, size: 18),
                 label: const Text('Edit profile'),
               ),
@@ -1067,7 +1072,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _loadFeaturedPhotos() async {
-    setState(() => _loadingPhotos = true);
+    final epoch = _cache.generation;
+    setState(() => _loadingPhotos = !_hasContent);
 
     try {
       final userId = _client.auth.currentUser?.id;
@@ -1085,34 +1091,38 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .eq('vault_id', widget.vaultId)
           .order('created_at');
 
+      final photoRows = (rows as List).cast<Map<String, dynamic>>();
+      final urls = await batchedSignedUrls(
+        _client,
+        _featuredPhotosBucket,
+        photoRows.map((row) => (row['path'] ?? '').toString()),
+      );
       final items = <Map<String, String>>[];
-      for (final row in (rows as List).cast<Map<String, dynamic>>()) {
+      for (final row in photoRows) {
         final fullPath = (row['path'] ?? '').toString().trim();
         if (fullPath.isEmpty) continue;
-        final url = await _signedUrl(_featuredPhotosBucket, fullPath);
+        final url = urls[fullPath];
         if (url == null || url.trim().isEmpty) continue;
 
         items.add({'path': fullPath, 'url': url});
       }
 
-      if (!mounted) return;
+      if (!mounted || epoch != _cache.generation) return;
 
       setState(() {
         _featuredPhotos = items;
         _loadingPhotos = false;
-        _highlightIndex = 0;
+        _highlightIndex = _highlightIndex.clamp(
+          0,
+          (items.length - 1).clamp(0, 999),
+        );
       });
-
-      if (_highlightController.hasClients) {
-        _highlightController.jumpToPage(0);
-      }
 
       _setupAutoSlide();
     } catch (e) {
       _connection.report(e);
       if (!mounted) return;
       setState(() {
-        _featuredPhotos = [];
         _loadingPhotos = false;
       });
       _toast(publicErrorMessage(e));
@@ -1500,8 +1510,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   Future<void> _loadAboutMe() async {
     if (!mounted) return;
+    final epoch = _cache.generation;
     setState(() {
-      _loadingAboutMe = true;
+      _loadingAboutMe = !_hasContent;
       _aboutMeError = null;
       _aboutMeMemoryId = null;
     });
@@ -1515,7 +1526,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .limit(1)
           .maybeSingle();
 
-      if (!mounted) return;
+      if (!mounted || epoch != _cache.generation) return;
 
       final id = (row?['id'] ?? '').toString().trim();
       final body = (row?['body'] ?? '').toString();
@@ -1587,13 +1598,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _loadAboutPhotos() async {
+    final epoch = _cache.generation;
     if (!mounted) return;
 
     setState(() {
-      _loadingAboutPhotos = true;
+      _loadingAboutPhotos = !_hasContent;
       _aboutPhotoError = null;
-      _aboutPhotos = [];
-      _aboutIndex = 0;
     });
 
     try {
@@ -1605,24 +1615,27 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final list = (rows as List).cast<Map<String, dynamic>>();
 
+      final urls = await batchedSignedUrls(
+        _client,
+        _aboutPhotosBucket,
+        list.map((row) => (row['path'] ?? '').toString()),
+      );
       final items = <Map<String, String>>[];
       for (final r in list) {
         final path = (r['path'] ?? '').toString().trim();
         if (path.isEmpty) continue;
-        final url = await _signedUrl(_aboutPhotosBucket, path);
+        final url = urls[path];
         if (url == null || url.trim().isEmpty) continue;
         items.add({'path': path, 'url': url});
       }
 
       if (!mounted) return;
       setState(() {
+        if (epoch != _cache.generation) return;
         _aboutPhotos = items;
         _loadingAboutPhotos = false;
+        _aboutIndex = _aboutIndex.clamp(0, (items.length - 1).clamp(0, 999));
       });
-
-      if (_aboutController.hasClients) {
-        _aboutController.jumpToPage(0);
-      }
     } catch (e) {
       _connection.report(e);
       if (!mounted) return;
@@ -1883,7 +1896,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             style: TextStyle(color: Colors.black.withOpacity(0.65)),
           ),
           const SizedBox(height: 10),
-          if (_loadingAboutMe)
+          if (_loadingAboutMe && !_readOnly)
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(8),
@@ -1897,6 +1910,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             )
           else
             TextField(
+              readOnly: _readOnly,
               controller: _aboutMeController,
               minLines: 5,
               maxLines: 10,
@@ -1931,7 +1945,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          if (_loadingAboutPhotos)
+          if (_loadingAboutPhotos && !_readOnly)
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(8),
@@ -1981,6 +1995,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                 Positioned.fill(
                                   child: VaultMedia.network(
                                     url,
+                                    cachedOnly: _readOnly,
                                     fit: BoxFit.contain,
                                     alignment: Alignment.center,
                                     gaplessPlayback: true,
@@ -2038,10 +2053,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   String _voicePrefix(String userId) => '$userId/${widget.vaultId}/voice';
 
   Future<void> _loadCoreVoice() async {
+    final epoch = _cache.generation;
     setState(() {
-      _loadingCoreVoice = true;
+      _loadingCoreVoice = !_hasContent;
       _coreVoiceError = null;
-      _coreVoice = null;
     });
 
     try {
@@ -2052,8 +2067,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .maybeSingle();
 
       if (row == null) {
-        if (!mounted) return;
-        setState(() => _loadingCoreVoice = false);
+        if (!mounted || epoch != _cache.generation) return;
+        setState(() {
+          _coreVoice = null;
+          _loadingCoreVoice = false;
+        });
         return;
       }
 
@@ -2075,7 +2093,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         return;
       }
 
-      if (!mounted) return;
+      if (!mounted || epoch != _cache.generation) return;
       setState(() {
         _coreVoice = _VoiceNote(
           id: id,
@@ -2384,7 +2402,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             style: TextStyle(color: Colors.black.withOpacity(0.65)),
           ),
           const SizedBox(height: 10),
-          if (_loadingCoreVoice)
+          if (_loadingCoreVoice && !_readOnly)
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(8),
@@ -2414,15 +2432,18 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _loadMemoryPhotosForVault() async {
+    final epoch = _cache.generation;
     setState(() {
-      _loadingMemoryPhotos = true;
+      _loadingMemoryPhotos = !_hasContent;
       _memoryPhotoError = null;
-      _memoryPhotosById.clear();
     });
 
     try {
       if (_memories.isEmpty) {
-        setState(() => _loadingMemoryPhotos = false);
+        setState(() {
+          _memoryPhotosById.clear();
+          _loadingMemoryPhotos = false;
+        });
         return;
       }
 
@@ -2434,26 +2455,32 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final list = (rows as List).cast<Map<String, dynamic>>();
 
-      final futures = list.map((r) async {
+      final urls = await batchedSignedUrls(
+        _client,
+        _memoryPhotosBucket,
+        list.map((row) => (row['path'] ?? '').toString()),
+      );
+      final resolved = list.map((r) {
         final id = (r['id'] ?? '').toString();
         final memoryId = (r['memory_id'] ?? '').toString();
         final path = (r['path'] ?? '').toString().trim();
         if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
 
-        final url = await _signedUrl(_memoryPhotosBucket, path);
+        final url = urls[path];
         if (url == null || url.trim().isEmpty) return null;
 
         return _MemPhoto(id: id, memoryId: memoryId, path: path, url: url);
       }).toList();
 
-      final resolved = await Future.wait(futures);
-      for (final p in resolved) {
-        if (p == null) continue;
-        _memoryPhotosById.putIfAbsent(p.memoryId, () => []).add(p);
-      }
-
-      if (!mounted) return;
-      setState(() => _loadingMemoryPhotos = false);
+      if (!mounted || epoch != _cache.generation) return;
+      setState(() {
+        _memoryPhotosById.clear();
+        for (final p in resolved) {
+          if (p == null) continue;
+          _memoryPhotosById.putIfAbsent(p.memoryId, () => []).add(p);
+        }
+        _loadingMemoryPhotos = false;
+      });
     } catch (e) {
       _connection.report(e);
       if (!mounted) return;
@@ -2464,49 +2491,39 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
+  bool _selectingMemoryMedia = false;
   Future<void> _uploadMemoryPhoto(String memoryId) async {
+    if (_selectingMemoryMedia) return;
+    _selectingMemoryMedia = true;
     try {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await pickVaultMedia(context);
+      final picked = await pickVaultMedia(context, allowMultiple: true);
       if (picked == null || picked.files.isEmpty) return;
-
-      final file = picked.files.first;
-      final bytes = file.bytes;
-      if (bytes == null) throw Exception('No file bytes received');
-
-      final image = await VaultMediaUpload.prepare(
-        bytes,
-        fileName: file.name,
-        contentType: _contentTypeFromExt(_extFromName(file.name)),
+      final media = await prepareMemoryMedia(picked.files);
+      if (!mounted || _client.auth.currentUser?.id != userId) return;
+      final count = await showMemoryMediaUpload(
+        context,
+        batch: MemoryMediaBatch(
+          client: _client,
+          target: MemoryMediaTarget.personal(
+            vaultId: widget.vaultId,
+            memoryId: memoryId,
+          ),
+          media: media,
+        ),
       );
-      final ts = DateTime.now().millisecondsSinceEpoch;
-      final path =
-          '$userId/${widget.vaultId}/memories/$memoryId/$ts.${image.extension}';
-
-      await _client.storage
-          .from(_memoryPhotosBucket)
-          .uploadBinary(
-            path,
-            image.bytes,
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: image.contentType,
-            ),
-          );
-
-      await _client.from('memory_photos').insert({
-        'vault_id': widget.vaultId,
-        'memory_id': memoryId,
-        'path': path,
-      });
-
-      await _loadMemoryPhotosForVault();
-      _toast('Media added to memory.');
+      if (!mounted || _client.auth.currentUser?.id != userId) return;
+      if (count > 0) {
+        await _refreshVault();
+        _toast('$count media items added to memory.');
+      }
     } catch (e) {
       _connection.report(e);
       await _handleUploadError(e, 'Add media failed');
+    } finally {
+      _selectingMemoryMedia = false;
     }
   }
 
@@ -2807,15 +2824,18 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _loadMemoryVoiceForVault() async {
+    final epoch = _cache.generation;
     setState(() {
-      _loadingMemoryVoice = true;
+      _loadingMemoryVoice = !_hasContent;
       _memoryVoiceError = null;
-      _memoryVoiceById.clear();
     });
 
     try {
       if (_memories.isEmpty) {
-        setState(() => _loadingMemoryVoice = false);
+        setState(() {
+          _memoryVoiceById.clear();
+          _loadingMemoryVoice = false;
+        });
         return;
       }
 
@@ -2827,6 +2847,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final list = (rows as List).cast<Map<String, dynamic>>();
 
+      final urls = await batchedSignedUrls(
+        _client,
+        _memoryVoiceBucket,
+        list.map((row) => (row['path'] ?? '').toString()),
+      );
+      if (!mounted || epoch != _cache.generation) return;
       _memoryVoiceById.clear();
       for (final r in list) {
         final id = (r['id'] ?? '').toString();
@@ -2836,7 +2862,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         final createdAt = (r['created_at'] ?? '').toString();
         if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
 
-        final url = await _signedUrl(_memoryVoiceBucket, path);
+        final url = urls[path];
         if (url == null || url.trim().isEmpty) continue;
 
         _memoryVoiceById
@@ -2914,8 +2940,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
 
-      if (memoryVoiceNoteId.isNotEmpty && mounted &&
-          await requestAiProcessingConsent(context) && mounted) {
+      if (memoryVoiceNoteId.isNotEmpty &&
+          mounted &&
+          await requestAiProcessingConsent(context) &&
+          mounted) {
         final token = _client.auth.currentSession?.accessToken.trim();
         if (token == null || token.isEmpty) {
           throw Exception('Missing session token. Please sign in again.');
@@ -2992,8 +3020,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
           final memoryVoiceNoteId = (inserted?['id'] ?? '').toString().trim();
 
-          if (memoryVoiceNoteId.isNotEmpty && mounted &&
-              await requestAiProcessingConsent(context) && mounted) {
+          if (memoryVoiceNoteId.isNotEmpty &&
+              mounted &&
+              await requestAiProcessingConsent(context) &&
+              mounted) {
             final token = _client.auth.currentSession?.accessToken.trim();
             if (token == null || token.isEmpty) {
               throw Exception('Missing session token. Please sign in again.');
@@ -3319,9 +3349,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   Future<void> _loadMemories() async {
     if (!mounted) return;
+    final epoch = _cache.generation;
 
     setState(() {
-      _loading = !_cachedView;
+      _loading = !_hasContent;
       _error = null;
     });
 
@@ -3340,25 +3371,30 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .order('created_at', ascending: false)
           .timeout(const Duration(seconds: 12));
 
-      if (!mounted) return;
+      if (!mounted || epoch != _cache.generation) return;
 
       setState(() {
         _memories = List<Map<String, dynamic>>.from(data);
       });
 
-      await _loadMemoryPhotosForVault();
-      unawaited(_loadMemoryVoiceForVault());
+      await Future.wait([
+        _loadMemoryPhotosForVault(),
+        _loadMemoryVoiceForVault(),
+      ]);
+      if (mounted && epoch == _cache.generation) {
+        setState(() {
+          _hasContent = true;
+          _loading = false;
+        });
+      }
     } catch (e) {
       _connection.report(e);
-      if (!mounted) return;
-      _connection.report(e);
+      if (!mounted || epoch != _cache.generation) return;
       if (isConnectionFailure(e)) {
         await _restoreSnapshot();
       } else {
-        await _cache.remove(_snapshotKey);
+        if (_accessDenied(e)) await _cache.clear();
         setState(() {
-          _cachedView = false;
-          _memories = [];
           _error = publicErrorMessage(e);
         });
       }
@@ -3417,7 +3453,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(16),
-            onTap: () => _openAddMemory(),
+            onTap: _readOnly ? null : () => _openAddMemory(),
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
@@ -3463,7 +3499,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     return ActionChip(
       avatar: Icon(icon, size: 18, color: const Color(0xFF76558F)),
       label: Text(label),
-      onPressed: () => _openAddMemory(initialMode: mode),
+      onPressed: _readOnly ? null : () => _openAddMemory(initialMode: mode),
     );
   }
 
@@ -3488,7 +3524,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 ),
               ),
               TextButton.icon(
-                onPressed: _uploadingPhoto ? null : _uploadFeaturedPhoto,
+                onPressed: _readOnly || _uploadingPhoto
+                    ? null
+                    : _uploadFeaturedPhoto,
                 icon: const Icon(Icons.add, size: 18),
                 label: Text(_uploadingPhoto ? 'Adding…' : 'Add'),
               ),
@@ -3496,7 +3534,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           ),
           const SizedBox(height: 8),
           if (_loadingPhotos)
-            const Center(child: CircularProgressIndicator())
+            const ContentPlaceholder(width: double.infinity, height: 132)
           else
             SizedBox(
               height: 132,
@@ -3508,7 +3546,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   if (index == _featuredPhotos.length) {
                     return InkWell(
                       borderRadius: BorderRadius.circular(18),
-                      onTap: _uploadingPhoto ? null : _uploadFeaturedPhoto,
+                      onTap: _readOnly || _uploadingPhoto
+                          ? null
+                          : _uploadFeaturedPhoto,
                       child: Container(
                         width: 104,
                         decoration: BoxDecoration(
@@ -3523,7 +3563,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                           children: [
                             Icon(Icons.add_circle_outline, size: 30),
                             SizedBox(height: 8),
-                            Text('New highlight'),
+                            Text('Add'),
                           ],
                         ),
                       ),
@@ -3532,11 +3572,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   final photo = _featuredPhotos[index];
                   return InkWell(
                     borderRadius: BorderRadius.circular(18),
-                    onTap: _openHighlightsGallery,
+                    onTap: _readOnly ? null : _openHighlightsGallery,
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(18),
                       child: VaultMedia.network(
                         photo['url'] ?? '',
+                        cachedOnly: _readOnly,
                         width: 104,
                         height: 132,
                         fit: BoxFit.cover,
@@ -3577,8 +3618,21 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .eq('id', id);
       await _refreshVault();
       _toast(
-        share ? 'Shared to your family feed.' : 'Removed from the family feed.',
+        share
+            ? (contentScreeningControlsEnabled
+                  ? 'Sharing requested.'
+                  : 'Shared to your family feed.')
+            : 'Removed from the family feed.',
       );
+      if (share && contentScreeningControlsEnabled && mounted) {
+        await showMemorySharingStatus(
+          context,
+          kind: 'memory',
+          targetId: id,
+          client: _client,
+          requestAfterSave: true,
+        );
+      }
     } catch (e) {
       _connection.report(e);
       _toast(publicErrorMessage(e));
@@ -3586,7 +3640,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Widget _socialMemoryCard(Map<String, dynamic> memory) {
-    final readOnly = _cachedView || _connection.offline;
+    final readOnly = _readOnly;
     final memoryId = (memory['id'] ?? '').toString();
     final prompt = (memory['prompt_text'] ?? '').toString();
     final body = (memory['body'] ?? '').toString();
@@ -3641,7 +3695,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                       Text(
-                        '${isSocialMemory ? 'Memory' : _prettyStage(stage)} · ${shared ? 'Shared with family' : 'Not in family feed'}',
+                        '${isSocialMemory ? 'Memory' : _prettyStage(stage)} · ${shared ? (contentScreeningControlsEnabled ? 'Sharing requested' : 'Shared with family') : 'Not in family feed'}',
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.black.withOpacity(0.55),
@@ -3650,40 +3704,53 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     ],
                   ),
                 ),
-                if (!readOnly)
-                  PopupMenuButton<String>(
-                    tooltip: 'Memory options',
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        _editMemory(memory);
-                      }
-                      if (value == 'share') {
-                        _setMemoryFeedVisibility(memory, !shared);
-                      }
-                      if (value == 'delete') {
-                        _deleteMemory(memory);
-                      }
-                    },
-                    itemBuilder: (_) => [
+                PopupMenuButton<String>(
+                  enabled: !readOnly,
+                  tooltip: 'Memory options',
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      _editMemory(memory);
+                    }
+                    if (value == 'share') {
+                      _setMemoryFeedVisibility(memory, !shared);
+                    }
+                    if (value == 'delete') {
+                      _deleteMemory(memory);
+                    }
+                    if (value == 'sharing') {
+                      showMemorySharingStatus(
+                        context,
+                        kind: 'memory',
+                        targetId: memoryId,
+                        client: _client,
+                      );
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Text('Edit memory'),
+                    ),
+                    PopupMenuItem(
+                      value: 'share',
+                      child: Text(
+                        shared
+                            ? 'Remove from family feed'
+                            : 'Share to family feed',
+                      ),
+                    ),
+                    if (contentScreeningControlsEnabled)
                       const PopupMenuItem(
-                        value: 'edit',
-                        child: Text('Edit memory'),
+                        value: 'sharing',
+                        child: Text('Sharing status'),
                       ),
-                      PopupMenuItem(
-                        value: 'share',
-                        child: Text(
-                          shared
-                              ? 'Remove from family feed'
-                              : 'Share to family feed',
-                        ),
-                      ),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Text('Delete memory'),
-                      ),
-                    ],
-                  ),
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete memory'),
+                    ),
+                  ],
+                ),
               ],
             ),
             const SizedBox(height: 14),
@@ -3770,32 +3837,34 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                     ),
                   ),
             ],
-            if (!readOnly) const Divider(height: 24),
-            if (!readOnly)
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: () => _uploadMemoryPhoto(memoryId),
-                    icon: const Icon(Icons.photo_outlined),
-                    label: const Text('Media'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _recorder.isSupported
-                        ? () => _recordMemoryVoice(memoryId)
-                        : null,
-                    icon: const Icon(Icons.mic_none),
-                    label: const Text('Record'),
-                  ),
-                  const Spacer(),
-                  Icon(
-                    shared
-                        ? Icons.family_restroom
-                        : Icons.visibility_off_outlined,
-                    size: 18,
-                    color: Colors.black.withOpacity(0.46),
-                  ),
-                ],
-              ),
+            const Divider(height: 24),
+            Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                TextButton.icon(
+                  onPressed: readOnly
+                      ? null
+                      : () => _uploadMemoryPhoto(memoryId),
+                  icon: const Icon(Icons.photo_outlined),
+                  label: const Text('Media'),
+                ),
+                TextButton.icon(
+                  onPressed: !readOnly && _recorder.isSupported
+                      ? () => _recordMemoryVoice(memoryId)
+                      : null,
+                  icon: const Icon(Icons.mic_none),
+                  label: const Text('Record'),
+                ),
+                Icon(
+                  shared
+                      ? Icons.family_restroom
+                      : Icons.visibility_off_outlined,
+                  size: 18,
+                  color: Colors.black.withOpacity(0.46),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -3823,14 +3892,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 12),
-          if (_loadingMemoryPhotos) const LinearProgressIndicator(),
           if (_memoryPhotoError != null)
             TextButton.icon(
-              onPressed: _loadMemoryPhotosForVault,
+              onPressed: _readOnly ? null : _loadMemoryPhotosForVault,
               icon: const Icon(Icons.refresh),
               label: const Text('Retry loading memory media'),
             ),
-          if (media.isEmpty && !_loadingMemoryPhotos)
+          if (media.isEmpty && _loadingMemoryPhotos)
+            const AspectRatio(aspectRatio: 2, child: ContentPlaceholder())
+          else if (media.isEmpty)
             const Text('Photos and videos you add will appear here.')
           else
             GridView.builder(
@@ -3846,6 +3916,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                 borderRadius: BorderRadius.circular(14),
                 child: VaultMedia.network(
                   media[index]['url'] ?? '',
+                  cachedOnly: _readOnly,
                   fit: BoxFit.cover,
                 ),
               ),
@@ -4296,6 +4367,15 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       await _refreshVault();
       _toast('Memory updated.');
+      if (contentScreeningControlsEnabled && mounted) {
+        await showMemorySharingStatus(
+          context,
+          kind: 'memory',
+          targetId: memoryId,
+          client: _client,
+          requestAfterSave: true,
+        );
+      }
     } on PostgrestException catch (e) {
       _toast(publicErrorMessage(e));
     } catch (e) {
@@ -4372,60 +4452,44 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          _cachedView || _connection.offline ? 'Offline' : 'Your Vault',
-        ),
+        title: Text(_showOffline ? 'Offline' : 'Your Vault'),
         centerTitle: false,
         actions: [
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
-            onPressed: () async {
-              if (widget.cachedOnly) {
-                await _restoreSnapshot();
-                return;
-              }
-              await _loadVaultMeta();
-              await _loadFeaturedPhotos();
-              await _loadAboutMe();
-              await _loadAboutPhotos();
-              await _loadCoreVoice();
-              await _loadMemories();
-            },
+            onPressed: _refreshing ? null : _refreshVault,
           ),
-          if (!_cachedView && !_connection.offline)
-            PopupMenuButton<String>(
-              enabled: !_cachedView && !_connection.offline,
-              tooltip: 'More options',
-              onSelected: (value) {
-                if (value == 'rename') _renameVault();
-                if (value == 'index') _reindexVaultNow();
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'rename',
-                  child: ListTile(
-                    leading: Icon(Icons.edit_outlined),
-                    title: Text('Edit vault name'),
-                  ),
+          PopupMenuButton<String>(
+            enabled: !_readOnly,
+            tooltip: 'More options',
+            onSelected: (value) {
+              if (value == 'rename') _renameVault();
+              if (value == 'index') _reindexVaultNow();
+            },
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'rename',
+                child: ListTile(
+                  leading: Icon(Icons.edit_outlined),
+                  title: Text('Edit vault name'),
                 ),
-                PopupMenuItem(
-                  value: 'index',
-                  enabled: !_reindexing,
-                  child: ListTile(
-                    leading: Icon(
-                      _reindexing ? Icons.hourglass_top : Icons.auto_fix_high,
-                    ),
-                    title: Text(
-                      _reindexing ? 'Updating AI…' : 'Update AI index',
-                    ),
+              ),
+              PopupMenuItem(
+                value: 'index',
+                enabled: !_reindexing,
+                child: ListTile(
+                  leading: Icon(
+                    _reindexing ? Icons.hourglass_top : Icons.auto_fix_high,
                   ),
+                  title: Text(_reindexing ? 'Updating AI…' : 'Update AI index'),
                 ),
-              ],
-            ),
+              ),
+            ],
+          ),
         ],
       ),
-      floatingActionButton: _cachedView || _connection.offline
+      floatingActionButton: _readOnly
           ? null
           : FloatingActionButton.extended(
               onPressed: () => _openAddMemory(),
@@ -4435,11 +4499,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       body: LogoWatermark(
         opacity: 0.03,
         size: 760,
-        child: _cachedView || _connection.offline
-            ? _offlineVault()
-            : _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
+        child: _error != null && !_hasContent
             ? Center(child: Text('Load failed: $_error'))
             : Center(
                 child: ConstrainedBox(
@@ -4447,6 +4507,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   child: RefreshIndicator(
                     onRefresh: _refreshVault,
                     child: ListView(
+                      key: const PageStorageKey('vault-content'),
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
                       children: [
@@ -4455,7 +4516,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                         _socialHighlightsSection(),
                         _vaultSectionPicker(),
                         if (_selectedVaultSection == 0) ...[
-                          if (_memories.isEmpty)
+                          if (_loading && !_hasContent)
+                            const FeedPlaceholder()
+                          else if (_memories.isEmpty)
                             Container(
                               padding: const EdgeInsets.all(28),
                               decoration: BoxDecoration(
@@ -4482,7 +4545,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                                   ),
                                   const SizedBox(height: 14),
                                   FilledButton.icon(
-                                    onPressed: () => _openAddMemory(),
+                                    onPressed: _readOnly
+                                        ? null
+                                        : () => _openAddMemory(),
                                     icon: const Icon(Icons.add),
                                     label: const Text(
                                       'Share your first memory',
@@ -4495,8 +4560,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                             ..._memories.map(_socialMemoryCard),
                         ],
                         if (_selectedVaultSection == 1) ...[
-                          _aboutMeSection(),
-                          _coreVoiceSection(),
+                          _readOnlySection(_aboutMeSection()),
+                          _readOnlySection(_coreVoiceSection()),
                         ],
                         if (_selectedVaultSection == 2) _mediaSection(),
                       ],

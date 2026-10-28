@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:immortalink/services/recent_cache.dart';
 import 'package:immortalink/widgets/recent_photo.dart';
+import 'package:immortalink/widgets/content_placeholder.dart';
 import 'recent_cache_test.dart' show MemoryDisk;
 
 void main() {
@@ -24,11 +26,26 @@ void main() {
     return cache;
   }
 
-  testWidgets('snapshot photos use local bytes without a network request', (tester) async {
+  testWidgets('snapshot photos use local bytes without a network request', (
+    tester,
+  ) async {
     final cache = await seed();
     var requests = 0;
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: RecentPhoto(url, cache: cache, cachedOnly: true,
-      clientFactory: () => MockClient((_) async { requests++; return http.Response('', 403); })))));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RecentPhoto(
+            url,
+            cache: cache,
+            cachedOnly: true,
+            clientFactory: () => MockClient((_) async {
+              requests++;
+              return http.Response('', 403);
+            }),
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
     expect(requests, 0);
     expect(find.byType(Image), findsOneWidget);
@@ -106,4 +123,133 @@ void main() {
     expect(find.text('Offline copy'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('slow photo keeps its size with a quiet placeholder', (
+    tester,
+  ) async {
+    final cache = await seed();
+    final pending = Completer<http.Response>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RecentPhoto(
+            url,
+            width: 200,
+            height: 160,
+            cache: cache,
+            clientFactory: () => MockClient((_) => pending.future),
+          ),
+        ),
+      ),
+    );
+    final before = tester.getRect(find.byType(RecentPhoto));
+    expect(before.size, const Size(200, 160));
+    expect(find.byType(ContentPlaceholder), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    pending.complete(http.Response.bytes(png, 200));
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsOneWidget);
+    expect(tester.getRect(find.byType(RecentPhoto)), before);
+    await cache.setUser(null);
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsNothing);
+    expect(tester.getRect(find.byType(RecentPhoto)), before);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('renewed URL keeps the same image until revalidation completes', (
+    tester,
+  ) async {
+    final cache = await seed();
+    Completer<http.Response>? response;
+    Widget photo(String address) => MaterialApp(
+      home: Scaffold(
+        body: RecentPhoto(
+          address,
+          cache: cache,
+          width: 200,
+          height: 160,
+          clientFactory: () => MockClient(
+            (_) async => response == null
+                ? http.Response.bytes(png, 200)
+                : await response.future,
+          ),
+        ),
+      ),
+    );
+    Future<void> settle() async {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    await tester.pumpWidget(photo(url));
+    await settle();
+    final provider = tester.widget<Image>(find.byType(Image)).image;
+    final rect = tester.getRect(find.byType(RecentPhoto));
+    response = Completer<http.Response>();
+    await tester.pumpWidget(photo('https://example.com/photo?token=renewed'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(ContentPlaceholder), findsNothing);
+    expect(tester.widget<Image>(find.byType(Image)).image, provider);
+    expect(tester.getRect(find.byType(RecentPhoto)), rect);
+    response.complete(http.Response.bytes(png, 200));
+    await settle();
+    expect(tester.widget<Image>(find.byType(Image)).image, provider);
+
+    response = Completer<http.Response>();
+    await tester.pumpWidget(photo('https://example.com/photo?token=denied'));
+    expect(find.byType(Image), findsOneWidget);
+    response.complete(http.Response('', 403));
+    await settle();
+    expect(find.byType(Image), findsNothing);
+    expect(await cache.read(cache.photoKey(url)), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'different media and an account switch cannot retain the old image',
+    (tester) async {
+      final cache = await seed();
+      Completer<http.Response>? response;
+      Widget photo(String address) => MaterialApp(
+        home: RecentPhoto(
+          address,
+          cache: cache,
+          width: 200,
+          height: 160,
+          clientFactory: () => MockClient(
+            (_) async => response == null
+                ? http.Response.bytes(png, 200)
+                : await response.future,
+          ),
+        ),
+      );
+      await tester.pumpWidget(photo(url));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(Image), findsOneWidget);
+      response = Completer<http.Response>();
+      await tester.pumpWidget(photo('https://example.com/different'));
+      expect(find.byType(Image), findsNothing);
+      await cache.setUser('another-account');
+      response.complete(http.Response.bytes(png, 200));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(Image), findsNothing);
+      expect(
+        await cache.read(cache.photoKey('https://example.com/different')),
+        isNull,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 }

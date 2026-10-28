@@ -16,6 +16,7 @@ import 'screens/sign_in_screen.dart';
 import 'screens/vaults_screen.dart';
 import 'utils/family_invite_share.dart';
 import 'widgets/keyboard_dismiss_scope.dart';
+import 'widgets/startup_screen.dart';
 
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
 final _passwordRecoveryPending = ValueNotifier<bool>(false);
@@ -27,6 +28,9 @@ Future<void> main() async {
 
 Future<void> _runApp() async {
   WidgetsFlutterBinding.ensureInitialized();
+  runApp(
+    const MaterialApp(debugShowCheckedModeBanner: false, home: StartupScreen()),
+  );
 
   // 1) Preferred for hosted web builds (Firebase, Vercel, etc.)
   const definedUrl = String.fromEnvironment('SUPABASE_URL');
@@ -71,7 +75,9 @@ Future<void> _runApp() async {
     ),
   );
 
-  await RecentCache.instance.setUser(Supabase.instance.client.auth.currentUser?.id);
+  await RecentCache.instance.setUser(
+    Supabase.instance.client.auth.currentUser?.id,
+  );
   await PushNotificationService.configureMessageHandlers();
 
   Supabase.instance.client.auth.onAuthStateChange.listen((data) {
@@ -99,11 +105,7 @@ void _handleUncaughtError(Object error, StackTrace stackTrace) {
   }
 
   FlutterError.reportError(
-    FlutterErrorDetails(
-      exception: error,
-      stack: stackTrace,
-      library: 'Heiro',
-    ),
+    FlutterErrorDetails(exception: error, stack: stackTrace, library: 'Heiro'),
   );
 }
 
@@ -148,6 +150,8 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   final _appLinks = AppLinks();
   bool _checkedSessionPreference = false;
+  bool _brandReady = false;
+  Timer? _brandTimer;
   int _inviteLinkRevision = 0;
   String _lastHandledInviteCode = '';
   DateTime? _lastHandledInviteAt;
@@ -156,12 +160,16 @@ class _AuthGateState extends State<AuthGate> {
   @override
   void initState() {
     super.initState();
+    _brandTimer = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) setState(() => _brandReady = true);
+    });
     _enforceSessionPreference();
     _listenForInviteLinks();
   }
 
   @override
   void dispose() {
+    _brandTimer?.cancel();
     _linkSubscription?.cancel();
     super.dispose();
   }
@@ -216,7 +224,8 @@ class _AuthGateState extends State<AuthGate> {
     if (!mounted) return;
 
     final session = Supabase.instance.client.auth.currentSession;
-    if (session == null || _passwordRecoveryPending.value ||
+    if (session == null ||
+        _passwordRecoveryPending.value ||
         needsFirstAccountSetup(session.user.userMetadata)) {
       setState(() => _inviteLinkRevision++);
       return;
@@ -234,8 +243,8 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_checkedSessionPreference) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (!_checkedSessionPreference || !_brandReady) {
+      return const StartupScreen();
     }
 
     final auth = Supabase.instance.client.auth;

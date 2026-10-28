@@ -62,7 +62,8 @@ class ConnectionStatus extends ChangeNotifier with WidgetsBindingObserver {
       _setOffline(false);
       return true;
     } catch (e) {
-      report(e);
+      // A server denial is not offline access, even after a network outage.
+      _setOffline(isConnectionFailure(e));
       return false;
     }
   }

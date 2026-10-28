@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../services/recent_cache.dart';
 import '../services/connection_status.dart';
+import 'content_placeholder.dart';
 
 class RecentPhoto extends StatefulWidget {
   const RecentPhoto(
@@ -38,6 +40,9 @@ class _RecentPhotoState extends State<RecentPhoto> {
   bool _cached = false;
   bool _onlineOnly = false;
   int _request = 0;
+  String? _displayKey;
+  int? _displayEpoch;
+  bool _hasImageFrame = false;
   http.Client? _client;
   Timer? _expiryTimer;
   @override
@@ -58,6 +63,9 @@ class _RecentPhotoState extends State<RecentPhoto> {
     if (mounted) {
       setState(() {
         _bytes = null;
+        _displayKey = null;
+        _displayEpoch = null;
+        _hasImageFrame = false;
         _onlineOnly = false;
         _error = StateError('Cache cleared');
       });
@@ -77,9 +85,15 @@ class _RecentPhotoState extends State<RecentPhoto> {
     final request = ++_request;
     final epoch = _cache.generation;
     final key = _cache.photoKey(widget.url);
+    // A renewed signed URL is not a new photo. Keep the same account's image
+    // while revalidating it; different media and access loss still clear it.
+    final keepImage = _displayKey == key && _displayEpoch == epoch;
     _client?.close();
     final client = _client = widget.clientFactory?.call() ?? http.Client();
-    _bytes = null;
+    if (!keepImage) {
+      _bytes = null;
+      _hasImageFrame = false;
+    }
     _error = null;
     _cached = false;
     _onlineOnly = false;
@@ -132,7 +146,13 @@ class _RecentPhotoState extends State<RecentPhoto> {
     }
     if (!mounted || request != _request || epoch != _cache.generation) return;
     setState(() {
+      if (bytes != null && _bytes != null && listEquals(bytes, _bytes)) {
+        bytes = _bytes; // Retain the decoded ImageProvider for unchanged bytes.
+      }
       _bytes = bytes;
+      _displayKey = bytes == null ? null : key;
+      _displayEpoch = bytes == null ? null : epoch;
+      if (bytes == null) _hasImageFrame = false;
       _error = error;
       _cached = cached;
       _onlineOnly = onlineOnly;
@@ -150,6 +170,14 @@ class _RecentPhotoState extends State<RecentPhoto> {
 
   @override
   Widget build(BuildContext context) {
+    return SizedBox(
+      width: widget.width,
+      height: widget.height,
+      child: _buildPhoto(context),
+    );
+  }
+
+  Widget _buildPhoto(BuildContext context) {
     if (_onlineOnly) {
       return Image.network(
         widget.url,
@@ -158,6 +186,7 @@ class _RecentPhotoState extends State<RecentPhoto> {
         height: widget.height,
         alignment: widget.alignment,
         errorBuilder: widget.errorBuilder,
+        frameBuilder: _photoFrame,
       );
     }
     if (_bytes != null) {
@@ -165,11 +194,13 @@ class _RecentPhotoState extends State<RecentPhoto> {
         label: _cached ? 'Cached photo, offline copy' : 'Photo',
         child: Image.memory(
           _bytes!,
+          gaplessPlayback: true,
           fit: widget.fit,
           width: widget.width,
           height: widget.height,
           alignment: widget.alignment,
           errorBuilder: widget.errorBuilder,
+          frameBuilder: _photoFrame,
         ),
       );
     }
@@ -177,9 +208,30 @@ class _RecentPhotoState extends State<RecentPhoto> {
       width: widget.width,
       height: widget.height,
       child: _error == null
-          ? const Center(child: CircularProgressIndicator())
+          ? ContentPlaceholder(width: widget.width, height: widget.height)
           : widget.errorBuilder?.call(context, _error!, null) ??
                 const Center(child: Icon(Icons.image_not_supported_outlined)),
+    );
+  }
+
+  Widget _photoFrame(
+    BuildContext context,
+    Widget child,
+    int? frame,
+    bool sync,
+  ) {
+    if (frame == null && !_hasImageFrame) {
+      return ContentPlaceholder(width: widget.width, height: widget.height);
+    }
+    _hasImageFrame = true;
+    return TweenAnimationBuilder<double>(
+      key: ValueKey('${_cache.generation}:${_cache.photoKey(widget.url)}'),
+      tween: Tween(begin: sync ? 1 : 0, end: 1),
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 120),
+      builder: (_, opacity, image) => Opacity(opacity: opacity, child: image),
+      child: child,
     );
   }
 }

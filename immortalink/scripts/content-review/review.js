@@ -1,4 +1,4 @@
-let csrf; let current; let generation=0; let sessionGeneration=0; const blobs=[];
+let csrf; let current; let screening; let generation=0; let sessionGeneration=0; const blobs=[];
 const $=(selector)=>document.querySelector(selector);
 const status=(text)=> { $('#status').textContent=text; };
 function clearMedia(){ for(const url of blobs) URL.revokeObjectURL(url); blobs.length=0; }
@@ -7,18 +7,20 @@ async function api(path,body={}) {
   const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json',...(csrf?{'X-Review-CSRF':csrf}:{})},body:JSON.stringify(body)});
   if(path!=='/api/logout' && requestSession!==sessionGeneration)throw new Error('Session ended.');
   if(!response.ok){ const error=await response.json(); throw new Error(error.error || 'Review request failed.'); }
-  return path==='/api/media'?response.blob():response.json();
+  return path.endsWith('/media')?response.blob():response.json();
 }
 function element(tag,text){ const node=document.createElement(tag); node.textContent=text; return node; }
 async function queue(){
   const reports=await api('/api/queue'); $('#queue').replaceChildren();
   if(!reports.length) $('#queue').append(element('li','No open reports.'));
   for(const report of reports){
-    const li=element('li',''); const button=element('button',`${report.reason.replaceAll('_',' ')}\n${report.target_kind.replaceAll('_',' ')} · ${report.status}\n${new Date(report.created_at).toLocaleString()}`);
+    const li=element('li',''); const pending=['pending','blocked'].includes(report.media_state)?' · media retirement pending':'';
+    const button=element('button',`${report.reason.replaceAll('_',' ')}\n${report.target_kind.replaceAll('_',' ')} · ${report.status}${pending}\n${new Date(report.created_at).toLocaleString()}`);
     button.onclick=()=>openCase(report.id).catch((e)=>status(e.message)); li.append(button); $('#queue').append(li);
   }
 }
 async function openCase(id){
+  screening?.clear();
   const request=++generation; current=null; clearMedia(); $('#case').replaceChildren(element('h2','Opening case...'));
   const data=await api('/api/case',{id}); if(request!==generation)return; current=data;
   const fragment=$('#case-template').content.cloneNode(true);
@@ -29,6 +31,22 @@ async function openCase(id){
   for(const [key,value] of [['Reason',data.report.reason.replaceAll('_',' ')],['Received',new Date(data.report.createdAt).toLocaleString()]]) details.append(element('dt',key),element('dd',value));
   fragment.querySelector('.statement').textContent=data.report.details || 'No statement supplied.';
   fragment.querySelector('.scope').textContent=data.scopeNote;
+  const retirement=data.retirement;
+  const messages={visible:'Content is not hidden by this memory decision.',
+    pending:'Hidden. Old media links still need retirement. Keep this case pending until retirement finishes.',
+    blocked:'Hidden. Media retirement needs attention. No files have been deleted. Retry after resolving the issue.',
+    retired:'Hidden. Old media addresses retired. CDN changes may take time to propagate; downloaded copies cannot be recalled.',
+    not_applicable:'This report is not for an individual memory. Hiding restricts access but does not retire archive media links.'};
+  fragment.querySelector('.retirement').textContent=messages[retirement?.state] || 'Media retirement status could not be confirmed. Reopen this case.';
+  const retry=fragment.querySelector('.retry-retirement');
+  retry.hidden=!['pending','blocked'].includes(retirement?.state);
+  if(retirement?.issue)fragment.querySelector('.retirement').append(element('span',` Issue: ${retirement.issue.replaceAll('_',' ')}.`));
+  fragment.querySelector('[value="restore"]').disabled=['pending','blocked'].includes(retirement?.state);
+  retry.onclick=async()=>{
+    retry.disabled=true;
+    try{await api('/api/retire',{id,revision:data.revision});await openCase(id);await queue();}
+    catch(error){status(error.message);}finally{retry.disabled=false;}
+  };
   const content=fragment.querySelector('.content');
   if(!data.available) content.append(element('p','Target is deleted, moved or unavailable. No other archive content has been opened.'));
   for(const [name,value] of Object.entries(data.fields)){ content.append(element('h3',name),element('p',value)); }
@@ -56,20 +74,25 @@ async function openCase(id){
       const action=values.get('action');
       if(['suspend','reinstate'].includes(action) && !confirm('Apply this action to the identified contributor account, not just this item?'))return;
       const result=await api('/api/action',{id,revision:data.revision,action,notes:values.get('notes'),confirm:values.get('confirm')});
-      status(`Decision recorded: ${result.action}.`); await openCase(id); await queue();
+      await openCase(id); await queue();
+      status(`Decision recorded: ${result.action}.${result.retirement?.state==='unconfirmed'?' Media retirement is not confirmed; check the case status.':''}`);
     }catch(error){status(error.message);}finally{button.disabled=false;}
   };
   $('#case').replaceChildren(fragment); status('Case opened. Preview access is recorded.');
 }
 $('#refresh').onclick=()=>queue().catch((e)=>status(e.message));
 $('#lookup').onsubmit=(event)=>{event.preventDefault();openCase($('#reference').value.trim()).catch((e)=>status(e.message));};
-function clearSession(){sessionGeneration++;generation++;current=null;csrf=null;clearMedia();$('#case').replaceChildren();$('#queue').replaceChildren();status('Session ended. Close this tab.');}
+function clearSession(){sessionGeneration++;generation++;current=null;csrf=null;clearMedia();screening?.end();$('#case').replaceChildren();$('#queue').replaceChildren();status('Session ended. Close this tab.');}
 $('#logout').onclick=async()=>{const closing=api('/api/logout');clearSession();try{await closing;}catch{status('Local session cleared. Close this tab and stop the console.');}};
-window.addEventListener('pagehide',clearMedia);
+window.addEventListener('pagehide',()=>{clearMedia();screening?.clear();});
 (async()=>{
   const key=location.hash.slice(1); history.replaceState(null,'',location.pathname);
   const session=await api('/session',key?{key}:{});csrf=session.csrf;$('#reviewer').textContent=session.reviewer;
   setTimeout(clearSession,session.expiresInMs);
+  if(session.screeningReview===true){
+    screening=initScreeningReview({api,status,element,onSelect:()=>{generation++;current=null;clearMedia();}});
+    screening.refresh().catch((e)=>status(e.message));
+  }
   await queue();status('Private review session ready.');
   const health=await api('/api/health');$('#health').textContent=health.needs_attention?'Alert delivery needs attention. Check the queue directly.':'Alert health checked.';
 })().catch((e)=>status(e.message));

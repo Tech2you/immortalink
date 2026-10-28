@@ -11,10 +11,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
 import '../services/push_notification_service.dart';
+import '../services/memory_media_batch.dart';
+import '../widgets/memory_media_upload_screen.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/web_audio_recorder.dart';
 import '../widgets/vault_media.dart';
+import '../widgets/content_screening_permission.dart';
+import '../widgets/memory_sharing_status.dart';
 
 class CreateMemoryScreen extends StatefulWidget {
   final String vaultId;
@@ -52,6 +56,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   String? _selectedMood;
   bool _showDetails = false;
   bool _saving = false;
+  bool _pickingPhotos = false;
   final _connection = ConnectionStatus.instance;
   void _connectionChanged() {
     if (mounted) setState(() {});
@@ -59,7 +64,6 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
 
   bool _shareToFamilyFeed = true;
 
-  static const _photoBucket = 'memory_photos';
   static const _voiceBucket = 'memory_voice';
 
   @override
@@ -117,10 +121,18 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
       MediaUploadPolicy.contentTypeForExtension(extension);
 
   Future<void> _pickPhotos() async {
+    if (_pickingPhotos || _saving) return;
+    final available = MediaUploadPolicy.photoBatchMaxCount - _photos.length;
+    if (available <= 0) {
+      _toast('This batch has 20 items. Remove one before selecting more.');
+      return;
+    }
+    setState(() => _pickingPhotos = true);
     try {
       final result = await pickVaultMedia(
         context,
         allowMultiple: true,
+        maxFiles: available,
         remainingBytes:
             MediaUploadPolicy.pendingMediaMaxBytes -
             _photos.fold<int>(0, (sum, p) => sum + p.bytes.length),
@@ -153,19 +165,16 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
       }
 
       if (!mounted) return;
-      final available = 10 - _photos.length;
-      final accepted = selected.take(available).toList();
       setState(() {
-        _photos.addAll(accepted);
+        _photos.addAll(selected);
       });
-      if (selected.length > available) {
-        _toast('You can add up to 10 photos or videos to one memory.');
-      }
       if (rejectedMessage != null) {
         _toast(rejectedMessage);
       }
     } catch (e) {
-      _toast(publicErrorMessage(e));
+      _toast(e is MediaUploadException ? e.message : publicErrorMessage(e));
+    } finally {
+      if (mounted) setState(() => _pickingPhotos = false);
     }
   }
 
@@ -388,38 +397,42 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   }
 
   Future<void> _uploadPhotos(String userId, String memoryId) async {
-    for (var index = 0; index < _photos.length; index++) {
-      final photo = _photos[index];
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadPolicy.visualKind(photo.name),
-        photo.bytes,
-        fileName: photo.name,
-        contentType: photo.contentType,
-      );
-      final stamp = DateTime.now().microsecondsSinceEpoch + index;
-      final path =
-          '$userId/${widget.vaultId}/memories/$memoryId/$stamp.${photo.extension}';
-      await _client.storage
-          .from(_photoBucket)
-          .uploadBinary(
-            path,
-            photo.bytes,
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: photo.contentType,
-            ),
-          );
-      await _client.from('memory_photos').insert({
-        'vault_id': widget.vaultId,
-        'memory_id': memoryId,
-        'path': path,
-      });
+    if (_photos.isEmpty || !mounted) return;
+    if (_client.auth.currentUser?.id != userId) {
+      throw const AuthException('Account changed.');
+    }
+    await showMemoryMediaUpload(
+      context,
+      autoStart: true,
+      batch: MemoryMediaBatch(
+        client: _client,
+        target: MemoryMediaTarget.personal(
+          vaultId: widget.vaultId,
+          memoryId: memoryId,
+        ),
+        media: _photos
+            .map(
+              (p) => PendingMemoryMedia(
+                name: p.name,
+                bytes: p.bytes,
+                extension: p.extension,
+                contentType: p.contentType,
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (_client.auth.currentUser?.id != userId || !mounted) {
+      throw const AuthException('Account changed.');
     }
   }
 
   Future<void> _uploadVoice(String userId, String memoryId) async {
-    final transcribe = _voices.isNotEmpty && mounted &&
-        await requestAiProcessingConsent(context) && mounted;
+    final transcribe =
+        _voices.isNotEmpty &&
+        mounted &&
+        await requestAiProcessingConsent(context) &&
+        mounted;
     for (var index = 0; index < _voices.length; index++) {
       final audio = _voices[index].audio;
       MediaUploadPolicy.validateListOrThrow(
@@ -473,7 +486,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || _pickingPhotos) return;
     final title = _titleController.text.trim();
     final body = _bodyController.text.trim();
     if (body.isEmpty && _photos.isEmpty && _voices.isEmpty) {
@@ -530,10 +543,21 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
           memoryId: memoryId,
         ).catchError((_) => 0),
       );
-      if (_shareToFamilyFeed) {
+      if (_shareToFamilyFeed && !contentScreeningControlsEnabled) {
         unawaited(PushNotificationService.notifyFamilyMemoryAdded(memoryId));
       }
 
+      if (!mounted) return;
+      if (contentScreeningControlsEnabled && _shareToFamilyFeed) {
+        await showMemorySharingStatus(
+          context,
+          kind: 'memory',
+          targetId: memoryId,
+          client: _client,
+          expectedUserId: userId,
+          requestAfterSave: true,
+        );
+      }
       if (!mounted) return;
       Navigator.pop(context, true);
     } on PostgrestException catch (e) {
@@ -581,7 +605,9 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
               ),
               Text(
                 _shareToFamilyFeed
-                    ? 'Sharing with family'
+                    ? (contentScreeningControlsEnabled
+                          ? 'Sharing requested'
+                          : 'Sharing with family')
                     : 'Only in your vault',
                 style: TextStyle(color: Colors.black.withValues(alpha: 0.55)),
               ),
@@ -619,6 +645,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                           photo.bytes,
                           width: 150,
                           height: 150,
+                          cacheWidth: 360,
                           fit: BoxFit.contain,
                         ),
                 ),
@@ -627,7 +654,10 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                   right: 6,
                   child: IconButton.filledTonal(
                     visualDensity: VisualDensity.compact,
-                    onPressed: () => setState(() => _photos.removeAt(index)),
+                    tooltip: 'Remove media ${index + 1}',
+                    onPressed: _saving || _pickingPhotos
+                        ? null
+                        : () => setState(() => _photos.removeAt(index)),
                     icon: const Icon(Icons.close, size: 18),
                   ),
                 ),
@@ -646,7 +676,9 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         title: const Text('New memory'),
         actions: [
           TextButton(
-            onPressed: _saving || _connection.offline ? null : _save,
+            onPressed: _saving || _pickingPhotos || _connection.offline
+                ? null
+                : _save,
             child: Text(
               _saving ? 'Preserving…' : 'Preserve',
               style: const TextStyle(fontWeight: FontWeight.w800),
@@ -711,8 +743,19 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                 ),
                 if (_photos.isNotEmpty) ...[
                   const SizedBox(height: 14),
+                  Text(
+                    '${_photos.length} / ${MediaUploadPolicy.photoBatchMaxCount} selected',
+                  ),
+                  const SizedBox(height: 8),
                   _photoPreview(),
                 ],
+                if (_pickingPhotos)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: LinearProgressIndicator(
+                      semanticsLabel: 'Preparing selected media',
+                    ),
+                  ),
                 if (_voices.isNotEmpty) ...[
                   const SizedBox(height: 14),
                   ...List.generate(_voices.length, (index) {
@@ -755,7 +798,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                   runSpacing: 10,
                   children: [
                     OutlinedButton.icon(
-                      onPressed: _saving ? null : _pickPhotos,
+                      onPressed: _saving || _pickingPhotos ? null : _pickPhotos,
                       icon: const Icon(Icons.photo_library_outlined),
                       label: Text(_photos.isEmpty ? 'Add media' : 'More media'),
                     ),
@@ -899,7 +942,9 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                 ),
                 const SizedBox(height: 18),
                 FilledButton.icon(
-                  onPressed: _saving || _connection.offline ? null : _save,
+                  onPressed: _saving || _pickingPhotos || _connection.offline
+                      ? null
+                      : _save,
                   icon: const Icon(Icons.auto_awesome_outlined),
                   label: Text(
                     _saving ? 'Preserving memory…' : 'Preserve memory',

@@ -38,3 +38,8 @@ verify_jwt = false
 # Single-use report authorization is validated by a service-role-only claim RPC.
 [functions.send_content_report_alert]
 verify_jwt = false
+
+# Staged and disabled by its environment switch; one-use dispatch authority is
+# consumed by a service-only RPC, never by a caller-supplied recipient or payload.
+[functions.send_screening_delivery]
+verify_jwt = false

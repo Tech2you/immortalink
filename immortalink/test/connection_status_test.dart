@@ -28,6 +28,8 @@ void main() {
         throw const PostgrestException(message: 'denied', code: '42501');
       },
     );
+    status.report(ClientException('Previous outage'));
+    expect(status.offline, isTrue);
     expect(await status.check(), isFalse);
     expect(status.offline, isFalse);
     status.dispose();
@@ -47,6 +49,41 @@ void main() {
     expect(await first, isTrue);
     expect(await second, isTrue);
     expect(calls, 1);
+    status.dispose();
+  });
+  test(
+    'failed token refresh transport is offline, invalid session is not',
+    () async {
+      var unavailable = true;
+      final status = ConnectionStatus(
+        probe: () async {
+          if (unavailable) {
+            throw AuthRetryableFetchException(message: 'network unavailable');
+          }
+          throw const AuthException('Session revoked', statusCode: '401');
+        },
+      );
+      expect(await status.check(), isFalse);
+      expect(status.offline, isTrue);
+      unavailable = false;
+      expect(await status.check(), isFalse);
+      expect(status.offline, isFalse);
+      status.dispose();
+    },
+  );
+  testWidgets('unresponsive connection falls back after four seconds', (
+    tester,
+  ) async {
+    final pending = Completer<void>();
+    final status = ConnectionStatus(probe: () => pending.future);
+    final result = status.check();
+    await tester.pump(const Duration(seconds: 4));
+    expect(await result, isFalse);
+    expect(status.offline, isTrue);
+    pending.complete();
+    await tester.pump();
+    // The late request must not silently switch an offline screen to online.
+    expect(status.offline, isTrue);
     status.dispose();
   });
 }

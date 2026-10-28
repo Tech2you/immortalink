@@ -2,6 +2,15 @@
 
 ## Scope
 
+The local startup follow-up (not yet delivered after build 27) holds the existing
+Heiro logo while resolving the signed-in account and family. An initial
+connection probe has a four-second timeout. If the network/service is unavailable,
+already-signed-in users automatically enter saved offline memories; signed-out
+users still see sign-in. A retryable token-refresh network failure also permits
+this fallback, but a revoked session or explicit access denial does not. The
+offline directory offers a Wi-Fi button to retry online without interrupting
+read-only browsing just because a background connection check succeeds.
+
 The offline home is a directory headed Offline, with separate Vaults, Family
 trees and Media sections. Successfully visited personal, shared and legacy
 vaults can be opened here without network requests, even if connectivity returns.
@@ -64,10 +73,13 @@ OS-private storage, not application-level encryption or an E2EE guarantee.
 
 1. Stay signed in, open some photos and a family tree while online.
 2. Open Settings > Recently viewed and confirm both appear.
-3. Enable airplane mode, close and reopen the app, and return to Recently viewed.
+3. On the next build containing the startup follow-up, enable airplane mode,
+   close and reopen the app. After the logo/connection attempt, Offline should
+   open automatically, without an empty-account or sign-in flash.
 4. Open a photo, zoom it, and browse the read-only tree. No edits should be enabled.
 5. Clear offline storage. Copies disappear, including any open offline view.
-6. Reconnect, view content again, then sign out and use a different account.
+6. Reconnect, tap the Wi-Fi button to return online, view content again, then
+   sign out and use a different account.
    No copies from the previous account should be visible.
 7. With two test accounts, remove membership while the other is disconnected.
    Reconnect and refresh its vault. Its device cache should be cleared.

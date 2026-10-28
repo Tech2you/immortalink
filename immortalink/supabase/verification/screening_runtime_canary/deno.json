@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "@imagemagick/magick-wasm": "npm:@imagemagick/magick-wasm@0.0.45"
+  }
+}

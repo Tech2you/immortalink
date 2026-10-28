@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'image_upload_optimizer.dart';
 import 'media_upload_policy.dart';
@@ -9,8 +11,14 @@ import 'media_upload_policy.dart';
 Future<FilePickerResult?> pickVaultMedia(
   BuildContext context, {
   bool allowMultiple = false,
+  int maxFiles = MediaUploadPolicy.photoBatchMaxCount,
   int remainingBytes = MediaUploadPolicy.pendingMediaMaxBytes,
 }) async {
+  if (maxFiles < 1 || maxFiles > MediaUploadPolicy.photoBatchMaxCount) {
+    throw const MediaUploadException(
+      'You can select up to 20 photos per batch.',
+    );
+  }
   final type = await showModalBottomSheet<FileType>(
     context: context,
     builder: (sheetContext) => SafeArea(
@@ -32,6 +40,32 @@ Future<FilePickerResult?> pickVaultMedia(
     ),
   );
   if (type == null) return null;
+  final limit = allowMultiple && type == FileType.image ? maxFiles : 1;
+  if (!kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.iOS &&
+      type == FileType.image &&
+      allowMultiple) {
+    final images = await ImagePicker().pickMultiImage(
+      limit: limit,
+      requestFullMetadata: false,
+    );
+    if (images.isEmpty) return null;
+    final files = <PlatformFile>[];
+    for (final image in images) {
+      files.add(
+        PlatformFile(
+          name: image.name,
+          size: await image.length(),
+          readStream: image.openRead(),
+        ),
+      );
+    }
+    return readVaultMediaFiles(
+      files,
+      maxFiles: limit,
+      remainingBytes: remainingBytes,
+    );
+  }
   final result = await FilePicker.platform.pickFiles(
     type: type,
     // Read only after checking sizes, rather than loading every selected video.
@@ -40,16 +74,43 @@ Future<FilePickerResult?> pickVaultMedia(
     allowMultiple: allowMultiple && type == FileType.image,
   );
   if (result == null) return null;
-  return readVaultMediaFiles(result.files, remainingBytes: remainingBytes);
+  return readVaultMediaFiles(
+    result.files,
+    maxFiles: limit,
+    remainingBytes: remainingBytes,
+  );
 }
 
 Future<FilePickerResult> readVaultMediaFiles(
   List<PlatformFile> selected, {
+  int maxFiles = MediaUploadPolicy.photoBatchMaxCount,
   int remainingBytes = MediaUploadPolicy.pendingMediaMaxBytes,
 }) async {
+  if (maxFiles < 1 ||
+      maxFiles > MediaUploadPolicy.photoBatchMaxCount ||
+      selected.length > maxFiles) {
+    throw MediaUploadException(
+      'Select no more than $maxFiles photos for this batch.',
+    );
+  }
+  // Check the entire selection before reading any bytes; never silently truncate.
+  var declared = 0;
+  for (final file in selected) {
+    MediaUploadPolicy.validateBytesOrThrow(
+      MediaUploadPolicy.visualKind(file.name),
+      file.size,
+      fileName: file.name,
+    );
+    declared += file.size;
+  }
+  if (declared > remainingBytes) {
+    throw const MediaUploadException(
+      'Selected media exceeds the 100 MB draft limit. Add fewer files.',
+    );
+  }
   final files = <PlatformFile>[];
   var used = 0;
-  for (final file in selected.take(10)) {
+  for (final file in selected) {
     final kind = MediaUploadPolicy.visualKind(file.name);
     MediaUploadPolicy.validateBytesOrThrow(
       kind,

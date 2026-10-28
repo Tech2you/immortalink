@@ -1,11 +1,12 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'family_membership_limit.dart';
 
 const String _defaultEverRootFamilyUpgradeMessage =
     'Heiro Family increases storage for photos, voice notes, memories, '
-    'AI, transcription, and larger family capacity. Subscriptions will be '
-    'available after App Store billing is connected.';
+    'AI, transcription, and more legacy profiles. Real family members do not '
+    'have a total headcount limit; available storage and invite safeguards still apply.';
 
 const String _storageLimitUpgradeMessage =
     'This family has reached its storage allowance. Check the family plan '
@@ -47,6 +48,10 @@ String everRootQuotaMessageFromError(Object error) {
   if (text.contains('ERR_EVERROOT_INVITE_COOLDOWN')) {
     return 'Please wait a moment before creating another invite.';
   }
+  if (text.contains('ERR_EVERROOT_INVITE_RATE_LIMIT')) {
+    return 'Too many invites were created in the last hour. Please wait before '
+        'creating another invite. This does not require a paid upgrade.';
+  }
   if (text.contains('ERR_EVERROOT_INVITE_LIMIT')) {
     return message ??
         'This family has used this month\'s invite allowance. Try again later.';
@@ -64,7 +69,7 @@ String everRootQuotaMessageFromError(Object error) {
         'This family has reached its real family member allowance.';
   }
   if (text.contains('ERR_EVERROOT_FREE_FAMILY_LIMIT')) {
-    return 'You already have a primary free family tree. You can still join relatives when the invite does not need to become your primary tree.';
+    return singleFamilyMembershipMessage;
   }
   if (text.contains('ERR_EVERROOT_FAMILY_REQUIRED')) {
     return 'Family invites are being enabled for free families. Please update the app and try again.';

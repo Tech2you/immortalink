@@ -4,10 +4,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
-import 'vaults_screen.dart';
 import 'legacy_vault_screen.dart';
 import 'family_branch_screen.dart';
-import 'sign_in_screen.dart';
 import 'relationship_tree_screen.dart';
 import '../services/family_leave_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
@@ -1037,8 +1035,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
       if (!mounted) return;
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const SignInScreen()),
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        '/',
         (route) => false,
       );
     } catch (e) {
@@ -1094,8 +1092,8 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
 
       if (!mounted) return;
 
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const VaultsScreen()),
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        '/',
         (route) => false,
       );
     } catch (e) {

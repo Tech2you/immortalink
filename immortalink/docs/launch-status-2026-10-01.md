@@ -3,7 +3,1310 @@
 Public paid launch: **NO-GO until the gates below are verified**.
 This is the current work ledger; earlier recovery notes are historical evidence.
 
-## Latest checkpoint - 22 October 2026
+## Latest checkpoint - 26 October 2026
+
+- Build 32 was distribution-signed and uploaded successfully at 20:10 SAST.
+  Its 126 source hashes match the locally installed build 32, including the
+  branding, sign-out navigation, refresh stability and 20-photo batch changes.
+  The compiled turquoise app icon, bundled artwork, production entitlements
+  and six Apple purchase defines passed verification. Fresh checks: 248 tests
+  passed / 50 configured skips; 68 purchase-enabled lifecycle/plan tests passed;
+  static analysis of the four upload/startup components found no issues. One
+  initial billing invocation incorrectly included a defaults-only test with
+  purchase defines; that test passed in the default suite, and the correctly
+  configured lifecycle suite passed separately. No app-source changes were
+  needed. Apple now reports the binary Validated and non-exempt encryption No.
+  Internal Beta is assigned with one tester. At 20:21 SAST, build 32 replaced
+  build 28 in iOS version 1.0, with a reload confirming the saved selection and
+  manual release. Only the app version was temporarily removed from the draft;
+  the same six-item draft now contains 1.0.0 (32), four subscriptions and Heiro
+  Plans. Status: Ready for Review, not submitted or released. Draft panel closed.
+  The previous archive is preserved under `build/ios/release-28-evidence/`;
+  new build/upload/signature/test evidence is in `build/ios/release-32-evidence/`.
+  Existing launch gates, including device acceptance of batch uploads and the
+  policy's responsible-party identity/address issue, remain open.
+- Local build 32 adds native iPhone photo multi-selection capped at 20 per batch
+  for new/existing personal and legacy memories. The remaining selection count,
+  previews/removal, sequential progress and same-screen retry are implemented.
+  Retries skip saved items and reconcile lost responses using stable random
+  paths; they do not overwrite existing media. Videos remain single-selection.
+  Existing 12 MB/photo, 100 MB pending-batch and server family quotas remain.
+  No backend or billing-rule change. Tests: 248 passed / 50 configured skips;
+  configured billing: 79 passed. New picker/queue/widget/test analysis is clean;
+  integrated screens retain 70 pre-existing warnings/information messages and
+  zero errors. Phone/tablet/large-text preview renders were inspected. Build 32
+  signature, 126 source hashes, artwork and billing flags passed verification.
+  In-place installation and remote launch succeeded. An independent device
+  query confirms Heiro 1.0.0 (32); native gallery/upload device acceptance
+  remains pending. No uninstall, account change or real media upload was done.
+  TestFlight/App Store were not accessed; the last
+  verified Apple candidate remains 28, not submitted. Retry state is local to
+  the open upload screen, not a background or durable queue. Evidence:
+  `build/ios/local-32-evidence/` and `build/photo-32-qa/`.
+- Local build 31 addresses the owner's reload flicker recording: cached/live
+  vaults now share one layout, refresh retains existing cards/media and scroll
+  position, and renewed photo links no longer blank the same visible image.
+  Account/cache clearing and denied access still remove stale content. Tests:
+  225 passed / 50 configured skips; configured billing: 79 passed; phone/tablet/
+  large-text refresh and render checks passed. Signature/source/artwork/billing
+  verification passed. In-place iPhone installation succeeded and an independent
+  query confirms 1.0.0 (31). Owner confirmed that it feels smooth; no
+  measured device frame-rate claim. No backend or Apple change; last verified
+  Apple candidate remains 28. See `docs/loading-stability-2026-10-26.md`.
+- A reported leave-family then sign-out bug is fixed locally: tree navigation
+  removed AuthGate, leaving an empty vault after sign-out. The affected routes
+  now preserve or restore the auth-aware root. Local build 30 compiled and
+  passed signature/source/artwork/billing verification. Full suite: 219 passed
+  / 50 existing configured skips; configured billing: 79 passed. After the owner
+  reconnected the phone, in-place installation succeeded and an independent
+  device query confirmed 1.0.0 (30). Remote launch failed after another transport
+  disconnect; the owner was asked to open Heiro manually and check sign-out/sign-in.
+  Device acceptance is pending. No real account/family data, backend or Apple
+  draft was changed. The last verified Apple candidate remains 28. See
+  `docs/sign-out-navigation-fix-2026-10-26.md`.
+- The owner accepted build 28's startup, photo placeholders and automatic offline
+  behavior. At their request, a branding-only local build 29 was then installed
+  in place on the connected iPhone and launched; an independent device query
+  confirms 1.0.0 (29), builtByDeveloper=true. Startup now uses the unchanged
+  in-app background tree. Sign-in/create-account use an app-icon-derived tree
+  with HEIRO across its roots. Launcher icons and other images are unchanged.
+  Tests: 219 pass / 50 existing configured skips; focused analyzer clean.
+  No TestFlight upload, backend deployment, submission or release occurred.
+  Apple's draft was not changed and remains at the last verified build 28;
+  local branding is NOT in that draft. See
+  `docs/heiro-branding-preview-2026-10-26.md`.
+- Build 27 phone functionality was confirmed (opening, photos, voice, tree),
+  but its jittery loading presentation was not accepted. A local follow-up now
+  keeps the existing logo visible through initial account/family loading,
+  automatically opens saved offline copies after a failed connection attempt
+  for signed-in users, and uses quiet, stable photo/feed placeholders. It also
+  preserves feed contents during refresh and distinguishes access denial from
+  connectivity failure. Tests: 211 pass / 50 existing configured skips, plus
+  79 configured billing checks; phone/tablet/large-text render checks pass.
+  After owner approval, build 28 uploaded successfully at 12:14 SAST. Apple
+  confirmed Validated, Non-Exempt Encryption No and Internal Beta (one tester).
+  At 12:37 SAST, build 28 was saved and verified after reload with manual release
+  selected, then restored to the existing six-item draft with the four
+  subscriptions and Heiro Plans. Ready for Review, not submitted or released.
+  Signature, purchase configuration, source hashes, existing turquoise icons
+  and all three in-app images were verified. No backend change was made.
+  Build 28 phone acceptance subsequently passed by owner report. Evidence:
+  `build/ios/release-28-evidence/`; follow-up:
+  `docs/family-growth-and-loading-2026-10-26.md`.
+- Family growth backend is deployed after explicit owner approval. Uncapped total
+  real members; 8/100/250 legacy profiles; rolling 20 invites per sender and 50
+  per family per hour; existing cooldown/pending safeguards; full storage blocks
+  new invites/joins/legacy profiles without removing existing access. Monthly
+  invite caps are removed. One-family-per-account and billing remain
+  unchanged. Batched image signing, overlapping independent loads and paginated
+  directories address startup/photo delays and larger families. Full Flutter
+  suite: 208 passed plus 50 configured skips; configured billing suite: 79 passed;
+  DB regression: 44 passed; real PostgreSQL growth races: 8 passed. Hosted
+  disposable verification passed with full rollback; existing data and policies
+  are unchanged. Build 27 is uploaded, Validated, Non-Exempt Encryption No and
+  assigned to Internal Beta (one tester). It replaced 26 in the saved version,
+  verified after reload with manual release selected. At 10:53 SAST Apple
+  confirmed the existing six-item draft includes app 1.0 / 1.0.0 (27), all four
+  subscriptions and Heiro Plans. Ready for Review, not submitted or released;
+  the draft panel was closed. Functional phone checks subsequently passed;
+  loading presentation needs the local follow-up and a new phone check above.
+  See `docs/family-growth-and-loading-2026-10-26.md`.
+- Scoped security audit found and fixed client-writable AI indexes and replayable
+  notifications, separately approved by the owner. Index writes are service-only;
+  push claims are deduplicated and capped 20/sender and 50/family/hour. Edge v9
+  is deployed. No real push, AI call or paid service was used. This is not a full
+  penetration test or an unhackable guarantee. Residual warnings and exact checks
+  are recorded in `docs/security-check-2026-10-26.md`. Screening stays disabled.
+
+## Previous checkpoint - 25 October 2026
+
+- Family-name editing: the owner explicitly approved allowing all current
+  family members to rename. The app now exposes the action from the vault
+  family-details sheet and tree menu, while successor controls remain
+  owner-only. Migration `20261025183407_allow_family_members_to_rename`
+  changes only the authorization check inside `rename_family`; membership,
+  ownership, billing, Storage and the launch admission guard are unchanged.
+  Full Flutter suite: 201 passed, 50 existing configured skips. Database
+  regression suite: 14 passed (rename, membership access and successor).
+  Focused analyzer: no errors; 45 existing warnings/info in the screen files.
+  `git diff --check` passed. The owner then approved deployment, rollback-only
+  verification, build 26 and replacing build 25 in the existing draft, without
+  submission or release. The exact migration is now deployed; authenticated
+  owner/member rename, invalid-name, outsider, cross-family, missing-identity
+  and former-member checks passed in a rolled-back transaction. Existing family
+  and membership counts/fingerprints, policies, other functions and security
+  advisor counts are unchanged. Build 26 is uploaded, Validated, Non-Exempt
+  Encryption No, and assigned to Internal Beta with one tester. The owner
+  confirmed "Renaming works" on the requested build-26 iPhone check. Build 25
+  does NOT contain this fix. No real family was renamed or promoted by the
+  agent; the owner performed the phone rename check. Icons and in-app images
+  match build 25. Build 26 is saved on app version 1.0 and verified after
+  reload, with manual release selected. The app was temporarily unstaged to
+  replace its build. After a temporary Safari lock interruption, the app was
+  restored to that same draft. At 21:24 SAST Apple confirmed six items: app
+  1.0/build 26, all four subscriptions and Heiro Plans. The app is Ready for
+  Review, not submitted or released. The draft panel was closed without
+  clicking Submit for Review. Store-copy/screenshot approval and other launch
+  gates remain separate. See `docs/family-name-edit-2026-10-25.md`.
+- Build 1.0.0 (25) delivers the owner's middle turquoise home-screen icon.
+  All 15 iOS icon PNGs pass size/opacity/catalog checks; bundled in-app and
+  launch-screen images are unchanged. Compared with build 24's source manifest,
+  only those 15 icon files changed. Signing/configuration checks and 21 focused
+  tests passed. Apple confirms processing complete, Validated, Non-Exempt
+  Encryption No, and assignment to Internal Beta (one tester).
+  Build 25 replaced build 23 in the saved App Store version; fresh page readback
+  confirms the selection and manual release, and Apple displays the new icon.
+  At that earlier checkpoint the draft contained six items: app 1.0 / 1.0.0 (25), four
+  subscriptions and Heiro Plans. Ready for Review is not submission or approval.
+  No Submit for Review or release action was taken. The owner confirmed build
+  25's correct home-screen icon and unchanged in-app images on their phone.
+  This is visual acceptance, not a new full functional or iPad test. See
+  `docs/heiro-home-icon-2026-10-25.md`.
+- The owner authorized deployment of the single-family launch guard and a new
+  TestFlight build, with no App Store review submission. Migration
+  `20261025095147_single_family_launch_guard` is deployed and verified on the
+  linked backend. Existing membership/family/vault counts and fingerprints are
+  unchanged; security-advisor findings are unchanged. The app removes additional
+  create/join actions while retaining first-family setup and existing access.
+  Full Flutter suite: 201 passed, 50 configured skips. Build 1.0.0 (24) passed
+  artifact/signature/configuration checks and was uploaded successfully at
+  12:05 SAST. A subsequent read-only Apple check confirms processing complete,
+  Binary State Validated, Non-Exempt Encryption No, and assignment to Internal
+  Beta with one tester. The owner answered "yes" to the build-24 iPhone check
+  covering opening their family, tree and an existing photo/voice memory. This
+  is a bounded owner-confirmed smoke pass, not full acceptance or an iPad test.
+  At that earlier checkpoint the review draft still used build 23; the later
+  icon/build-25 checkpoint above supersedes that selection. See
+  `docs/single-family-launch-2026-10-25.md` for scope and evidence.
+- Submission forms resumed. Fresh Apple inspection confirmed saved build 23,
+  reviewer details, manual release and one draft submission. The privacy-policy
+  URL is saved and the 14-category App Privacy label was completed and published
+  with the owner's specific approval. Apple displayed its publication confirmation.
+  Age rating is saved and verified: generally 13+, Australia 16+ (other regional
+  and older-OS variants documented in the package). Owner rights attestation is
+  received; Content Rights is saved and verified after reload. All four missing
+  declarations from the 24 October validation are now completed. Private review
+  notes explain the test tone and persisted after reload (2,393 characters left).
+  In the next authorized continuation, selected build 23's Apple metadata
+  showed Validated / App Uses Non-Exempt Encryption No. All four saved price
+  schedules were checked for the five launch countries, without edits. The app
+  passed Add for Review into the existing draft; Apple now shows six items
+  ready to submit and app status Ready for Review. Manual release remains set.
+  Submit for Review was not clicked. This clears form validation, not app review
+  or the remaining owner/device checks. The owner subsequently confirmed the
+  demo-password reset, saving its replacement directly in Apple, and a fresh
+  phone sign-in showing Morgan Family. No credential was collected or read.
+  The installed build was not reconfirmed for that login; it does not establish
+  acceptance of the separately uploaded build 24.
+  The owner also approved replacing only the isolated demo's macOS synthetic
+  speech with an original eight-second test tone. One attachment row/new object
+  is verified; the old object is removed. No real family content, code, policies,
+  schema, authentication or billing changed. The app is not submitted or released.
+  Exact inventory and evidence are in
+  `docs/heiro-submission-package-2026-10-24.md`. The earlier demo credential
+  replacement was owner-confirmed. During the later build/store read-only
+  check, an automated accessibility response unexpectedly included the private
+  reviewer-password field. The owner was informed; no value is reproduced in
+  these files. Replace that demo password once more after metadata work and
+  update Apple's field before actual submission. Later page output is filtered
+  to exclude credential fields. Other final owner/device checks remain pending.
+- Store review on 25 October: saved description and promotional text match this
+  package; both public screenshot slots still contain the legacy and personal
+  photo/voice captures. Proposed, not applied: a more direct description opening
+  and photo/voice first, legacy second. The tree capture remains held for framing.
+  Owner copy/image approval and comparison with build 24 remain pending; the
+  basic phone smoke reply does not approve the listing. No Apple metadata,
+  screenshot order, build selection or submission state changed in this review.
+- Current live family allowances and localized price snapshots are recorded in
+  the submission package. Free / Family / Legacy storage is 500 MB / 10 GB /
+  50 GB, AI replies 20 / 500 / 1,500 per month, and transcription 10 / 120 / 400
+  minutes per month. These are pooled family allowances. The live definition,
+  not the older three-tier migration's transcription values, is authoritative
+  for this reminder. No billing/backend/code changes were made in this check.
+
+## Previous checkpoint - 24 October 2026
+
+### Submission package preparation; not submitted
+
+- Resume checkpoint at 23:07 SAST, based on owner-provided Safari evidence:
+  all four subscriptions plus Heiro Plans are staged in one iOS draft (five
+  items, Ready for Review). Build 23 / 1.0.0 is attached and saved to app
+  version 1.0. Adding the app is blocked by Content Rights, age-rating answers,
+  Privacy Policy URL and App Privacy data-practices answers. The app remains
+  Prepare for Submission; nothing has been submitted or released. Owner wants
+  the remaining forms filled and is considering a pause to conserve usage.
+  Saved drafts persist; no automatic resume is scheduled. See the submission
+  package's resume checkpoint for the exact next steps and evidence limits.
+  The reviewer password field appeared in a user-shared screenshot: do not
+  retain/repeat it; replacement and Apple-field update are pending before
+  actual submission. No Apple forms or backend settings changed in this
+  checkpoint-only turn. This supersedes unstaged-build statements below.
+- Private subscription review images: the owner's two clearest genuine phone
+  screenshots are uploaded to all four products (Family image for both Family
+  durations, Legacy image for both Legacy durations). Verified persistence after
+  reload and all four rendered thumbnails; evidence is saved as
+  `docs/submission-evidence-2026-10-24/*-review-image.jpg`. Originals are unchanged
+  1170 x 2532 PNGs with matching SHA-256 hashes in the asset manifest. They were
+  not used as public marketing artwork. The owner reports TestFlight build 23
+  and USD diagnostics, then confirmed Storefront USA. USD is expected for that
+  storefront despite physical presence in South Africa; no payment-logic fix is
+  indicated. This is not a new ZAF/ZAR test. Product count/Result were not supplied,
+  and no failure was reported. The bounded dollar-price concern is explained.
+  No prices, payments, product IDs, backend code or submission state changed.
+- Review/release checkpoint: the owner asked whether Apple would explain a
+  rejection and whether Supabase could be upgraded after launch. Verified
+  Apple's feedback/resubmission and manual-release guidance. No authority to
+  submit, release or buy hosting was inferred. Live Supabase is ACTIVE_HEALTHY
+  on Free; Storage metadata totals 19 objects / 13,548,282 bytes. Free's 1 GB
+  storage is not per family. Recommend deciding on Pro (currently from USD
+  25/month) before public paid release, with database AND media recovery checked;
+  this is operational judgment, not a required Apple vendor tier. Do not add
+  larger compute speculatively or treat Apple approval as comprehensive QA.
+  See the submission package for sources and the exact evidence limits.
+- Uploaded the two non-tree screenshot drafts per device into Apple: iPhone
+  Dynamic Island large display and iPad 13-inch. The iPhone pair persisted after
+  reload and supplies the medium-display fallback. The iPad pair also persisted
+  after full reload, showing 2 of 10. Screenshot evidence is saved in
+  `docs/submission-evidence-2026-10-24/iphone-images-uploaded.jpg` and
+  `docs/submission-evidence-2026-10-24/ipad-images-uploaded.jpg`.
+  Tree images remain held locally. The requested TestFlight paywall screenshots
+  have now filled all four private review slots, as recorded above.
+  Store copy, image selection, declarations and final acceptance remain pending.
+- Reviewer-access checkpoint: the owner approved the unused
+  `linebreakers+apple-review@outlook.com` address. Created that separate ordinary
+  account and only its fictional Morgan Family/sample media. The existing bare
+  Linebreakers account was not changed. Login works through the API and both
+  iPhone/iPad simulator UIs. Member-token checks confirm only its own vault and
+  family; photo and WAV downloads match local sample bytes. No schema, policy,
+  billing or paid-entitlement changes. The unique password and concise notes
+  are saved in Apple's private reviewer fields and verified after reload;
+  no password is in repository documents. A later user screenshot exposed the
+  field; see the replacement task above. Draft/manual-release remain.
+- Six genuine screenshot candidates were captured from a clean export of
+  TestFlight 23 source `d66dcf4`, built for iOS 26.5 simulators, not from the dirty
+  screening worktree. iPhone JPEGs are 1320 x 2868; iPad JPEGs 2064 x 2752; all
+  have no alpha. The four non-tree JPEGs are now uploaded as drafts, as above.
+  The tree selector overlaps
+  part of its top row at initial framing: hold those captures for review. Other
+  candidates need owner selection and final-build confirmation. See
+  [asset provenance and remaining checks](app-store-assets-2026-10-24/README.md).
+  This does not establish audible playback, multi-member/invitation/blocking,
+  purchases or deletion for this new fixture, or final TestFlight acceptance.
+- Owner authorized the Apple draft rename to **Heiro**, non-EU launch and manual
+  release, with store-copy review and final checks before any submission.
+- Name, draft subtitle and Lifestyle category saved in Apple. Manual release
+  saved. Owner then approved a free download, iPhone/iPad only and exactly South
+  Africa, United Kingdom, United States, Canada and Australia. Those territories
+  are saved as Available on App Release; future automatic territories, Mac and
+  Vision Pro are disabled. Optional subscription prices/logic are unchanged.
+- Current package and owner-review copy:
+  [Heiro submission package](heiro-submission-package-2026-10-24.md).
+  Description, promotion, keywords, support/marketing URLs and copyright are
+  saved and verified after reload. Private reviewer name/email and the
+  owner-supplied phone are also saved and verified; the phone is intentionally
+  excluded from repository documents and public copy.
+  Version 1.0 remains Prepare for Submission. Build 23 was subsequently selected
+  by the owner, as recorded above. No submission, release, deployment or legal
+  acceptance occurred in this preparation pass.
+- Subscription group reference/localized name **Heiro Plans**, all four Heiro
+  product reference/display names, localized purchase descriptions and reviewer
+  notes are saved and read back. Ireland alone was removed from each product;
+  all four show exactly the five approved launch countries, with future
+  automatic territories off. Product IDs, durations, price fields and backend
+  billing logic were not changed. Annual products remain 1 Year Upfront; Apple
+  Family Sharing was left off. A full price-schedule audit is still pending.
+- The approved service-level correction is **saved and verified after reload**.
+  The owner grouped the pairs; editor readback confirmed both Legacy products
+  at level 1 and both Family products at level 2 before Save. A full reload then
+  confirmed the persisted 1/1/2/2 grouping. Evidence is
+  `docs/submission-evidence-2026-10-24/subscription-levels-saved.jpg`; earlier
+  pending-editor screenshots are historical. No prices, IDs, durations or
+  backend payment logic changed. This proves configuration, not StoreKit
+  switching behavior on the final candidate. All four subscription review
+  screenshot fields are now filled and verified. The owner subsequently staged
+  the four products and group using Add for Review, as recorded above.
+- Re-centering: the large local screening backlog below is historical engineering
+  work, not proof of live filtering and not automatically the minimum launch
+  scope. Blanket manual review of every upload is not an explicit Apple mandate.
+  The remaining filtering approach is an unresolved review risk to decide and
+  verify, separately from completing store metadata. Keep all staged switches off.
+- The 24 October live read-only audit found agreements/banking/tax Active; the
+  older updated-agreement blocker below is superseded. App privacy/declarations,
+  final copy/image approval, reviewer-device rehearsal, price-schedule checks
+  and final candidate acceptance remain incomplete. Do not reopen passed payment/storage
+  behavior or mark every historical checkbox as a current defect.
+
+### Automatic-review alerts and post-approval notifications connected locally; not deployed
+
+- Continued after the owner's "proceed". Added staged migration
+  `20261024170015_screening_delivery_outboxes.sql` and a default-off
+  `send_screening_delivery` worker. A newly held current generation queues one
+  generic operator email; first approval/automatic clearance of a new enrolled
+  personal or legacy memory queues generic family pushes for eligible registered
+  devices. Existing user-report alerts, sign-up email settings and family-joined
+  notification handling are unchanged. No content, names or attachments enter
+  these new email/push payloads.
+- Dispatch uses a short-lived one-use token and service-only claim/authorization/
+  completion RPCs. Immediately before sending it rechecks the generation, sharing
+  intent, family, membership, deletion, restrictions, blocks, hidden-feed choice
+  and device-token ownership. The old memory notification handler now routes
+  enrolled sources to this outbox, preventing an old client from sending again
+  after approval. Its new routing RPC must be deployed before that handler.
+- Email retries keep a stable per-case idempotency key and stop before 23 hours.
+  Push timeouts, malformed successes and crashed in-flight sends become uncertain,
+  not blindly resent. Known failures have bounded backoff. Limits are three send
+  attempts, eight leases, 1,000 active deliveries and 100 devices per initial
+  notice. Provisional new global caps are 20 email attempts and 200 push attempts
+  per UTC day, separate from existing user-report/sign-up limits. Omissions and
+  failed/stalled/uncertain deliveries are visible in the private console.
+- Scope is first-publication notification, not repeated edit/Restore announcements.
+  A source edited before its initial notice is sent makes that notice stale; this
+  candidate skips it rather than silently retargeting it or producing edit spam.
+  New devices/family members are not backfilled. Offline pushes expire immediately.
+  Provider acceptance is not proof of mailbox/device delivery. A change after the
+  final database check cannot be atomically coupled to an external provider; the
+  generic payload and normal app read permissions remain important safeguards.
+- **Verification:** combined local database/image/worker suite **508 passed**,
+  zero failures/skips; reviewer/server/browser suite **30 passed**, zero failures/
+  skips. Eight new real-PostgreSQL delivery races cover issue, claim, authorization,
+  completion, edit/Hide, shared daily-budget contention and invalid-token rejection
+  without taking the shared media lock. An actual staged-SQL
+  harness follows flag -> local pg_net stand-in -> fake email -> exact-version
+  approval -> fake push. Tests also cover Restore/media retirement, duplicate
+  prevention, revocation during OAuth preparation, privacy, bounded transport,
+  actual local RSA signing, and unchanged existing functions/ACLs/RLS policies.
+  Desktop/mobile delivery-health screenshots were inspected without overflow.
+  Node syntax checks passed for both Edge entry points. Deno runtime/typechecking
+  and hosted provider/gateway/scheduler verification are still outstanding.
+- **Unchanged live:** no migrations/functions/secrets/schedules deployed, no real
+  AI/email/push calls, no family data accessed, no payment or phone build changes.
+  Every app, processing, publication and delivery switch remains off. The normal
+  Finder launcher is unchanged. Flutter was not rerun because no app source was
+  changed in this checkpoint. No phone action is needed yet.
+- **Next:** finish pending collaborative edits, archive edits and the declined-
+  permission/voice/video alternatives; operational pagination, retention, recovery
+  and activation/capacity checks. Then obtain approval for a controlled hosted
+  end-to-end deployment/canary, verify real alerts and pushes using disposable
+  fixtures, and complete the new TestFlight and Apple submission checks. This
+  checkpoint is not evidence of fully hosted screening or launch readiness.
+
+### Automatic held-item review connected locally; not deployed
+
+- Continued after the owner's "okay proceed". Added staged migration
+  `20261024162740_content_screening_human_review.sql` and an **Automatic checks**
+  section in the existing private Mac review console. This is distinct from the
+  already-tested user-report/email/Hide/Restore workflow, which is preserved.
+- A current flagged result or exhausted retry creates one private case for that
+  exact source generation. Refreshing or withdrawing/reaccepting provider consent
+  cannot reroll that held generation. Human approval never grants AI permission.
+  No existing archive is scanned, copied into an evidence archive or backfilled.
+- Reviewers can mark under review, keep private, reopen by reference/filter, or
+  approve the exact reviewed text/photo version. Text and every direct image must
+  have a recent recorded preview by that reviewer. The server acknowledges an
+  image only after successful bounded retrieval and a second source check; the
+  browser additionally waits for image display before enabling approval. This
+  records access, not proof that a human actually inspected the image carefully.
+- Edits, replaced media, scope changes and deletion invalidate the old case.
+  Account deletion in progress, lost membership, existing report restrictions
+  and restricted sexual-content cases prevent approval. Human approval never
+  removes a report restriction, moves/deletes media or changes subscriptions.
+  Closing an unavailable case cannot publish it. Historical cases hold references
+  and decision logs, not copies of memory text or image bytes.
+- The console capability defaults off and requires an explicit operator flag;
+  `Heiro Safety Review.command` is unchanged. The app/server screening and
+  publication switches remain off. No deployment, AI call, live account/media
+  access, Apple setting or phone build changed. No phone action is needed yet.
+- **Verification:** final combined local database/image/worker suite passed
+  **453 tests**, zero failures/skips, including six real-PostgreSQL approval races
+  and unchanged existing policy/function/privilege checks. Reviewer/server/browser
+  regression passed **29 tests**, zero failures/skips. The browser uses the real
+  staged SQL against a disposable local database with mocked Storage bytes; hold,
+  reopen, preview, approve, family readback and logout passed at 1280x900 and
+  390x844. Screenshots were inspected with no overlap/overflow. The split-worker
+  harness now connects a mocked classifier flag through the case and exact-version
+  approval. No hosted classifier/Storage/notification or real phone proof is claimed.
+  Flutter was not rerun in this checkpoint; app source was not changed this turn.
+  `git diff --check` is clean.
+- **Still missing:** automatic-case email alerts and durable post-clear family
+  notification dispatch/deduplication; collaborative pending edits, archive-edit
+  and declined-permission/voice/video alternatives; complete hosted split/Storage
+  proof, retention/recovery/queue pagination and final device/Apple checks.
+  The normal report-alert emails remain separate and already working. Do not
+  describe this checkpoint as fully hosted screening or enable it for testers.
+
+### Local app sharing status, consent and notification guard; not deployed
+
+- Continued after the owner's "proceed". Added staged migration
+  `20261024120503_content_screening_client_status.sql`: a caller/account-bound
+  status RPC and a service-only notification audience RPC. Status reveals no
+  content, paths, provider responses or other contributors' identities. Refresh
+  cannot enqueue work, grant permission, reset a held result or publish content.
+- The default-off app candidate now connects completed personal/legacy saves and
+  edits to separate permission, sharing status and an explicit retry. It separates
+  saved from shared, supports decline/close, account changes, timeout recovery,
+  held/paused/unsupported states and retries the same target without re-uploading.
+  Normal upload and payment behavior is unchanged with the switch off.
+- The local notification handler now requires the server-checked owner, family,
+  current publication generation and eligible recipients before token lookup or
+  Firebase dispatch. Pending, hidden and restricted content cannot use the old
+  owner-readable shortcut. The app suppresses immediate notifications when its
+  screening switch is enabled. Durable post-approval dispatch/deduplication is
+  still missing; this guard is not a completed notification delivery workflow.
+- Verification: **413 local database/image/worker tests passed**, zero failures
+  or skips; **198 default Flutter tests passed**, with 50 existing purchase-config
+  skips; the separately configured fake-StoreKit billing suite passed **79**
+  with no skips. Focused consent/sharing tests passed **59**. New/changed focused analyzer
+  scope is clean; `vault_home_screen.dart` retains 69 existing warnings/info.
+  Rendered and inspected 320x568, 390x844 and 1024x768 at 200% text size with real
+  fonts/icons: no overflow or overlap. The first modal run exposed a background
+  spinner; it was fixed rather than weakening the timeout assertions.
+  These are local SQL, widget/service, source-wiring and mock-worker checks, not
+  full composer/device or hosted Firebase notification proof. Edge handler syntax
+  passed Node's check; a Deno runtime/typecheck is still needed before deployment.
+- **Unchanged:** all screening switches remain off. No live migrations/functions,
+  AI requests, family content, payments, Apple settings or phone build changed.
+  No phone action is needed. This work does not authorize deployment/submission.
+- **Next:** scoped held-item review and durable post-approval notifications;
+  collaborative pending edits, archive edits and voice/video alternatives;
+  approved hosted split/Storage integration and operational retention/recovery
+  checks. Then final TestFlight acceptance and the Apple submission gates below.
+
+### Local exact-generation publication ceiling; still disabled and not deployed
+
+- Continued after the owner's "proceed". Added staged migration
+  `20261024114120_content_screening_publication.sql`, with an independent
+  default-false `enforce_publication` switch that requires capture configuration.
+  It adds restrictive read ceilings for enrolled personal/legacy memories,
+  their direct attachments/chunks, the existing shared-vault media reader and
+  new Storage reads. Existing owner/family/block/hide rules remain in force.
+  Identified authors retain pending-source access so INSERT RETURNING, editing
+  and inspection work; this is not a new permission grant to relatives.
+- A successful, currently authorized worker completion approves only the current
+  source generation. Edits, media-reference/byte changes and parent scope changes
+  rotate that generation. Editing and reverting cannot resurrect old approval.
+  Provider errors, flags, unsupported voice, missing permission and exhausted
+  budgets never release pending content. The worker pause switch does not release
+  pending content or unpublish already-approved unchanged content.
+- Publication is distinct from provider permission: later consent withdrawal
+  stops new processing, not already-approved family access. Local tests preserve
+  approved Grandma text and same-byte retained images through contributor-account
+  deletion, and preserve approval through exact report Hide/retirement/Restore.
+  The maintenance exception requires an existing server-only manifest; arbitrary
+  service writes still invalidate. Legacy deletion with unverified/different
+  object fingerprints fails closed and needs operator recovery, not lost bytes.
+- Private address markers protect orphaned/new uploads from folder-read fallback.
+  Clients cannot overwrite enrolled media or delete/recreate its old address
+  when enforcement is on; the composer already uses unique names/upsert:false.
+  This is local SQL/preflight evidence, not proof of hosted Storage byte ordering
+  or CDN behaviour. Existing archive objects are not scanned or backfilled.
+  New media attached to an excluded archive stays uploader-only; edited-archive
+  publication/decline/retry behaviour must be completed before activation.
+- Integrated the 14-scenario local split-worker harness with the publication
+  gate, asserting relative-visible rows before and after the mocked classifier.
+  Added 37 generation, RLS, retention, immutable-address and concurrency test
+  entries, including five real PostgreSQL race scenarios. Full combined local
+  database/image/worker regression: **388 passed, zero failures/skips**.
+  `git diff --check` is clean. Flutter/device tests were not rerun: no app code
+  or build changed in this checkpoint.
+  Existing policy definitions, quota/deletion routines and object metadata were
+  checked unchanged apart from the explicitly added restrictive policies and
+  three replaced screening/visibility helpers. No new permissive policy.
+- **Unchanged:** no live migration, function, account, file, payment, Apple
+  setting or phone build was changed; no family data or AI endpoint was accessed.
+  Screening, the Flutter disclosure switch and publication enforcement stay off.
+- **Next:** app-side consent/sharing/status/retry integration, server notification
+  release checks (an owner can still read their pending memory), scoped held-item
+  review, collaborative legacy edits and edited-archive/unsupported-media paths.
+  Then complete approved hosted split/Storage-flow verification and operational
+  retention/cost/recovery checks before seeking deployment approval. Address
+  tombstones retain metadata after byte deletion; bounded retention and cleanup
+  remain launch gates. No phone action is needed for this local checkpoint.
+
+### Trusted new-sharing requests implemented locally; no deployment
+
+- Continued after the owner's "proceed". Added the staged migration
+  `20261024111907_content_screening_share_requests.sql`. It records only actual
+  new personal/legacy memory INSERTs after the server's capture cutoff, with
+  private origins linked to the real source row and scope. There is no backfill.
+  Editing an archive's client-writable date/feed flag cannot enroll it. Pausing
+  processing after capture begins still records new inserts, so they cannot
+  become exempt archives when processing resumes. Initial defaults stay off.
+- Added caller-only `request_content_screening(text,uuid,uuid)`: authenticated
+  identity and expected account must agree; the caller must be the current
+  personal owner or a current legacy contributor/editor in the family, with no
+  deletion underway. Unavailable/archived/foreign targets return one generic
+  code. This request never grants consent, publishes content or returns media.
+  Only a valid explicit request unlocks the existing queue eligibility check.
+- Replaced the staged snapshot in place (same function identity), retaining all
+  source, permission, attribution, restriction, file and budget checks. Source
+  generation is part of the revision. Repeat requests cannot reset a review;
+  deleting a target removes its origin, job and photo tickets, not other memories
+  or files. Reusing its ID cannot accept an old result. Shared legacy text still
+  survives author deletion, without granting new provider permission.
+- Connected the 14-scenario local split-worker test to the authenticated sharing
+  request, including four-image WASM preparation and one mock classifier call.
+  Added 33 eligibility/concurrency tests, including seven real-PostgreSQL races.
+  The initial restricted run aborted in Node while starting the loopback test;
+  the permitted local rerun passed without weakening assertions. The access
+  audit now expects three staged client RPCs (two permission, one request); those
+  missing from live are expected until approved deployment, not reasons to grant
+  access or claim deployed readiness.
+- **Verification:** final combined local database/image/worker regression run
+  passed **351 tests, zero failures/skips**, including the 33 new sharing cases
+  and seven real-PostgreSQL races. `git diff --check` is clean.
+- **Unchanged:** no live migration/function, policy, Storage file, account,
+  payment, Apple setting or phone build was changed. No family content was read
+  and no AI/provider call was made. Screening and its app switch remain disabled.
+  No need for a phone test at this checkpoint.
+- **Next:** integrate the new request with publication/read enforcement and
+  held-item review, including old-client/edited-archive handling and a usable
+  decline/unsupported-media path. Complete hosted split-flow verification using
+  approved disposable fixtures before activation. Voice/video safeguards,
+  operational limits/retention, privacy/security, final TestFlight and Apple
+  submission gates remain. This is a tested local entry boundary, not a working
+  end-to-end deployed filter or authorization to submit.
+
+### Build tools installed; bundled decoder passes local and hosted diagnostics
+
+- Owner approved local build tools. Installed Colima 0.10.3, Docker CLI 29.9.2
+  and Lima 2.2.1 using Homebrew, without upgrading unrelated packages or enabling
+  a login service. Dedicated `heiro-build` profile: 2 CPUs, 2 GiB RAM, 20 GiB
+  data disk plus 20 GiB root disk (sparse, not fully allocated). Only the
+  disposable build directory was mounted; no home/repository credentials were
+  shared into the VM. Default Docker context stayed unchanged. VM is now stopped.
+- Actual bundling exposed two local issues before any deployment: importing the
+  whole npm package included unused binaries (47,760,710-byte bundle), and the
+  runtime's static-file system does not support `Deno.stat` for that asset.
+  Preparation now copies the locked module byte-for-byte, retains license and
+  notices, includes one WASM asset, and uses supported `Deno.readFile` with exact
+  byte-count/SHA-256 checks. No decoder download/fallback occurs at worker start.
+- Local offline bundling produces a **16,086,872-byte** bundle (4,967,409 bytes
+  using local Brotli quality 6, not a measured cloud bill). Generated 2048x1536,
+  4032x3024 and 6000x4000 JPEGs pass in isolated 256 MiB / 2-second workers.
+  The harness uses one-shot retirement: an earlier harness accumulated workers
+  and lost its largest-fixture connection; its OOM state was not recorded, so
+  the exact cause remains unproven. No resource cap was increased to get a pass.
+- Repeated the previously approved generated-only hosted diagnostic from 10:51:23
+  to 10:51:50 UTC. Bundled static assets load successfully; all three fixtures
+  returned HTTP 200 with matching local/hosted output sizes. Processing wall
+  times: **373 / 703 / 438 ms**. Final observed isolate: 1,383 ms lifecycle CPU,
+  56,974,150 bytes at shutdown, reason `EarlyDrop`. Shutdown usage is not peak
+  memory, and processing wall time is not CPU time or total upload latency.
+- Anonymous/app-key probes returned 401; authorized wrong method/empty body
+  returned 405/413. Temporary function removed; runner and independent readback
+  both confirm all ten existing function fingerprints unchanged. No family data,
+  Storage, database records or AI endpoint was accessed by the diagnostic.
+  No app function, migration, payment, policy, phone build or screening activation
+  changed. Sanitized evidence: `results-bundled-2026-10-24.json` beside the canary.
+- **Verification:** complete local database/image/worker regression rerun passed
+  **318 tests, zero failures/skips**. Local containers removed and VM stopped.
+  Build tools/cache remain installed for reuse; no paid hosting was added.
+- **Next:** verify the complete split flow with database tickets, current consent,
+  child/parent checks and mock dispatch on the host using approved disposable
+  fixtures; then trusted new-sharing eligibility, publication/read enforcement
+  and held-item review. Voice/video safeguards, operational cost/cleanup limits,
+  privacy/security checks, final TestFlight acceptance and Apple gates remain.
+  This closes the generated-image packaging test, not screening or public launch.
+
+### Bundled decoder candidate tested locally; build-tool approval pending
+
+- Continued packaging preparation only. Added a fixed-local-asset loader and
+  `--bundled-wasm` mode for the isolated generated-image diagnostic. The exact
+  15,425,791-byte pinned decoder is included in `static_files`, checked by size
+  and SHA-256 before initialization, and initialized once per isolate. A failed
+  load stays failed; there is no network fallback or per-start CDN fetch in this
+  candidate. Existing hosted results used the older CDN loader, not this mode.
+- The runner verifies the local asset and a running Docker-compatible engine
+  before obtaining project keys. Static-file mode uses local CLI bundling, not
+  `--use-api`; missing packaging metadata, altered bytes or an absent engine
+  stops it. Existing generated-fixture restrictions, gateway JWT checks,
+  secret handling, cleanup and existing-function fingerprints are retained.
+- **Verification:** complete local database, image, worker and mocked-provider
+  suite passed **318 tests, zero failures/skips**, including real-PostgreSQL
+  concurrency and working storage/deletion/reporting regressions. Six new
+  loader/preparation tests include actual pinned-WASM processing without a
+  network loader and exact static-asset copying. Twelve fake-runner scenarios
+  include bundled success, altered assets, missing engine and missing packaging.
+  These do not prove deployed filesystem access, final bundle size or cold CPU.
+- **No live changes:** no deployment, migration, AI call, family-media access,
+  account/payment change, phone build or Apple setting change occurred. Screening
+  remains disabled. No new paid hosting or local runtime was installed.
+- **Pending owner answer:** requested approval to install free Colima and Docker
+  command-line build tools on this Mac, using local disk/RAM only. Do not install
+  until approved. Then verify the bundled candidate with the isolated generated
+  diagnostic, preserving its explicit approval and cleanup requirements. Bundling
+  avoids a loader CDN fetch but does not make hosting/compute/transfer free.
+- **Still required:** full hosted split-flow verification and scoped deployment
+  approval; trusted new-sharing eligibility, publication/read enforcement and
+  held-item review; voice/video safeguards, operations and final privacy/security
+  checks; TestFlight acceptance and Apple submission gates. Temporary diagnostic
+  approval is not permission to deploy or activate screening. No phone action
+  is needed for this checkpoint. Public paid launch remains NO-GO.
+
+### Single-photo preparation implemented and tested locally; no live changes
+
+- Continued the next local implementation after the owner's "proceed". Added
+  `20261024092200_content_screening_photo_tickets.sql`, a single-photo worker,
+  internal HTTP transport factories and aggregate-worker integration. These are
+  **not deployed**. No AI request, family-media read, phone build, Apple change,
+  production migration or screening activation occurred in this step.
+- Chose **no durable image staging**: each child request prepares exactly one
+  current, checked private object and returns a bounded JPEG directly to the
+  parent. The database stores only a single-use ticket, revision, source ID,
+  expiry, size and SHA-256, at most four rows per parent job. Old-lease tickets
+  are replaced; deleting the parent removes its tickets. No temporary bucket,
+  duplicate stored photo, Storage policy or new image-cleanup process is added.
+- Photo claims reserve the whole attempt before download and recheck current
+  source, consent and deletion state again after decoding. Every ticket must
+  finish before aggregate dispatch. The parent verifies each response against
+  the ordered database manifest, then reserves **one** classifier request for
+  all text/photos. Edits, withdrawal, deletion, stale leases, missing photos and
+  changed proofs cannot produce a current clear result. Ambiguous child calls
+  do not retry under the same ticket; a fresh bounded parent attempt pays again.
+- HTTP factories remain default-off and undeployed. They use a fixed internal
+  endpoint, a separate server-worker secret, bounded streamed bodies, deadlines,
+  no redirects/retries and one decode at a time per handler isolate. Deployment
+  must retain gateway authentication and server-only credentials. Actual gateway
+  configuration, full hosted CPU/memory behaviour and cold WASM packaging are
+  still unverified; local HTTP simulation is not hosted proof.
+- Expanded the existing **undeployed** outgoing-budget reservation to include
+  both the binary child response and classifier base64, without raising any cap.
+  Owned buffers are cleared after use, not a guarantee that every runtime copy
+  is erased. Cold binary transfer/compute and total cloud cost still require a
+  production decision; no "free infrastructure" or profitability claim is made.
+- **Verification:** complete local database, image, worker and mocked-provider
+  suite passed **308 tests, zero failures/skips**. Includes 16 ticket/database
+  tests, 13 photo/HTTP unit tests, 14 end-to-end scenarios and six additional
+  real-PostgreSQL races. Four native/WASM photo requests converge into one mock
+  classifier request; source/permission/deletion changes, altered manifests,
+  failed children and exhausted budgets fail closed. Existing policies, triggers,
+  media rows and unrelated function bodies remain unchanged in migration tests;
+  existing upload/deletion/retirement regressions pass. No Flutter change here.
+- **Next:** resolve production WASM packaging and verify the complete split flow
+  on the existing host using approved disposable fixtures before deployment or
+  activation. Then implement trusted new-sharing eligibility, publication/read
+  enforcement and held-item review; settle voice/video safeguards and operational
+  cleanup/health. Final privacy/security checks, TestFlight acceptance and Apple
+  submission gates remain. No phone action is needed for this local checkpoint.
+
+### Hosted image bottleneck identified; single-photo diagnostics pass; screening stays off
+
+- Continued the explicitly approved temporary generated-image experiment only.
+  No family media, Storage, database records or AI endpoint was accessed by the
+  diagnostic. No payment, app function, policy, migration, phone build, Apple
+  setting or screening-activation change was made.
+- Fixed diagnostic observability and authentication: fixed stage labels exposed
+  an unexpected service-key rejection before decoding. The temporary handler now
+  pins a SHA-256 fingerprint of the exact operator key in a separate header,
+  retaining gateway JWT verification. Anonymous/public-app keys are rejected;
+  authorized GET/empty-body controls return 405/413. No shared credential was
+  rotated, logged or written to disk; only its fingerprint is in the temporary
+  deployment configuration. The precise cause of the earlier key comparison
+  mismatch was not established; it was not an app-user permissions change.
+- **Hosted failure confirmed:** four generated 2048x1536 JPEGs with 2048-edge
+  screening copies reached serialization but were terminated with HTTP 546,
+  `CPUTime`, 2,064 ms lifecycle CPU. This replaces the earlier unknown-timeout
+  hypothesis with direct evidence for this run, not a claim about yesterday's
+  exact timeout cause.
+- Changed only the local WASM screening-copy candidate to a 1024-pixel edge.
+  JPEG shrink hints round up to the decoder's eighth-scale steps to preserve
+  target detail. Stored originals, uploaded quality and family storage allowances
+  are unchanged. Image tests cover dimensions, metadata, orientation and original
+  bytes. Moderation accuracy at this resolution is not yet tested.
+- **Batch result:** four 2048x1536 images passed; four 4032x3024 images still
+  failed with HTTP 546 / `CPUTime`, 2,113 ms CPU. Do not deploy the current
+  four-photo-in-one-invocation worker, increase spend caps to hide the failure or
+  treat desktop benchmarks as hosted proof.
+- **Single-photo result:** generated 2048x1536, 4032x3024 and 6000x4000 JPEGs all
+  passed with HTTP 200, one image per request. Measured processing wall times
+  were 741 / 594 / 1,099 ms; the last isolate reported 1,188 ms lifecycle CPU.
+  These are bounded fixture results, not adversarial worst-case or all-format
+  guarantees. No content was sent to a classifier. Cold WASM packaging, staging
+  and extra invocation/transfer costs still need a production design.
+- **Cleanup verified after every attempt:** temporary function removed; all
+  ten existing functions retain IDs, versions, statuses, JWT flags and bundle
+  hashes. Sanitized evidence is in
+  `supabase/verification/screening_runtime_canary/results-2026-10-24.json`.
+  The checked diagnostic runner is operator-only with explicit opt-in, fail-stop
+  probes and cleanup/readback; fake CLI tests exercise failures without deploying.
+- **Regression verification:** the complete local database, screening worker,
+  photo adapter and diagnostic suite passed **258 tests, zero failures/skips**,
+  including both real-PostgreSQL concurrency suites. The first sandboxed run
+  aborted inside Node when starting the localhost database tests; those passed
+  separately, and the complete rerun passed with local database/socket access.
+  No assertion was weakened. `git diff --check` is clean. This does not replace
+  final-device or real-provider validation; no Flutter code/build changed here.
+- **Follow-up:** the later local checkpoint above implements split single-photo
+  work without persistent staging, with source/consent/deletion binding and one
+  aggregate classifier request. Full hosted verification, production packaging
+  and unsupported-format recovery remain open. No new hosting is authorized or
+  provisioned.
+- **Then:** trusted sharing eligibility, publication/read enforcement and
+  held-item review; voice/video safeguards, final privacy/operations/security,
+  TestFlight acceptance and Apple submission settings. No phone action is needed
+  for this diagnostic step. Public paid launch remains NO-GO.
+
+## Previous checkpoint - 23 October 2026
+
+### Processing budgets tested; approved hosted diagnostic timed out and was removed
+
+- Continued locally without changing working payments, uploads, Storage policies,
+  family allowances, account deletion or the TestFlight build. Screening remains
+  disabled. No provider call or real family image was used.
+- Found and closed a local cost-control gap: previously request budget was only
+  reserved after photos were fetched/decoded. New migration
+  `20261023174955_content_screening_processing_budgets.sql` reserves downloads,
+  conservative outgoing payload bytes, jobs and photo decodes before returning
+  source data for processing. Global UTC-day/month limits and per-initiator UTC
+  hourly limits share atomic durable counters. Retries/edits do not refund them;
+  same-lease rechecks do not double charge. Missing/exhausted limits fail closed.
+- Provisional defaults: global 256 MiB/day and 2 GiB/month for source bytes,
+  separately the same limits for outgoing payload allowance; 1,000 jobs/day,
+  10,000/month; 1,000 photos/day, 5,000/month. Per initiator: 48 MiB/hour in each
+  byte category, 20 attempts and 40 photos. Outgoing reservation covers worst-case
+  base64/JSON for bounded outputs. These are workload caps, not a total cloud bill
+  or profitability guarantee. They do not lower existing storage allowances.
+- Implemented a local `magick-wasm 0.0.45` candidate, with JPEG shrink-on-load,
+  metadata stripping, orientation, bounded output, no disk spill, guarded pixel
+  allocations and cooperative deadlines. Container checks reject animation and
+  multi-picture JPEG rather than checking one frame. Unsupported/large raster
+  failures remain pending/review, not clear; a usable recovery path remains needed.
+  Both candidate and native reference pass the real-local-DB/mocked-provider flow,
+  including edits, permission withdrawal and deletion races.
+- Generated-noise benchmark in fresh Node child processes includes holding the
+  whole batch and JSON/base64 serialization: four 2048x1536 JPEGs, 562 ms CPU /
+  220 MiB peak process RSS; four 4032x3024 JPEGs, 725 ms / 212 MiB; one 6000x4000
+  JPEG, 482 ms / 207 MiB. This supersedes the earlier unshrunk JPEG experiment,
+  but is NOT hosted CPU/memory proof or a worst-case guarantee. Large PNG/WebP
+  may fail closed under the cache limit. No new hosting was added.
+- Pinned/locked both local image dependencies; npm advisory audit reports zero
+  known vulnerabilities at this check. Worker now requires the server's explicit
+  processing reservation before downloading, so an old backend cannot silently
+  omit cost controls.
+- **Local verification:** the combined database, worker, adapter and diagnostic
+  suite passed **247 tests, zero failures and zero skips**, including both opt-in
+  real-PostgreSQL concurrency suites. No Flutter build changed in this step.
+- Prepared a temporary diagnostic outside the app function directory. It requires
+  the service key, expires after 30 minutes, accepts only exact generated-fixture
+  hashes and returns numeric metrics. No database, Storage or AI calls in its
+  code. This Mac has no Docker; diagnostic API packaging uses a fixed public,
+  hash-verified WASM binary download, not a selected production loader.
+- **Owner approved the temporary generated-image test.** Between 18:19 and 18:26
+  UTC, deployed only `screening_runtime_canary`, with gateway JWT verification
+  retained and a second exact service-key check. The first attempt hit a client
+  transport error during a rejected upload. Empty-body rejection probes then
+  returned **401** for both no credential and the public app key. The authorized
+  2,188,411-byte generated JPEG request timed out after 90 seconds with Node fetch
+  and 75 seconds with curl. Neither produced decode metrics; the larger two
+  fixtures were not run. This is **failed/incomplete hosted validation**, not a
+  decoder-performance pass or proof that a particular CPU/memory limit was hit.
+  Available scoped logs showed boots and lifecycle shutdowns, not a successful
+  image result. The failing request/body/loader stage remains unidentified.
+- **Cleanup verified after every attempt:** the temporary function is absent;
+  all ten existing functions retain their IDs, versions, status, JWT settings
+  and bundle hashes. No screening migration, Storage policy, app function,
+  subscription, family data or AI call was involved. No secret was printed or
+  written to the diagnostic results. No new hosting was provisioned.
+- **Next:** isolate the hosted request/body/loader timeout before another batch
+  benchmark or production runtime decision; resolve production binary packaging
+  and hard runtime limits. Then server-owned new-sharing eligibility,
+  publication/read enforcement and held-item review. Voice/video, operations,
+  final device checks and Apple submission gates remain below. No phone test or
+  submission yet; screening remains disabled.
+
+### Queue-to-provider worker proven locally; runtime/publication gates still open
+
+- Owner requested continuation. Implemented the next local processing stage in
+  `scripts/content-screening/`: closed-RPC/fixed-project Storage transport, a
+  single-lease worker and a bounded Node photo-normalization reference. No
+  production migration, app hook, scheduler, hosting service or paid API was
+  enabled. The worker defaults off and additionally requires an explicitly
+  supplied decoder. It has no CLI or automatic credential discovery.
+- Extended the existing moderation adapter to accept up to four photos plus
+  text in **one** multimodal request and one aggregate result. It preserves the
+  previous single-photo API, rejects partial/invalid batches, bounds combined
+  image bytes at 10 MiB and serialized request bytes at 15 MiB, and never loops
+  four provider requests against one queue reservation. This closes the earlier
+  local queue/adapter batch mismatch, not publication enforcement.
+- Downloads require the current lease's exact private bucket/path, recorded
+  size/MIME and strong ETag. Conditional requests, actual-length/digest checks,
+  closed URL construction, redirect rejection, stream limits and deadlines fail
+  closed. ETag/MD5 is a Storage coherency check, not a signature; the queue's full
+  source/consent hash is rechecked before dispatch and completion. Production
+  Storage header compatibility still needs approved disposable-fixture proof.
+- The Node reference decodes JPEG/PNG/WebP, applies orientation, strips embedded
+  metadata, rejects animated/corrupt/unsupported images, and bounds dimensions
+  and pixels. Four-photo inputs are processed sequentially, with a 24 MiB total
+  source limit and 2 MiB per normalized JPEG. It does not change stored originals.
+  Temporary owned buffers are cleared, but this is not a guarantee of erasing
+  every runtime/OS copy. Sharp `0.35.5` is pinned/locked as a local dev dependency;
+  its npm advisory audit returned zero known vulnerabilities at this check.
+- **Runtime finding:** Supabase explicitly does not support native Sharp in
+  hosted Edge Functions. Kept it as a local reference, not a proposed deployable
+  function. An isolated `magick-wasm 0.0.45` experiment used generated images only:
+  a solid 1600x1200 JPEG took about 81 ms CPU and 4032x3024 about 548 ms CPU;
+  6000x4000 hit a configured 96 MiB pixel-cache limit with disk spill disabled.
+  These are Mac Node measurements including a separate image-generation setup,
+  NOT Supabase memory/CPU proof. The documented hosted limits are 256 MB and
+  2 seconds CPU per request. Validate a bounded WASM path in the target runtime
+  before selecting it; do not quietly add hosting or lower published allowances.
+- **Verification:** 40 focused tests passed, including five real local-database
+  scenarios from queue through checked bytes, normalization, mocked provider and
+  queue completion. Edits, withdrawal before dispatch, withdrawal during the
+  request and deletion reject stale results. The combined database/worker/mock
+  suite passed **192 tests**, with the same two opt-in concurrency parents
+  skipped; their earlier **11 passing** real-PostgreSQL results are unchanged.
+  No Flutter/SQL behavior changed in this step. No actual provider request or
+  real family image was used; classifier effectiveness is not proven by mocks.
+- **Next:** resolve and test the existing-host decoder/runtime path and global
+  media-transfer/compute budgets, then server-owned new-sharing eligibility,
+  publication/read enforcement and held-item review. Voice/video, privacy and
+  Apple gates remain below. Do not activate screening, ask for a phone screening
+  test or submit to Apple on this local worker evidence alone.
+
+### Bounded screening queue tested locally; not deployed or connected
+
+- Owner said "proceed". Added CLI-generated migration
+  `20261023164835_content_screening_queue.sql`, a private queue and service-only
+  enqueue/claim/prepare/finish RPCs. Controls start disabled with no eligibility
+  cutoff. No upload hook, scheduler, network request, read policy or publication
+  grant was added. The existing permission migration is still local only.
+- The queue binds the actual memory, scoped attachment metadata, family scope
+  and every identified legacy contributor/editor's current permission revision.
+  It rechecks these before dispatch authorization and completion. Changes,
+  withdrawals, deletion jobs and existing restrictions invalidate approval.
+  Duplicate work and obsolete leases cannot approve a new revision. A second
+  contributor cannot reset a review decision or retry limit for the same source.
+- Provisional processing ceilings: 1,000 pending/review jobs globally, 20 per
+  initiating account; 1,000 request reservations per UTC day globally, 20 per
+  initiating account per UTC hour. Each revision gets at most three processing
+  attempts, a two-minute lease and bounded retry backoff. These are separate
+  from the existing report-submission limit, not monetary or profit guarantees.
+  Counters persist across worker restarts and failed requests consume capacity.
+- No voice/video is sent by these RPCs. Unsupported or unattributed content,
+  oversized inputs and targets with sexual-content reports fail eligibility.
+  These return codes are NOT yet integrated with a held-item reviewer or a
+  user-facing recovery path. Existing archives are not automatically queued.
+- **Verification:** the full database plus mocked-adapter run passed **166
+  tests**, with the two opt-in real-PostgreSQL parents skipped. Separately enabled
+  both real-PostgreSQL concurrency suites: **11 passed, no skips**, including
+  screening consent/source/budget races and the existing media-retirement versus
+  deletion/restore races. The queue suite contributes **38 passing tests** to
+  the default run. A definition/data comparison verifies the new migration does
+  not replace existing functions, policies or triggers, or alter Storage rows.
+  Tests use isolated fixtures, not live accounts or real family media. Flutter
+  was unchanged in this step; its previous test results remain recorded below.
+- **Still missing before activation:** authenticated sharing integration and
+  server-owned eligibility events; exact-revision publication/read enforcement
+  across metadata, media, feed and AI paths; safe byte retrieval/decoding and
+  metadata stripping; a compatible bounded batch-provider contract; held-item
+  review, retry and retention operations; old-client handling and a voice/video
+  approach. The queue currently allows up to four photos while the disconnected
+  adapter accepts one: do not loop provider calls against one reservation or
+  claim multi-photo screening is implemented. Client-writable timestamps alone
+  must not decide which historical content is eligible when integration lands.
+- `clear` means a locally recorded assessment of one exact revision, not public
+  access. The service-only predicate rechecks the source but is not wired into
+  RLS. Do not deploy/enable this as a complete filter. No provider request, live
+  deployment, Apple write, phone build or payment change occurred. Preserve the
+  working TestFlight 23 and the passed billing/media checks. No phone screening
+  test is useful until the complete path is implemented and approved to deploy.
+
+### Apple account rechecked after owner sign-in (read-only)
+
+- Owner replied "done" to the sign-in request. Inspected the actual distribution
+  draft, App Information, App Privacy, subscription group, TestFlight and Business
+  pages in Safari. No Apple field, release setting, agreement, product, account or
+  submission was changed. The findings below replace the expired-session blocker
+  and the corresponding historical 13 October account observations.
+- **Distribution draft:** app is still named **Ever Roots**, iOS version `1.0`,
+  **Prepare for Submission**. No build is selected. The displayed iPhone 6.5-inch
+  set has **0 screenshots and 0 previews**; other device sets were not inspected.
+  Description, keywords, support URL, marketing URL, copyright, reviewer sign-in,
+  review contact and notes are empty. Automatic release is currently selected;
+  switch to manual release with approval before submission. Previews, promotional
+  text and marketing URL are optional, not independent launch blockers.
+- **App Information:** name and subscription display names still need the Heiro
+  rename, without changing bundle/product IDs. Category is blank, content rights
+  are not set up and age ratings show **Set Up Age Ratings**. Both production and
+  sandbox server-notification URLs still point to the existing Supabase Apple
+  notification function. This readback confirms configuration, not delivery.
+- **App Privacy:** no privacy policy URL is entered and the questionnaire still
+  shows **Get Started**. Complete answers against the finished implementation,
+  including any consented third-party screening, rather than declaring future
+  behavior as deployed. No privacy answers were published.
+- **Subscriptions:** group `22339684` and all four products are **Prepare for
+  Submission**. Service levels remain Legacy annual 1, Legacy monthly 2, Family
+  annual 3 and Family monthly 4. Correct the catalog to group equal service tiers
+  (both Legacy durations at level 1; both Family durations at level 2), with
+  approval and upgrade/downgrade regression checks. This is not permission to
+  alter the working entitlement code. Billing grace period is not configured;
+  streamlined purchasing is On and needs a supported-path decision. Individual
+  product prices, territories and review attachments were not rechecked today.
+- **TestFlight:** `1.0.0 (23)` is present, **Ready to Submit**, assigned to Internal
+  Beta, with one install shown. This is not a selected App Store build or Apple
+  approval. Build 13 remains Testing. Today's local screening work is not in 23.
+- **Business:** Free Apps Agreement is Active. Paid Apps Agreement is
+  **Active (New Agreement Available)**, and the app list warns that the Account
+  Holder must review/accept the updated Paid Applications Schedule before new
+  app submission. Owner must review the terms; no acceptance was attempted.
+  Bank and both displayed tax forms are Active. EU trader-status compliance is
+  still requested; resolve it if distributing in the EU. Do not invent a trader
+  declaration or publish personal contact information without owner review.
+- **Next:** keep building and locally testing the bounded, revision-bound
+  screening/publication flow. The Apple audit does not authorize deployment or
+  submission and does not close the voice/video, privacy, operations or final
+  TestFlight acceptance gates below.
+
+### Submission work resumed; separate permission controls tested locally
+
+- Owner requested a remaining-launch checklist followed by implementation.
+  Reconciled the current source/ledger with passed device results rather than
+  restarting the resolved payment investigation. The current remaining gates are
+  listed below; no public submission is authorized or performed.
+- Added `lib/widgets/content_screening_permission.dart` and a separately named
+  settings action. The release switch is deliberately **false**: no user sees a
+  new prompt and no client calls the un-deployed RPCs yet. This is not an upload
+  hook or permission to publish. No chat/transcription consent, payment logic,
+  storage policy, public privacy page or existing archive changed.
+- The local prompt identifies OpenAI, text/photos, family personal information,
+  human review, excluded archives/private drafts and separate voice/video/chat
+  permissions. It supports explicit decline, withdrawal, retry, policy changes,
+  duplicate-call suppression and account changes. An unconfirmed withdrawal
+  explicitly warns that checks may still be enabled; it never claims success.
+- Strengthened the still-un-deployed permission migration's setter to
+  `set_content_screening_permission(boolean,text,uuid)`: the expected account
+  must equal `auth.uid()`. A request started before a session switch cannot grant
+  or withdraw the new account's permission. This check is additional to, not a
+  replacement for, authenticated caller identity. Old disclosure versions can
+  still withdraw, but cannot grant processing.
+- Extended the staged access-audit contract to exactly the two new RPCs. The
+  worker helper remains service-only; unsafe old setter overloads and accidental
+  helper grants are caught by a new negative test. The earlier live audit's zero
+  findings used the earlier contract. Running this new candidate contract on
+  live before deployment should show these two missing RPCs; do not call that
+  deployed or grant them just to silence the audit.
+- **Verification:** 29 new Flutter permission tests and nine permission SQL
+  tests passed. Full default Flutter suite: **168 passed, 50 configuration skips**;
+  separately enabled billing/plan/deletion suite: **79 passed, no skips**. Full
+  SQL plus mocked screening adapter run: **128 passed, 1 skipped** (the opt-in
+  real-PostgreSQL retirement concurrency test was not rerun). These fixture tests
+  are not a claim that the full screening pipeline or live migrations were tested.
+- Rendered and visually inspected 320x568 and 390x844 dialogs with 2x text;
+  also rendered/tested 1024x768. Fixed small-phone overflow and used a compact
+  heading with scrolling disclosure and accessible actions. Focused analysis is
+  clean; the wider vault screen still has its 42 pre-existing informational lints.
+  `git diff --check` passed. No real OpenAI request, paid inference, phone build,
+  upload, live deployment, account mutation or media operation occurred.
+- **Apple audit resumed:** the first attempt was blocked by an expired login.
+  After the owner signed in, the read-only audit above completed. No settings
+  were saved; use the fresh 23 October findings rather than the older snapshot.
+
+### Current submission gates
+
+| Gate | Current status | Required next evidence |
+| --- | --- | --- |
+| Family purchases, expiry/replacement sponsor; ordinary photo/voice; report/preview/hide/restore | Passed in recorded user/device and scoped backend checks | Preserve these results and smoke-test the final distribution candidate; do not reopen the resolved payer bug without a new failure. |
+| New shared-content filtering | Local consent/status/retry, budgets, split worker, caller-bound requests, exact-generation read ceilings, pre-dispatch notification guard and exact-version human review tested; isolated hosted JPEG diagnostics pass; everything remains off | Automatic-case alerts, durable post-approval notifications, collaborative/old-client/archive-edit and declined-permission paths; full hosted split/Storage-flow verification; explicit voice/video safeguards without paid transcription. |
+| Privacy and human operations | Partly implemented | Align the deployed disclosure and Apple answers with actual processing; finalize retention/appeals, urgent escalation and reviewer cover. Do not auto-purge retained family contributions. |
+| Security, resilience and costs | Unverified remaining controls | Review privileged function authorization, password protection, database AND media recovery, monitoring, and hard global/provider budgets. Catalog audit alone is not clearance. |
+| Final TestFlight acceptance | Incomplete | Fresh sign-up/invite/join, legacy contribution, consent decline/withdrawal, deletion/retention and offline recovery; remaining active restore/tier-change/refund/interruption billing cases on the final candidate. |
+| Apple submission | Rechecked 23 October; draft incomplete and updated paid agreement requires owner review | Heiro name/URLs/screenshots/metadata, privacy/category/content rights/age rating, reviewer access, subscription service levels and product metadata, final-build export compliance, EU status if applicable, updated agreement and manual release. Bank/tax Active; build 23 in TestFlight but not selected. Then request submission approval. |
+
+Next implementation step: add automatic-case alerts and durable post-approval
+notification dispatch to the locally connected exact-version review, app
+consent/status/retry and read gates. Complete collaborative edits, archive edits and unsupported-media paths,
+preserving existing archives and usable decline/recovery behavior. The split-photo
+candidate avoids durable image staging; its bundled decoder passes isolated hosted
+tests, not the complete hosted parent/child/DB flow. Do not deploy the old batch
+worker, turn the settings switch on, present foundations as "complete screening", or ask for another
+phone screening test before that end-to-end path exists.
+
+### Owner selected free text/photo moderation; permission foundation local only
+
+- Newest direction: "if theres no ai cost we can do that". Clarified that the
+  standalone OpenAI moderation endpoint has no classifier API fee, but hosting,
+  transfer and human review remain costs. Proceed locally with that route; do
+  not enable paid audio transcription or treat the earlier self-hosting proposal
+  as selected. Privacy requirements and audio/video gaps remain.
+- Added un-deployed migration `20261023110215_content_screening_permission.sql`:
+  a private RLS-protected permission table, caller-scoped getter/setter and a
+  service-only revision predicate. Permission starts off and is independent of
+  AI-chat consent. Acceptance must match the current disclosure; withdrawal
+  works with stale disclosure versions and advances the revision. Account deletion
+  removes its permission. No triggers, uploads, billing or Storage changes.
+- Eight new local tests pass; combined consent/adapter suite **23 passed**.
+  Full default database suite **112 passed, 1 skipped** (the separate real-PG
+  concurrency suite was not rerun). Mocked adapter tests made no provider request.
+- This is only a permission foundation, NOT complete screening. Next: user
+  disclosure/withdrawal UI, durable bounded claim/finish queue, exact-revision
+  publication/read enforcement and scoped held-item review. Before deployment,
+  extend the live access-audit contract for the two new authenticated RPCs and
+  verify their grants; do not silently allow all new privileged functions.
+- The worker must recheck permission before sending and before publication.
+  Revocation cannot recall an already-dispatched request; the predicate is not
+  atomic coordination with a provider and cannot replace the future claim/finish
+  design. Old-client behavior, absent consent and audio/video need explicit paths.
+- No live deployment, end-user prompt, phone build, archive scan or public
+  disclosure change occurred. Screening stays off. No phone test is needed yet.
+
+### Filtering privacy/cost comparison completed; screening still off
+
+- The owner asked for the comparison, not activation. Recorded source inspection,
+  current provider constraints and explicitly hypothetical cost calculations in
+  `docs/filtering-privacy-cost-comparison-2026-10-23.md`. No family content or
+  production settings were accessed, no model was installed and no inference ran.
+- Apple Sensitive Content Analysis cannot supply server review flags: Apple says
+  its detection results must stay on-device, and users can disable it. The app
+  targets iOS 15 and has no integration. Treat it as optional viewer protection.
+- Source also permits video. Neither the proposed text/photo adapter nor an
+  image-only replacement settles voice/video safeguards. Feed visibility is not
+  itself proof of owner-only access; define the sharing boundary from access rules.
+- Recommendation at that point, superseded by the owner's later choice above:
+  local-only, bounded self-managed filtering
+  evaluation on synthetic/rights-cleared fixtures, then a production decision
+  based on measured quality, languages, resource use and privacy review. This is
+  a recommendation, not deployment permission or a claim of complete coverage.
+  Self-managed inference may need a separate runtime; OpenAI moderation itself
+  has no classifier API charge, so cost alone does not justify self-hosting.
+- External screening remains disconnected. Existing optional AI, payments,
+  storage, accounts and the passed phone media check are unchanged. No new phone
+  test is needed for this documentation-only checkpoint. Launch remains NO-GO.
+
+### Read-only access preflight and current work order
+
+- Added `supabase/verification/launch_access_audit.sql`, a SELECT-only catalog
+  check, and seven negative/positive regression tests. It records the expected
+  36 app-facing privileged signatures and seven private RLS helpers, rejects
+  unexpected overloads/grants, and checks anonymous access, schema creation,
+  fixed function search paths, table RLS, view access, private review relations
+  (including column grants) and public buckets. The signature inventory is an
+  access contract, not approval of every function's authorization logic.
+- Ran the exact final query against live Supabase inside `BEGIN READ ONLY` /
+  `ROLLBACK`: all nine checks returned zero findings. No family content was
+  inspected and no production configuration, function, policy, media, payment
+  or account was changed. Default SQL suite: **104 passed, 1 skipped**. The
+  skipped PostgreSQL concurrency suite was not rerun in this read-only checkpoint;
+  its separate passing deployment evidence remains below. `git diff --check` passed.
+- Current advisors still report 36 authenticated SECURITY DEFINER functions,
+  `vector` in `public` and disabled leaked-password protection. Do not revoke
+  app-required functions merely to clear a warning. Individual authorization
+  review, backup/recovery and provider-cost controls are not closed by this audit.
+- **Filtering preflight (before the later selection above).** Cloud screening remains disabled. The local
+  adapter is not a publication gate. Apple's guideline 1.2 requires a filtering
+  method as well as report/block/contact flows; it does not prescribe a paid AI
+  vendor. Apple's device-sensitive-media framework can be disabled by policy
+  and is not text/audio coverage; the app still supports iOS 15. A device-only
+  check must not be represented as complete server enforcement.
+- Rechecked official OpenAI documentation: standalone text/image moderation has
+  no provider API fee, does not classify audio, and must not receive known or
+  suspected CSAM. Infrastructure/review still cost money. Renewed owner direction
+  is needed before integrating external processing of new shared text/photos;
+  separate consent, publication checks, held-item review and audio safeguards
+  would still be required. No private-draft or existing-archive scan, automatic
+  paid voice transcription, new provider request or disclosure publication occurred.
+
+Current work order, not the stale tasks in older dated checkpoints:
+
+1. Implement/test the selected text/photo filtering at actual sharing boundaries,
+   including the queue, revision-bound publication/read gate, held-item review
+   and defined audio/video paths. Consent controls are now local and tested, not
+   active. Keep reporting and blocking; no paid moderation transcription.
+2. Finish the operational retention/appeal and urgent-escalation process. Hiding
+   is not deletion; no automatic purge of family memories is approved. A documented
+   retention decision is needed, not an arbitrary deletion timer.
+3. Complete security/operations follow-through: authorization review, password
+   protection, recovery of database AND media, monitoring and hard provider limits.
+4. Verify the final distribution candidate's core flows and remaining billing
+   cases, then refresh Apple metadata/privacy/age rating, review access, agreements
+   and business settings before requesting submission. Preserve passed device evidence.
+
+Already-downloaded copies cannot be recalled; this is a disclosed residual limit,
+not a task that can be made to pass. CDN propagation and whole-archive takedown
+need explicit operational handling. Public submission remains unapproved.
+Sources checked: [Supabase advisors](https://supabase.com/docs/guides/observability/advisors),
+[Apple 1.2](https://developer.apple.com/app-store/review/guidelines/#user-generated-content),
+[Apple sensitive media](https://developer.apple.com/documentation/SensitiveContentAnalysis/detecting-nudity-in-media-and-providing-intervention-options),
+[OpenAI moderation](https://developers.openai.com/api/docs/guides/moderation).
+
+### Exact-memory old-link fix deployed and disposable canary passed
+
+- After the explanation, the owner explicitly said to proceed and take extra
+  care not to break other storage features. Applied only
+  `20261023101256_memory_media_retirement.sql`; the local timestamp was aligned
+  with Supabase's recorded migration version. No app build, payment change,
+  screening activation or real-family media operation was performed.
+- Preflight refreshed Supabase docs/advisors and live schema/function definitions.
+  The original quota body was verified equivalent apart from the exact approved
+  move exception. Deletion claim/finalization and original review function bodies
+  were preserved byte-for-byte under the private schema, with direct service
+  execution revoked. Readback matched all **20 new/replaced function bodies**,
+  checked service-only RPC grants, private-table RLS/no direct grants and all
+  **36 new triggers**. No production deletion job was active before deployment.
+- Re-ran local checks before deployment: **97 SQL passes / 1 intentional skip**;
+  the separate PostgreSQL 17 concurrency suite passed three scenarios (four Node
+  entries); **29 worker/CLI/server/browser/QA-runner checks passed**. These cover
+  ordinary saves, photo/voice paths, legacy retention, full/expired quotas,
+  retry/permission-probe rollback and deletion race orderings. Local fixture
+  coverage is not a claim that every flow was repeated on a physical phone.
+- Integrated live canary run `06ac3d34-c362-4024-863e-a1456d765459`, exact synthetic
+  report `0bac3eca-43dc-4a22-9edb-b88b843733c8`: two server-tagged temporary accounts,
+  isolated family, two personal memories and generated PNGs. Ordinary authenticated
+  memory save/upload and family read succeeded. Hide denied new signing; the
+  Storage API move completed and atomically rewrote the direct attachment path.
+  The original warmed link remained a 200/HIT initially, then became 400/BYPASS
+  after **56.16 seconds** of measured polling. Restore returned identical bytes
+  at the new address while the old link remained denied. The sibling photo
+  stayed readable. This is one observed CDN location, not instant global removal.
+- Both QA accounts were deleted through the existing account-deletion endpoint.
+  Cleanup independently returned to **6 users, 5 families, 5 vaults, 7 personal
+  memories, 7 legacy memories, 14 objects, zero restrictions/deletion jobs/pending
+  retirements**. Hashes of existing Storage paths/owners/metadata, personal/legacy
+  memory records and photo/voice references all matched baseline. Billing function
+  hashes matched and event count stayed 70. Public/Storage policy hash stayed
+  `a3922afaaadd5e3592092dbfccab38ed` using this turn's full-policy serialization.
+  Synthetic non-content audit/tombstone records remain intentionally.
+- No new security warning category appeared. Two new RLS-with-no-policy INFO
+  notices are expected for deliberately private tables. Performance warning
+  counts were unchanged; one new unused-index INFO concerns the intentional
+  report foreign-key index. Existing vector-schema, authenticated RPC exposure
+  and leaked-password-protection warnings remain for separate launch review;
+  do not represent the advisor report as entirely clean.
+- Restarted the private reviewer with `Heiro Safety Review.command`. Safari
+  independently showed **Private review session ready**, **Alert health checked**,
+  and **No open reports**. The DB also showed no waiting lifecycle lock and no
+  active deletion. No private session URL or credentials are retained here.
+- Post-deployment phone smoke check: the owner replied **"Photo and recording
+  both work"** after being asked to save a disposable memory with a harmless
+  photo and short voice note, then reopen it. This records owner-reported
+  acceptance of ordinary photo display and voice playback after the server
+  change, without an app update. It does not establish live legacy/audio
+  old-link retirement or every account-deletion path. This acceptance update
+  made no further backend changes.
+- **Boundaries / next:** exact-personal-memory integrated old-link proof passed.
+  Legacy/photo/audio and deletion interaction have local regression coverage,
+  not fresh live end-to-end evidence for every media type. Production-scale lock
+  latency is unverified. Whole-vault/member archive links, already-downloaded
+  copies, adequate filtering, retention and final Apple submission checks remain
+  separate gates. No further phone reinstall or repetition of the already-passing
+  report test is required for this server change.
+
+### Earlier local implementation checkpoint (superseded by deployment above)
+
+- Implemented local migration `20261023091212_memory_media_retirement.sql` and
+  bounded `scripts/retire_report_media.mjs` worker, integrated with the private
+  reviewer console and operator CLI. Hide creates durable exact-memory jobs;
+  Storage moves preserve bytes/ownership/folder/extension and atomically update
+  attachment references. Restore never reuses the retired address. Pending or
+  held jobs remain in the queue even if the report is resolved; operator Retry
+  continues them. No automatic scheduler or whole-archive relocation is claimed.
+- Narrow maintenance-only quota handling preserves full/expired-family behavior.
+  Transaction locking coordinates moves with existing account deletion without
+  making deletion wait on an operator or a network operation. Local tests cover
+  retained legacy photo/audio, ordinary save-returning, path reuse, malformed or
+  shared refs, stale previews, partial/retried moves and deletion orderings.
+- Verification completed: full SQL suite **97 passed / 1 skipped**. The skipped
+  real-PostgreSQL case ran separately against isolated PostgreSQL 17 and passed
+  all **three concurrency scenarios** (four Node entries including its parent).
+  Worker, operator CLI, server, desktop/mobile Playwright and live-runner guards:
+  **29 passed**. Inspected synthetic desktop/mobile screenshots; no layout overflow
+  or browser errors. `git diff --check` clean. No Flutter/device build changes.
+- Production reads only: expected attachment/Storage column types, five private
+  unversioned media buckets, aggregate metadata keys. No real family content was
+  opened, no production migration applied and no real object moved in this turn.
+  Upstream Storage move source informed permission-probe/HEAD tests but does not
+  establish the integrated behavior of the deployed API. The global short
+  metadata transaction lock also needs live latency/lock-wait observation.
+- Prepared guarded `--run-integrated` disposable QA mode to test warmed old-link
+  denial, hidden new-link denial, new-address restore, byte equality, sibling
+  preservation and cleanup. It has NOT run live. Its cleanup deletes only tagged
+  fixtures through the normal deletion flow before reconciling a pending hide.
+- **Next:** request explicit production migration plus disposable canary approval,
+  deploy/read back, restart the reviewer, run the isolated canary and verify
+  cleanup. The modified local console requires new RPCs: do not restart it against
+  the old backend before deployment. No need to repeat phone tests yet.
+- **Launch gate remains open:** existing live Hide still has the old-link gap.
+  The change does not retire whole-vault/member archives, remove downloaded
+  copies, implement filtering or settle retention. Payments and AI screening
+  remain untouched. See `docs/media-takedown-design.md` for rollout/recovery.
+
+### Earlier media-link experiment completed; not integrated production proof
+
+- The owner explicitly approved a disposable live media-access test. Added
+  `supabase/verification/media_link_live_qa.mjs` and its opt-in, scope, redaction
+  and cleanup tests. No existing family content was read or changed; no policy,
+  migration, worker, payment or phone build was deployed.
+- Run `0cdc7a5e-b9ab-4212-b2f6-67f2759ab98a` created two tagged QA accounts,
+  one isolated family, two personal memories and copies of one generated pixel
+  image. Exact test report: `f1d2eae0-6bb6-421d-bb05-8d8d70d5b73c`.
+  A harmless QA alert/audit is expected; it is not a genuine abuse report.
+- **Gap reproduced live:** a hidden memory and new signed-link requests were
+  denied, but the original pre-warmed signed URL still returned the exact image
+  with HTTP 200 / CDN HIT. Adding `cacheNonce` still returned HIT in this run;
+  it did not establish an origin-only read. The sibling image stayed available,
+  and restore returned access to the exact original bytes.
+- **Storage mechanism verified, not a finished moderation fix:** after restoring
+  the fixture, an owner-authorized Storage move to a new path and metadata-path
+  update preserved family access and image bytes. The old warmed URL returned
+  HTTP 400 / BYPASS after ten five-second polling waits (about 50 seconds), having
+  remained readable before then. This is one observed CDN location/window, not
+  an instantaneous or global revocation guarantee. A separate administrator move
+  kept `media_object_matches_scope` true on this deployed Storage version;
+  do not assume that behavior on other versions without checking it.
+- **Cleanup independently verified:** all fixture accounts, family, vault,
+  memories, files and deletion jobs are removed. Baseline/readback match: six
+  Auth users, five families, five vaults, seven memories, fourteen Storage objects
+  and zero moderation restrictions. Public/Storage policy fingerprint remained
+  `95084a65e45d567ee0ecc72839278df7`. Non-content synthetic review audit remains.
+  Initial cleanup hit a runner bug reading an empty successful RPC response;
+  fixed it, added a regression test and completed cleanup through the existing
+  account-deletion endpoint. This was not an app-deletion failure.
+- Tests: 22 Node tests pass across the live-test guards, reviewer console and CLI.
+  The console tests require loopback permission; the initial sandbox EPERM was
+  rerun successfully with that permission. No full Flutter/SQL regression or new
+  device acceptance is claimed. Final runner-only assertions additionally check
+  the exact updated metadata row and record actual elapsed time; these later
+  assertions were not rerun live after fixture cleanup.
+- **Next implementation:** durable, exact-memory address retirement coordinated
+  with the existing Hide action, atomic reference changes, narrow quota handling,
+  account-deletion concurrency and retry recovery. Never reuse the retired path
+  on Restore. Review the constraints in `docs/media-takedown-design.md` before
+  editing storage/deletion code. Approval above covers only disposable testing,
+  not deploying new production logic or moving real memories. Normal Hide still
+  has the old-link gap; do not mark this launch gate passed or repeat the owner's
+  already-passing phone workflow tests yet.
+
+### Earlier owner-operated acceptance
+
+- The owner confirmed reopening resolved report
+  `4a08c3fa-94ea-410a-8002-4ae28c17b268` by reference after ending and restarting
+  the private reviewer session. This is owner-reported acceptance, not a new
+  independent UI/backend inspection. No new report or moderation action was needed.
+- Photo-memory save, report/preview, hide, restore and cross-session case reopening
+  are now owner-confirmed. The owner also answered "yes" to hearing the short
+  harmless reported voice note after Open audio and Play in the reviewer console.
+  This establishes owner-reported audio-preview acceptance, not independent
+  device/provider proof; the audio report reference and dismissal were not supplied.
+- The owner answered "yes working" to the paired phone check: Ross's shared
+  memories disappear from Frank's view when blocked and return when unblocked
+  through Settings > Safety and blocked members. Record this as owner-confirmed
+  block/unblock acceptance, not independent backend/device inspection. It does
+  not establish every legacy surface, already-open/offline view, or suspension.
+  Dismissal of the harmless audio QA report remains unconfirmed.
+- Next engineering check: cached-media takedown. Current source still generates
+  one-hour signed links in personal/shared/legacy vault screens. RecentPhoto
+  removes its cached entry on 401/403/404/410 and can use cached bytes on network
+  failure; those controls do not establish revocation of an already-issued link.
+  No new live cached-URL test was run during this acceptance update. Preserve the
+  known takedown gap pending focused verification and a scoped correction.
+- Reporting/photo/audio review, exact-memory hide/restore, resolved-case reopening
+  and the requested member block/unblock path are owner-confirmed. Cached-media
+  takedown, retention/filtering, final-candidate and Apple submission gates remain
+  open. No further repetition of these passing phone checks is needed right now.
+- Earlier acceptance update was documentation only. The later disposable live
+  experiment above supersedes its statement that no cached-URL test was run.
+
+## Previous checkpoint - 22 October 2026
 
 ### Memory creation permission regression fixed and deployed
 
@@ -63,8 +1366,7 @@ This is the current work ledger; earlier recovery notes are historical evidence.
   sums the stored media objects without excluding hidden content. The console
   lists only open/reviewing reports, but exact-reference lookup can reopen a
   resolved case. Closing the browser or dismissing a case does not lift a hide.
-- Resume: verify the owner can reopen this resolved case by its email reference
-  after ending/restarting the private session, then cover audio/blocking and the
+- Reopening was subsequently owner-confirmed on 23 October above. Cover audio/blocking and the
   known cached-media takedown gap. Define deliberate moderation retention/deletion
   and appeal handling instead of leaving hidden files unmanaged or silently
   auto-deleting family memories. Filtering and broader Apple gates remain open.

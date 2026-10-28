@@ -4,6 +4,9 @@
 export const SCREENING_LIMITS = Object.freeze({
   textCharacters: 20000,
   imageBytes: 10 * 1024 * 1024,
+  images: 4,
+  totalImageBytes: 10 * 1024 * 1024,
+  requestBytes: 15 * 1024 * 1024,
   responseBytes: 32 * 1024,
   timeoutMs: 15000,
 });
@@ -37,20 +40,26 @@ function encodeImage(bytes) {
 }
 
 function buildInput(content) {
-  if (!isRecord(content) || Object.keys(content).some((key) => !['text', 'image'].includes(key))) {
+  if (!isRecord(content) || Object.keys(content).some((key) => !['text', 'image', 'images'].includes(key))) {
     return { error: 'INPUT_UNSUPPORTED' };
   }
   const { text = '', image } = content;
+  if (Object.hasOwn(content, 'image') && Object.hasOwn(content, 'images')) return { error: 'INPUT_UNSUPPORTED' };
+  const images = Object.hasOwn(content, 'images') ? content.images : image === undefined ? [] : [image];
+  if (!Array.isArray(images) || images.length > SCREENING_LIMITS.images) return { error: 'IMAGE_COUNT_INVALID' };
   if (typeof text !== 'string') return { error: 'TEXT_INVALID' };
   if (text.length > SCREENING_LIMITS.textCharacters) return { error: 'TEXT_TOO_LARGE' };
   const input = [];
   if (text.trim()) input.push({ type: 'text', text });
-  if (image !== undefined) {
+  let totalBytes = 0;
+  for (const image of images) {
     if (!isRecord(image) || Object.keys(image).some((key) => !['bytes', 'mime'].includes(key)) ||
         !(image.bytes instanceof Uint8Array)) return { error: 'IMAGE_INVALID' };
     if (!image.bytes.length || image.bytes.length > SCREENING_LIMITS.imageBytes) {
       return { error: 'IMAGE_SIZE_INVALID' };
     }
+    totalBytes += image.bytes.length;
+    if (totalBytes > SCREENING_LIMITS.totalImageBytes) return { error: 'IMAGE_BATCH_TOO_LARGE' };
     const mime = imageMime(image.bytes);
     if (!mime || mime !== image.mime) return { error: 'IMAGE_FORMAT_UNSUPPORTED' };
     // Only inline, server-loaded bytes are accepted. Never fetch client URLs or
@@ -127,6 +136,8 @@ export async function screenTextOrImage(content, {
   if (typeof apiKey !== 'string' || !apiKey.trim()) return pending('PROVIDER_NOT_CONFIGURED');
   const prepared = buildInput(content);
   if (prepared.error) return pending(prepared.error);
+  const body = JSON.stringify({ model, input: prepared.input });
+  if (new TextEncoder().encode(body).length > SCREENING_LIMITS.requestBytes) return pending('REQUEST_TOO_LARGE');
 
   const controller = new AbortController();
   let timer;
@@ -141,7 +152,7 @@ export async function screenTextOrImage(content, {
       const response = await fetcher(endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, input: prepared.input }),
+        body,
         signal: controller.signal,
         redirect: 'error',
       });

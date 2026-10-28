@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { retireReportMedia } from './retire_report_media.mjs';
 
 const project = 'vbzyvaylfdhwowdbodmk';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -42,7 +43,7 @@ export async function runCommand(command, request) {
   if (command.command === 'health') return request('/rest/v1/rpc/content_report_alert_health', {});
   const columns = 'id,created_at,reason,status,target_kind,target_id,reviewed_at';
   if (command.command === 'queue') {
-    return request(`/rest/v1/content_reports?select=${columns}&status=in.(open,reviewing)&order=created_at.asc&limit=50`);
+    return request('/rest/v1/rpc/content_review_queue',{});
   }
   const path = `/rest/v1/content_reports?select=${columns},details,family_id,subject_user_id&id=eq.${command.id}`;
   const reports = await request(path);
@@ -58,7 +59,12 @@ export async function runCommand(command, request) {
   if (!Array.isArray(after) || after[0]?.id !== command.id || after[0]?.status !== expected || !after[0]?.reviewed_at) {
     throw new Error('Action sent but readback not confirmed. Inspect the audit before retrying.');
   }
-  return { report: command.id, action: command.action, status: after[0].status, reviewedAt: after[0].reviewed_at };
+  let retirement;
+  if(command.action==='hide') {
+    try { retirement=await retireReportMedia(request,command.id); }
+    catch { retirement={state:'unconfirmed',hidden:true}; }
+  }
+  return { report: command.id, action: command.action, status: after[0].status, reviewedAt: after[0].reviewed_at,retirement };
 }
 
 async function main() {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/onboarding_invite_state.dart';
 import '../services/push_notification_service.dart';
+import '../utils/family_membership_limit.dart';
 import 'relationship_tree_screen.dart';
 
 class JoinFamilyScreen extends StatefulWidget {
@@ -31,6 +32,9 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   }
 
   String _friendlyJoinError(Object error) {
+    if (isSingleFamilyMembershipError(error)) {
+      return singleFamilyMembershipMessage;
+    }
     final text = error.toString().toLowerCase();
     if (text.contains('expired') || text.contains('used') || text.contains('revoked')) {
       return 'This invite is no longer available. Ask your family for a new link.';
@@ -189,7 +193,7 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
             ),
             const SizedBox(height: 6),
             Text(
-              'Joining another family will not remove you from your current family. You can switch between trees from Your Vault.',
+              'Use an invite to join your family. Joining additional families is not available yet.',
               style: TextStyle(color: Colors.black.withValues(alpha: 0.62)),
             ),
             const SizedBox(height: 12),

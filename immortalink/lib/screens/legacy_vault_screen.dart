@@ -1,4 +1,11 @@
 import 'dart:async';
+import '../utils/public_error.dart';
+import '../services/memory_media_batch.dart';
+import '../widgets/memory_media_upload_screen.dart';
+import '../widgets/content_placeholder.dart';
+import '../services/batched_signed_urls.dart';
+import '../widgets/content_screening_permission.dart';
+import '../widgets/memory_sharing_status.dart';
 import '../widgets/content_safety_actions.dart';
 import '../widgets/ai_processing_consent.dart';
 import '../services/recent_cache.dart';
@@ -318,18 +325,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     return p.contains('/profile_picture/');
   }
 
-  Future<String?> _signedUrl(String bucket, String path) async {
-    try {
-      final signed = await _supabase.storage
-          .from(bucket)
-          .createSignedUrl(path, 60 * 60);
-      final sep = signed.contains('?') ? '&' : '?';
-      return '$signed${sep}t=${DateTime.now().millisecondsSinceEpoch}';
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _load() async {
     if (!mounted) return;
     final cache = RecentCache.instance;
@@ -385,10 +380,12 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         _openProfileEditor();
       }
 
-      await _loadPhotos();
-      await _loadMemories();
-      await _loadMemoryPhotos();
-      await _loadMemoryVoice();
+      await Future.wait([
+        _loadPhotos(),
+        _loadMemories(),
+        _loadMemoryPhotos(),
+        _loadMemoryVoice(),
+      ]);
       if (mounted &&
           epoch == cache.generation &&
           _memoryError == null &&
@@ -452,6 +449,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           .order('created_at', ascending: false);
 
       final list = (rows as List).cast<Map<String, dynamic>>();
+      final urls = await batchedSignedUrls(_supabase, _photosBucket, [
+        dbAvatarPath,
+        ...list.map((row) => (row['path'] ?? '').toString()),
+      ]);
       final items = <Map<String, String>>[];
 
       String? profileId;
@@ -459,7 +460,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       String? profileUrl;
 
       if (dbAvatarPath.isNotEmpty) {
-        final url = await _signedUrl(_photosBucket, dbAvatarPath);
+        final url = urls[dbAvatarPath];
         if (url != null && url.trim().isNotEmpty) {
           profilePath = dbAvatarPath;
           profileUrl = url;
@@ -480,7 +481,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         final path = (r['path'] ?? '').toString().trim();
         if (id.isEmpty || path.isEmpty) continue;
 
-        final url = await _signedUrl(_photosBucket, path);
+        final url = urls[path];
         if (url == null || url.trim().isNotEmpty == false) continue;
 
         final isProfile = path == profilePath || _isProfilePhotoPath(path);
@@ -576,6 +577,11 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           .order('created_at', ascending: false);
 
       final list = (rows as List).cast<Map<String, dynamic>>();
+      final urls = await batchedSignedUrls(
+        _supabase,
+        _photosBucket,
+        list.map((row) => (row['path'] ?? '').toString()),
+      );
 
       for (final r in list) {
         final id = (r['id'] ?? '').toString();
@@ -584,7 +590,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
         if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
 
-        final url = await _signedUrl(_photosBucket, path);
+        final url = urls[path];
         if (url == null || url.trim().isEmpty) continue;
 
         _memoryPhotosById.putIfAbsent(memoryId, () => []).add({
@@ -646,6 +652,11 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           .order('created_at', ascending: false);
 
       final list = (rows as List).cast<Map<String, dynamic>>();
+      final urls = await batchedSignedUrls(
+        _supabase,
+        _memoryVoiceBucket,
+        list.map((row) => (row['path'] ?? '').toString()),
+      );
 
       for (final r in list) {
         final id = (r['id'] ?? '').toString();
@@ -656,7 +667,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
         if (id.isEmpty || memoryId.isEmpty || path.isEmpty) continue;
 
-        final url = await _signedUrl(_memoryVoiceBucket, path);
+        final url = urls[path];
         if (url == null || url.trim().isEmpty) continue;
 
         _memoryVoiceById
@@ -1247,6 +1258,15 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _loadMemoryPhotos();
       await _loadMemoryVoice();
       _toast('Memory added.');
+      if (contentScreeningControlsEnabled && mounted) {
+        await showMemorySharingStatus(
+          context,
+          kind: 'legacy_memory',
+          targetId: memoryId,
+          client: _supabase,
+          requestAfterSave: true,
+        );
+      }
     } on PostgrestException catch (e) {
       await _handleUploadError(e, 'Add memory failed');
     } catch (e) {
@@ -1316,6 +1336,15 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       await _loadMemoryPhotos();
       await _loadMemoryVoice();
       _toast('Memory updated.');
+      if (contentScreeningControlsEnabled && mounted) {
+        await showMemorySharingStatus(
+          context,
+          kind: 'legacy_memory',
+          targetId: memoryId,
+          client: _supabase,
+          requestAfterSave: true,
+        );
+      }
     } on PostgrestException catch (e) {
       await _handleUploadError(e, 'Update failed');
     } catch (e) {
@@ -1341,6 +1370,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final peopleController = TextEditingController(text: initialPeople);
     final locationController = TextEditingController(text: initialLocation);
     final pendingPhotos = <_LegacyPendingPhoto>[];
+    var pickingPhotos = false;
     final pendingVoices = <_LegacyPendingVoice>[];
     var stage = initialStage.trim().isEmpty ? 'mid' : initialStage.trim();
     String? selectedMood = initialMood.trim().isEmpty
@@ -1379,10 +1409,21 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           );
 
           Future<void> pickPendingPhotos() async {
+            if (pickingPhotos) return;
+            setDialogState(() => pickingPhotos = true);
             try {
+              final available =
+                  MediaUploadPolicy.photoBatchMaxCount - pendingPhotos.length;
+              if (available <= 0) {
+                _toast(
+                  'This batch has 20 items. Remove one before selecting more.',
+                );
+                return;
+              }
               final picked = await pickVaultMedia(
                 context,
                 allowMultiple: true,
+                maxFiles: available,
                 remainingBytes:
                     MediaUploadPolicy.pendingMediaMaxBytes -
                     pendingPhotos.fold<int>(
@@ -1417,19 +1458,19 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 }
               }
 
-              final available =
-                  10 - existingPhotos.length - pendingPhotos.length;
-              final accepted = selected.take(available).toList();
-              setDialogState(() => pendingPhotos.addAll(accepted));
-
-              if (selected.length > available) {
-                _toast('You can add up to 10 photos or videos to one memory.');
-              }
+              if (!dialogContext.mounted) return;
+              setDialogState(() => pendingPhotos.addAll(selected));
               if (rejectedMessage != null) {
                 _toast(rejectedMessage);
               }
             } catch (e) {
-              _toast('Could not add media: $e');
+              _toast(
+                e is MediaUploadException ? e.message : publicErrorMessage(e),
+              );
+            } finally {
+              if (dialogContext.mounted) {
+                setDialogState(() => pickingPhotos = false);
+              }
             }
           }
 
@@ -1440,6 +1481,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           }
 
           Future<void> submitMemory() async {
+            if (pickingPhotos) return;
             if (promptController.text.trim().isNotEmpty) {
               Navigator.pop(dialogContext, memoryResult());
               return;
@@ -1508,7 +1550,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                           ),
                         ),
                         TextButton(
-                          onPressed: submitMemory,
+                          onPressed: pickingPhotos ? null : submitMemory,
                           child: Text(
                             actionLabel == 'Preserve memory'
                                 ? 'Preserve'
@@ -1591,7 +1633,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                       runSpacing: 10,
                       children: [
                         OutlinedButton.icon(
-                          onPressed: pickPendingPhotos,
+                          onPressed: pickingPhotos ? null : pickPendingPhotos,
                           icon: const Icon(Icons.photo_library_outlined),
                           label: Text(
                             pendingPhotos.isEmpty && existingPhotos.isEmpty
@@ -1612,6 +1654,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                         ),
                       ],
                     ),
+                    if (pickingPhotos) const LinearProgressIndicator(),
                     if (existingPhotos.isNotEmpty ||
                         pendingPhotos.isNotEmpty) ...[
                       const SizedBox(height: 16),
@@ -1622,6 +1665,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
+                      if (pendingPhotos.isNotEmpty)
+                        Text('${pendingPhotos.length} / 20 selected'),
                       const SizedBox(height: 10),
                       SizedBox(
                         height: 116,
@@ -1684,6 +1729,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                           )
                                         : Image.memory(
                                             photo.bytes,
+                                            cacheWidth: 360,
                                             width: 116,
                                             height: 116,
                                             fit: BoxFit.contain,
@@ -1696,10 +1742,13 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                   child: IconButton.filledTonal(
                                     tooltip: 'Remove media',
                                     visualDensity: VisualDensity.compact,
-                                    onPressed: () => setDialogState(
-                                      () =>
-                                          pendingPhotos.removeAt(pendingIndex),
-                                    ),
+                                    onPressed: pickingPhotos
+                                        ? null
+                                        : () => setDialogState(
+                                            () => pendingPhotos.removeAt(
+                                              pendingIndex,
+                                            ),
+                                          ),
                                     icon: const Icon(Icons.close, size: 18),
                                   ),
                                 ),
@@ -1903,7 +1952,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: submitMemory,
+                        onPressed: pickingPhotos ? null : submitMemory,
                         icon: const Icon(Icons.auto_awesome, size: 18),
                         label: Text(actionLabel),
                       ),
@@ -1986,51 +2035,44 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     }
   }
 
+  bool _selectingMemoryMedia = false;
+  MemoryMediaTarget _memoryMediaTarget(String memoryId) =>
+      MemoryMediaTarget.legacy(
+        familyId: widget.familyId,
+        memberId: widget.legacyMemberId,
+        memoryId: memoryId,
+      );
+
   Future<void> _uploadMemoryPhoto(String memoryId) async {
+    if (_selectingMemoryMedia) return;
+    _selectingMemoryMedia = true;
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await pickVaultMedia(context);
+      final picked = await pickVaultMedia(context, allowMultiple: true);
       if (picked == null || picked.files.isEmpty) return;
-
-      final file = picked.files.first;
-      final Uint8List? bytes = file.bytes;
-      if (bytes == null) throw Exception('No image bytes received.');
-
-      final image = await VaultMediaUpload.prepare(
-        bytes,
-        fileName: file.name,
-        contentType: _contentTypeFromExt(_extFromName(file.name)),
+      final media = await prepareMemoryMedia(picked.files);
+      if (!mounted || _supabase.auth.currentUser?.id != userId) return;
+      final count = await showMemoryMediaUpload(
+        context,
+        batch: MemoryMediaBatch(
+          client: _supabase,
+          target: _memoryMediaTarget(memoryId),
+          media: media,
+        ),
       );
-      final ts = DateTime.now().millisecondsSinceEpoch;
-      final path =
-          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/$ts.${image.extension}';
-
-      await _supabase.storage
-          .from(_photosBucket)
-          .uploadBinary(
-            path,
-            image.bytes,
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: image.contentType,
-            ),
-          );
-
-      await _supabase.from('legacy_memory_photos').insert({
-        'legacy_memory_id': memoryId,
-        'legacy_member_id': widget.legacyMemberId,
-        'family_id': widget.familyId,
-        'path': path,
-      });
-
-      await _loadMemoryPhotos();
-      _toast('Media added to memory.');
+      if (!mounted || _supabase.auth.currentUser?.id != userId) return;
+      if (count > 0) {
+        await _loadMemoryPhotos();
+        _toast('$count media items added to memory.');
+      }
     } on PostgrestException catch (e) {
       await _handleUploadError(e, 'Add media failed');
     } catch (e) {
       await _handleUploadError(e, 'Add media failed');
+    } finally {
+      _selectingMemoryMedia = false;
     }
   }
 
@@ -2043,35 +2085,27 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) throw Exception('Not signed in');
 
-    for (var index = 0; index < photos.length; index++) {
-      final photo = photos[index];
-      MediaUploadPolicy.validateUint8ListOrThrow(
-        MediaUploadPolicy.visualKind(photo.name),
-        photo.bytes,
-        fileName: photo.name,
-        contentType: photo.contentType,
-      );
-      final ts = DateTime.now().microsecondsSinceEpoch + index;
-      final path =
-          '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/memories/$memoryId/$ts.${photo.extension}';
-
-      await _supabase.storage
-          .from(_photosBucket)
-          .uploadBinary(
-            path,
-            photo.bytes,
-            fileOptions: FileOptions(
-              upsert: false,
-              contentType: photo.contentType,
-            ),
-          );
-
-      await _supabase.from('legacy_memory_photos').insert({
-        'legacy_memory_id': memoryId,
-        'legacy_member_id': widget.legacyMemberId,
-        'family_id': widget.familyId,
-        'path': path,
-      });
+    if (!mounted) return;
+    await showMemoryMediaUpload(
+      context,
+      autoStart: true,
+      batch: MemoryMediaBatch(
+        client: _supabase,
+        target: _memoryMediaTarget(memoryId),
+        media: photos
+            .map(
+              (p) => PendingMemoryMedia(
+                name: p.name,
+                bytes: p.bytes,
+                extension: p.extension,
+                contentType: p.contentType,
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (_supabase.auth.currentUser?.id != userId || !mounted) {
+      throw const AuthException('Account changed.');
     }
   }
 
@@ -2128,7 +2162,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
   }
 
   Future<void> _indexLegacyMemoryVoice(String voiceId) async {
-    if (!mounted || !await requestAiProcessingConsent(context) || !mounted) return;
+    if (!mounted || !await requestAiProcessingConsent(context) || !mounted)
+      return;
     final token = _supabase.auth.currentSession?.accessToken.trim();
     if (token == null || token.isEmpty) return;
 
@@ -2580,7 +2615,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           ),
           const SizedBox(height: 12),
           if (_loadingPhotos)
-            const Center(child: CircularProgressIndicator())
+            const ContentPlaceholder(width: double.infinity, height: 132)
           else if (_photoError != null)
             Text(
               'Photo load issue: $_photoError',
@@ -3076,12 +3111,32 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                     if (value == 'edit') _editMemory(m);
                     if (value == 'delete') _deleteMemory(m);
                     if (value == 'report') {
-                      showContentReport(context, kind: 'legacy_memory', targetId: memoryId);
+                      showContentReport(
+                        context,
+                        kind: 'legacy_memory',
+                        targetId: memoryId,
+                      );
+                    }
+                    if (value == 'sharing') {
+                      showMemorySharingStatus(
+                        context,
+                        kind: 'legacy_memory',
+                        targetId: memoryId,
+                        client: _supabase,
+                      );
                     }
                   },
                   itemBuilder: (_) => const [
                     PopupMenuItem(value: 'edit', child: Text('Edit memory')),
-                    PopupMenuItem(value: 'report', child: Text('Report memory or media')),
+                    PopupMenuItem(
+                      value: 'report',
+                      child: Text('Report memory or media'),
+                    ),
+                    if (contentScreeningControlsEnabled)
+                      PopupMenuItem(
+                        value: 'sharing',
+                        child: Text('Sharing status'),
+                      ),
                     PopupMenuDivider(),
                     PopupMenuItem(
                       value: 'delete',
@@ -3171,12 +3226,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         ),
         const SizedBox(height: 8),
         if (_loadingMemories)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(10),
-              child: CircularProgressIndicator(),
-            ),
-          )
+          const FeedPlaceholder()
         else if (_memoryError != null)
           _fieldCard(
             child: Text(
@@ -3234,8 +3284,13 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         actions: [
           IconButton(
             tooltip: 'Report profile or media',
-            onPressed: _loading || _error != null ? null : () => showContentReport(
-              context, kind: 'legacy_profile', targetId: widget.legacyMemberId),
+            onPressed: _loading || _error != null
+                ? null
+                : () => showContentReport(
+                    context,
+                    kind: 'legacy_profile',
+                    targetId: widget.legacyMemberId,
+                  ),
             icon: const Icon(Icons.flag_outlined),
           ),
           IconButton(
@@ -3267,7 +3322,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             ),
           ),
           _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const SingleChildScrollView(
+                  padding: EdgeInsets.all(16),
+                  child: FeedPlaceholder(),
+                )
               : _error != null
               ? Center(child: Text(_error!))
               : _legacyPageContent(),

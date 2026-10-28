@@ -10,7 +10,12 @@ const snapshot={ report:{id,kind:'legacy_memory',status:'open',reason:'privacy',
 const png=Buffer.from([137,80,78,71,13,10,26,10]);
 async function fixture(){
   const calls=[];let time=0;
-  const backend={request:async(path,body)=>{calls.push({path,body}); if(path.includes('preview_content_report'))return body.p_media_id?snapshot.media[0]:snapshot;return [];},download:async()=>png};
+  const backend={request:async(path,body)=>{calls.push({path,body});
+    if(path.includes('preview_content_report'))return body.p_media_id?snapshot.media[0]:snapshot;
+    if(path.includes('next_content_media_retirement'))return null;
+    if(path.includes('content_report_media_status'))return {state:'retired',hidden:true,pending:0,completed:1};
+    if(path.includes('review_content_report_checked'))return {id,action:body.p_action,status:'resolved'};
+    return [];},download:async()=>png};
   const app=await startReviewServer({backend,reviewer:'Ross',now:()=>time});
   const origin=new URL(app.url).origin;
   const post=(path,body={},headers={})=>fetch(`${origin}${path}`,{method:'POST',headers:{origin,'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
@@ -100,4 +105,16 @@ test('provider requests are fixed-origin, bounded, no-redirect and redact upstre
   await assert.rejects(backend.request('/rest/v1/rpc/preview_content_report',{}),(e)=>!e.message.includes('SECRET'));
   assert.equal(options.redirect,'error');assert.ok(options.signal);
   await assert.rejects(readBounded((async function*(){yield Buffer.alloc(20);})(),10),/limit/);
+});
+test('retry is case-bound, ignores injected file paths, and refuses stale previews',async()=>{
+  const app=await fixture();try{
+    const response=await app.post('/api/retire',{id,revision:version,bucket:'secrets',source:'anything',destination:'anything'},app.headers);
+    assert.equal(response.status,200);
+    assert.ok(app.calls.every(c=>!JSON.stringify(c).includes('secrets')));
+    assert.equal(app.calls[1].path,'/rest/v1/rpc/next_content_media_retirement');
+    assert.deepEqual(app.calls[1].body,{p_report_id:id});
+    const before=app.calls.length;
+    assert.equal((await app.post('/api/retire',{id,revision:'b'.repeat(32)},app.headers)).status,409);
+    assert.equal(app.calls.length,before+1);
+  }finally{await app.close();}
 });

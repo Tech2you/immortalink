@@ -617,7 +617,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
       MaterialPageRoute(
         builder: (_) => FamilyTreeScreen(familyId: widget.familyId),
       ),
-      (route) => false,
+      (route) => route.isFirst,
     );
   }
 

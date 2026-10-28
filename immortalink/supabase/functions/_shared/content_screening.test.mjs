@@ -64,6 +64,38 @@ test('image-only JPEG, PNG and WebP inputs use their detected MIME type', async 
   }
 });
 
+test('up to four photos and text share ONE moderation request and result', async () => {
+  let calls = 0;
+  const result = await screenTextOrImage({ text: 'A family lunch',
+    images: Array.from({ length: 4 }, () => ({ bytes: png, mime: 'image/png' })) }, configured(async (_, options) => {
+    calls++;
+    const body = JSON.parse(options.body);
+    assert.equal(body.input.length, 5);
+    assert.equal(body.input.filter(x => x.type === 'image_url').length, 4);
+    assert(new TextEncoder().encode(options.body).length < SCREENING_LIMITS.requestBytes);
+    return json(safeBody());
+  }));
+  assert.equal(result.state, 'clear'); assert.equal(calls, 1);
+});
+
+test('oversized, ambiguous, malformed or partly invalid photo batches never send', async () => {
+  const photo = { bytes: png, mime: 'image/png' };
+  const large = new Uint8Array(6 * 1024 * 1024); large.set(png);
+  const cases = [
+    [{ images: Array(5).fill(photo) }, 'IMAGE_COUNT_INVALID'],
+    [{ images: null }, 'IMAGE_COUNT_INVALID'],
+    [{ images: {}, text: 'caption' }, 'IMAGE_COUNT_INVALID'],
+    [{ image: photo, images: [photo] }, 'INPUT_UNSUPPORTED'],
+    [{ images: [photo, null] }, 'IMAGE_INVALID'],
+    [{ images: [{ bytes: large, mime: 'image/png' }, { bytes: large, mime: 'image/png' }] }, 'IMAGE_BATCH_TOO_LARGE'],
+    [{ images: [] }, 'INPUT_EMPTY'],
+  ];
+  for (const [input, code] of cases) {
+    const result = await screenTextOrImage(input, configured(async () => { assert.fail('Must not send'); }));
+    assert.equal(result.code, code); assert.equal(result.state, 'pending');
+  }
+});
+
 test('empty, oversized and unsupported inputs cannot be silently approved or sent', async () => {
   let calls = 0;
   const fetcher = async () => { calls++; return json(safeBody()); };

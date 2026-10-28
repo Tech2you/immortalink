@@ -1,13 +1,18 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Heiro | Safety review</title><link rel="stylesheet" href="/review.css"><script src="/review.js" defer></script></head>
+<title>Heiro | Safety review</title><link rel="stylesheet" href="/review.css"><script src="/screening-review.js" defer></script><script src="/review.js" defer></script></head>
 <body><header><div><strong>Heiro</strong><span>Safety review</span></div><div><span id="reviewer"></span><button id="logout">End session</button></div></header>
 <p id="status" role="status">Opening private session...</p>
 <main><aside><h1>Reports</h1><button id="refresh">Refresh queue</button><p id="health"></p>
 <form id="lookup"><label for="reference">Report reference</label><input id="reference" required maxlength="36"><button>Open case</button></form>
-<ul id="queue"></ul></aside><section id="case"><h2>Select a report</h2></section></main>
+<ul id="queue"></ul><div id="screening-panel" hidden><h2>Automatic checks</h2>
+<p id="screening-health" role="status"></p>
+<label for="screening-filter">Check status</label><select id="screening-filter"><option value="active">Awaiting review</option><option value="held">Kept private</option><option value="approved">Approved</option><option value="obsolete">Closed or changed</option></select>
+<button id="screening-refresh">Refresh checks</button><form id="screening-lookup"><label for="screening-reference">Check reference</label><input id="screening-reference" required maxlength="36"><button>Open check</button></form>
+<ul id="screening-queue"></ul></div></aside><section id="case"><h2>Select a report</h2></section></main>
 <template id="case-template"><div class="case-heading"><h2></h2><span class="state"></span></div><p class="reference"></p>
 <dl class="details"></dl><h3>Reporter's statement</h3><p class="statement"></p><p class="scope notice"></p>
+<p class="retirement notice" role="status"></p><button class="retry-retirement" type="button" hidden>Retry media retirement</button>
 <h3>Current content</h3><div class="content"></div><div class="attachments"></div>
 <p class="notice">If you suspect child sexual abuse material, stop previewing and use the restricted escalation process. Do not download, forward or submit it to an AI service.</p>
 <form class="decision"><h3>Review decision</h3><label for="decision-action">Action</label><select id="decision-action" name="action" required>
@@ -17,4 +22,13 @@
 </select><label for="decision-notes">Reason</label><textarea id="decision-notes" name="notes" required maxlength="2000" rows="3"></textarea>
 <label for="decision-confirm">Confirm report reference</label><input id="decision-confirm" name="confirm" required maxlength="36" autocomplete="off">
 <p class="notice">Hiding restricts new access; previously downloaded or cached copies may remain. Account actions are separate from content removal. No action here deletes memories or changes subscriptions.</p>
-<button type="submit">Record decision</button></form></template></body></html>
+<button type="submit">Record decision</button></form></template>
+<template id="screening-case-template"><div class="case-heading"><h2>Automatic check</h2><span class="state"></span></div><p class="reference"></p><dl class="details"></dl>
+<p class="scope notice"></p><h3>Held content</h3><div class="content"></div><div class="attachments"></div>
+<p class="notice">If you suspect child sexual abuse material, stop previewing and use the restricted escalation process. Do not download, forward or submit it to an AI service.</p>
+<form class="decision"><h3>Review decision</h3><label for="screening-action">Check action</label><select id="screening-action" name="action" required>
+<option value="review">Mark under review</option><option value="hold">Keep private</option><option value="approve">Approve this version for family sharing</option><option value="obsolete">Close unavailable check</option></select>
+<label for="screening-notes">Decision reason</label><textarea id="screening-notes" name="notes" required maxlength="2000" rows="3"></textarea>
+<label for="screening-confirm">Confirm check reference</label><input id="screening-confirm" name="confirm" required maxlength="36" autocomplete="off">
+<p class="notice">Keeping private or closing a check does not delete content. Approval applies only to this version and does not remove other restrictions or change subscriptions.</p>
+<button type="submit">Record check decision</button></form></template></body></html>

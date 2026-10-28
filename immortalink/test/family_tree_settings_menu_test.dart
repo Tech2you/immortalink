@@ -17,6 +17,7 @@ void main() {
                 canRecenter: true,
                 canLeave: true,
                 canEditName: true,
+                canManageSuccessor: true,
               ),
             ],
           ),
@@ -51,7 +52,7 @@ void main() {
     }
   });
 
-  testWidgets('non-owner cannot rename; large text fits a narrow phone', (
+  testWidgets('member can rename but not choose successor; large text fits', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(320, 700);
@@ -73,7 +74,8 @@ void main() {
                 onSelected: (_) {},
                 canRecenter: true,
                 canLeave: true,
-                canEditName: false,
+                canEditName: true,
+                canManageSuccessor: false,
               ),
             ],
           ),
@@ -88,7 +90,7 @@ void main() {
         matching: find.byType(PopupMenuItem<FamilyTreeAction>),
       ),
     );
-    expect(item.enabled, isFalse);
+    expect(item.enabled, isTrue);
     expect(find.text('Account successor'), findsNothing);
     expect(tester.takeException(), isNull);
   });

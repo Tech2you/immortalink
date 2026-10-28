@@ -23,6 +23,16 @@ void main() {
   );
 
   group('EverRoot quota messages', () {
+    test('hourly invite rate is a wait message, never a paid upgrade', () {
+      const error = 'ERR_EVERROOT_INVITE_RATE_LIMIT';
+      expect(isEverRootQuotaError(error), isTrue);
+      expect(isEverRootFamilyUpgradeError(error), isFalse);
+      expect(everRootQuotaMessageFromError(error), contains('last hour'));
+      expect(
+        everRootQuotaMessageFromError(error),
+        contains('does not require'),
+      );
+    });
     test('burst cooldown is friendly and is not an upgrade prompt', () {
       const error = 'ERR_EVERROOT_USAGE_BURST: private implementation detail';
       expect(isEverRootFamilyUpgradeError(error), isFalse);

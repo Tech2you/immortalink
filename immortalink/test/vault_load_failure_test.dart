@@ -8,6 +8,20 @@ import 'package:immortalink/widgets/vault_load_failure.dart';
 
 void main() {
   const secret = 'private-host.supabase.co user-123 token=secret';
+  test('family admission limit is clear without exposing backend details', () {
+    final message = publicErrorMessage(
+      const PostgrestException(
+        message: 'FAMILY_MEMBERSHIP_LIMIT',
+        code: 'P0001',
+        details: secret,
+      ),
+    );
+    expect(
+      message,
+      'You already belong to a family. Joining another family is not available yet.',
+    );
+    expect(message, isNot(contains(secret)));
+  });
   test(
     'public errors never echo backend details or arbitrary exception text',
     () {
@@ -19,6 +33,7 @@ void main() {
           ),
         ),
         TimeoutException(secret),
+        AuthRetryableFetchException(message: secret),
         const AuthException(secret),
         const PostgrestException(
           message: secret,
@@ -27,6 +42,8 @@ void main() {
           hint: secret,
         ),
         const PostgrestException(message: secret, code: '500'),
+        const PostgrestException(message: secret, code: '401'),
+        const PostgrestException(message: secret, code: '403'),
         StateError(secret),
       ];
       for (final error in errors) {

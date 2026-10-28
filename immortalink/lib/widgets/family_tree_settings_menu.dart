@@ -9,6 +9,7 @@ class FamilyTreeSettingsMenu extends StatelessWidget {
     required this.canRecenter,
     required this.canLeave,
     required this.canEditName,
+    required this.canManageSuccessor,
     this.enabled = true,
   });
 
@@ -16,6 +17,7 @@ class FamilyTreeSettingsMenu extends StatelessWidget {
   final bool canRecenter;
   final bool canLeave;
   final bool canEditName;
+  final bool canManageSuccessor;
   final bool enabled;
 
   @override
@@ -45,7 +47,7 @@ class FamilyTreeSettingsMenu extends StatelessWidget {
         canEditName,
       ),
       const PopupMenuDivider(),
-      if (canEditName)
+      if (canManageSuccessor)
         _item(
           FamilyTreeAction.successor,
           Icons.manage_accounts_outlined,

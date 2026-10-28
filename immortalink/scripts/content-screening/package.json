@@ -1,0 +1,9 @@
+{
+  "name": "heiro-screening-worker-local",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20.9.0" },
+  "scripts": { "test": "node --test --test-concurrency=1 *.test.mjs" },
+  "devDependencies": { "@imagemagick/magick-wasm": "0.0.45", "sharp": "0.35.5" }
+}

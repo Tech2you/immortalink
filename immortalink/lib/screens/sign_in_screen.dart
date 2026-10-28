@@ -334,7 +334,6 @@ class _SignInScreenState extends State<SignInScreen> {
                       : const EdgeInsets.fromLTRB(18, 16, 18, 18))
                 : const EdgeInsets.fromLTRB(24, 20, 24, 22);
             final logoHeight = tight ? 104.0 : (compact ? 132.0 : 168.0);
-            final logoScale = tight ? 1.16 : (compact ? 1.24 : 1.34);
             final verticalGap = tight ? 18.0 : (compact ? 24.0 : 32.0);
             final outerPadding = tight ? 12.0 : 22.0;
             Widget modeButton(_AuthMode mode, String label) {
@@ -455,13 +454,10 @@ class _SignInScreenState extends State<SignInScreen> {
                                         ),
                                       ),
                                     ),
-                                    Transform.scale(
-                                      scale: logoScale,
-                                      child: Image.asset(
-                                        'assets/images/sign_in_logo_heiro.png',
-                                        height: logoHeight,
-                                        fit: BoxFit.contain,
-                                      ),
+                                    Image.asset(
+                                      'assets/images/sign_in_logo_heiro.png',
+                                      height: logoHeight,
+                                      fit: BoxFit.contain,
                                     ),
                                   ],
                                 ),

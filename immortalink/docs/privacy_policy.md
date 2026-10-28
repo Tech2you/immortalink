@@ -2,13 +2,15 @@
 
 Effective date: 13 October 2026
 
+Last updated: 26 October 2026
+
 Heiro is a private family memory app that helps people build family trees, save photos and voice memories, invite relatives, and use AI-assisted tools to explore family stories. This Privacy Policy explains what information we collect, why we use it, who may receive it, and the choices you have.
 
 This policy applies to Heiro, including its TestFlight builds. The TestFlight-specific information below applies only when you use a beta build.
 
-## Who We Are
+## Privacy Contact
 
-Heiro is operated by Ross Strauss. For privacy questions, data requests, or safety concerns, contact us at linebreakers@outlook.com.
+For privacy questions, data requests, or safety concerns relating to Heiro, contact linebreakers@outlook.com.
 
 ## Information We Collect
 
@@ -137,5 +139,6 @@ We may update this Privacy Policy as Heiro changes. If we make important changes
 
 For questions, requests, or concerns about this Privacy Policy or your information, contact:
 
-Ross Strauss  
+Heiro Privacy Support
+
 Email: linebreakers@outlook.com

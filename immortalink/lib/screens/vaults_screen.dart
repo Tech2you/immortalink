@@ -1,12 +1,17 @@
 import 'dart:async';
 import '../services/connection_status.dart';
 import '../utils/public_error.dart';
+import '../utils/family_membership_limit.dart';
 import '../widgets/vault_load_failure.dart';
+import '../services/batched_signed_urls.dart';
+import '../services/family_directory.dart';
 import 'dart:convert';
 import '../services/recent_cache.dart';
 import 'recently_viewed_screen.dart';
 import 'content_safety_screen.dart';
 import '../widgets/vault_media.dart';
+import '../widgets/startup_screen.dart';
+import '../widgets/content_placeholder.dart';
 import '../widgets/content_safety_actions.dart';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -23,6 +28,7 @@ import '../services/apple_subscription_config.dart';
 import '../services/apple_subscription_service.dart';
 import '../services/push_notification_service.dart';
 import '../widgets/ai_processing_consent.dart';
+import '../widgets/content_screening_permission.dart';
 import '../widgets/legal_links.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import 'vault_home_screen.dart';
@@ -33,9 +39,9 @@ enum _VaultSettingsAction {
   recentlyViewed,
   refresh,
   joinFamily,
-  createFamily,
   manageSubscription,
   aiPermission,
+  screeningPermission,
   safety,
   privacy,
   terms,
@@ -44,6 +50,8 @@ enum _VaultSettingsAction {
   deleteAccount,
   signOut,
 }
+
+enum _VaultRowAction { rename, delete }
 
 class VaultsScreen extends StatefulWidget {
   const VaultsScreen({super.key});
@@ -57,6 +65,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
   bool _pushRegistrationStarted = false;
 
   void _openJoinFamilyScreen() {
+    if (_familyMemberships.isNotEmpty) {
+      _toast(singleFamilyMembershipMessage);
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const JoinFamilyScreen()),
@@ -78,24 +90,24 @@ class _VaultsScreenState extends State<VaultsScreen> {
     }
   }
 
-  Future<void> _editFamilyPhoto(String familyId) async {
+  Future<void> _editFamilyProfile(String familyId) async {
     if (_familyPhotoBusy.contains(familyId)) return;
     final membership = _familyMemberships.firstWhere(
       (row) => row['family_id'] == familyId,
       orElse: () => <String, dynamic>{},
     );
+    if (membership.isEmpty) return;
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (membership['role'] == 'owner')
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('Edit family name'),
-                onTap: () => Navigator.pop(context, 'rename'),
-              ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Edit family name'),
+              onTap: () => Navigator.pop(context, 'rename'),
+            ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Change family photo'),
@@ -159,16 +171,17 @@ class _VaultsScreenState extends State<VaultsScreen> {
         }
       });
       _toast('Family name updated.');
-    } catch (_) {
-      _toast(
-        'Could not rename the family. Only a family owner can change its name.',
-      );
+    } catch (error) {
+      _toast(publicErrorMessage(error));
     } finally {
       if (mounted) setState(() => _familyPhotoBusy.remove(familyId));
     }
   }
 
   bool _loading = true;
+  bool _initialAccountLoading = true;
+  bool _startingAccount = true;
+  bool _offlineStartup = false;
   Object? _error;
   bool _vaultLoadInProgress = false;
 
@@ -178,7 +191,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
   Timer? _homeCacheTimer;
 
   void _homeConnectionChanged() {
-    if (!mounted) return;
+    if (!mounted || _startingAccount || _offlineStartup) return;
     if (_connection.offline) {
       unawaited(_restoreHome());
     } else {
@@ -191,8 +204,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (!mounted) return;
     setState(() {
       _vault = null;
+      _cachedHome = false;
       _vaultAvatarUrl = null;
       _familyFeed = [];
+      ++_feedRequest;
       _avatarUrlCache.clear();
       _feedPhotosByMemoryId.clear();
       _feedVoiceByMemoryId.clear();
@@ -229,6 +244,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
   bool _loadingFeed = false;
   String? _feedError;
   List<_FeedItem> _familyFeed = [];
+  String? _feedFamilyId;
+  int _feedRequest = 0;
 
   final Map<String, String?> _avatarUrlCache = {};
   final Map<String, List<_MemPhoto>> _feedPhotosByMemoryId = {};
@@ -264,7 +281,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
     _connection.attach();
     RecentCache.instance.addListener(_homeCacheCleared);
     _homeCacheTimer = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (_cachedHome || _connection.offline) unawaited(_restoreHome());
+      if (!_startingAccount &&
+          !_offlineStartup &&
+          (_cachedHome || _connection.offline))
+        unawaited(_restoreHome());
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startAccount();
@@ -272,24 +292,48 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   Future<void> _startAccount() async {
-    await _restoreHome();
     final user = _supabase.auth.currentUser;
-    FirstAccountSetupResult? setupResult;
-    if (needsFirstAccountSetup(user?.userMetadata)) {
-      setupResult = await Navigator.of(context).push<FirstAccountSetupResult>(
-        MaterialPageRoute(builder: (_) => const FirstAccountSetupScreen()),
-      );
+    _startingAccount = true;
+    try {
+      // Do not render a cached partial account before current membership is known.
+      await _connection.check();
+      if (!mounted || _supabase.auth.currentUser?.id != user?.id) return;
+      if (user != null && _connection.offline) {
+        setState(() {
+          _offlineStartup = true;
+          _initialAccountLoading = false;
+        });
+        return;
+      }
+      FirstAccountSetupResult? setupResult;
+      if (needsFirstAccountSetup(user?.userMetadata)) {
+        setupResult = await Navigator.of(context).push<FirstAccountSetupResult>(
+          MaterialPageRoute(builder: (_) => const FirstAccountSetupScreen()),
+        );
+      }
+      if (!mounted || _supabase.auth.currentUser?.id != user?.id) return;
+      await _loadVault();
+      if (!mounted || _offlineStartup || _error != null) return;
+      final invite = await pendingFamilyInviteCode();
+      if (!mounted) return;
+      await _openPendingInviteIfNeeded();
+      if (!mounted) return;
+      if (invite.isEmpty && setupResult == FirstAccountSetupResult.familyTree) {
+        await _ensureFamilyAndOpenTree();
+      }
+    } finally {
+      _startingAccount = false;
     }
-    if (!mounted || _supabase.auth.currentUser?.id != user?.id) return;
-    await _loadVault();
-    if (!mounted) return;
-    final invite = await pendingFamilyInviteCode();
-    if (!mounted) return;
-    await _openPendingInviteIfNeeded();
-    if (!mounted) return;
-    if (invite.isEmpty && setupResult == FirstAccountSetupResult.familyTree) {
-      await _ensureFamilyAndOpenTree();
-    }
+  }
+
+  void _retryOnline() {
+    if (_startingAccount || _vaultLoadInProgress) return;
+    setState(() {
+      _offlineStartup = false;
+      _initialAccountLoading = true;
+      _cachedHome = false;
+    });
+    unawaited(_startAccount());
   }
 
   Future<void> _openPendingInviteIfNeeded() async {
@@ -401,9 +445,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
       case _VaultSettingsAction.joinFamily:
         _openJoinFamilyScreen();
         return;
-      case _VaultSettingsAction.createFamily:
-        await _ensureFamilyAndOpenTree(createAnother: true);
-        return;
       case _VaultSettingsAction.manageSubscription:
         await _showSubscriptionSettings();
         return;
@@ -412,6 +453,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
         return;
       case _VaultSettingsAction.aiPermission:
         await requestAiProcessingConsent(context, settings: true);
+        return;
+      case _VaultSettingsAction.screeningPermission:
+        await requestContentScreeningPermission(context, settings: true);
         return;
       case _VaultSettingsAction.safety:
         await Navigator.push(
@@ -481,15 +525,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       await _supabase.auth.signOut();
       _removeFamilyFeedRealtime();
       if (!mounted) return;
-      setState(() {
-        _vault = null;
-        _vaultAvatarUrl = null;
-        _error = null;
-        _familyFeed = [];
-        _feedError = null;
-        _familyMemberships = [];
-        _activeFamilyId = null;
-      });
+      Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e) {
       _toast(publicErrorMessage(e));
     }
@@ -691,7 +727,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
     final epoch = RecentCache.instance.generation;
 
     setState(() {
-      _loading = showLoading && !_cachedHome;
+      _loading = showLoading && _vault == null && !_cachedHome;
       _error = null;
     });
 
@@ -741,24 +777,26 @@ class _VaultsScreenState extends State<VaultsScreen> {
         }
       }
 
-      String? signedUrl;
       final path = (data?['avatar_path'] as String?)?.trim();
-      if (path != null && path.isNotEmpty) {
-        signedUrl = await _signedAvatarUrl(
-          path,
-        ).timeout(const Duration(seconds: 12));
-      }
+      final avatarFuture = path == null || path.isEmpty
+          ? Future<String?>.value(null)
+          : _signedAvatarUrl(
+              path,
+            ).timeout(const Duration(seconds: 8), onTimeout: () => null);
 
-      if (!mounted) return;
+      if (!mounted || epoch != RecentCache.instance.generation) return;
       setState(() {
+        final sameAvatar =
+            _vault?['id'] == data?['id'] &&
+            _vault?['avatar_path'] == data?['avatar_path'];
         _vault = data;
-        _vaultAvatarUrl = signedUrl;
+        if (!sameAvatar) _vaultAvatarUrl = null;
         _cachedHome = false;
       });
       if (data != null) {
         await RecentCache.instance.put(
           'home:vault',
-          utf8.encode(jsonEncode({'vault': data, 'avatar': signedUrl})),
+          utf8.encode(jsonEncode({'vault': data, 'avatar': null})),
           epoch: epoch,
           kind: 'home',
         );
@@ -768,19 +806,45 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
       await _cleanupStaleMembershipsForFreshVault(data, user.id);
       await _loadFamilyMemberships(user.id);
-      if (!mounted) return;
-      setState(() => _loading = false);
+      if (!mounted || _supabase.auth.currentUser?.id != user.id) return;
+      setState(() {
+        _vault = data;
+        _loading = false;
+        _initialAccountLoading = false;
+      });
       _syncFamilyFeedRealtime();
       _registerForPushNotificationsOnce();
-      await _loadFamilyFeed();
+      await Future.wait([
+        _loadFamilyFeed(),
+        avatarFuture.then((url) async {
+          if (!mounted ||
+              epoch != RecentCache.instance.generation ||
+              _supabase.auth.currentUser?.id != user.id)
+            return;
+          setState(() => _vaultAvatarUrl = url);
+          if (data != null) {
+            await RecentCache.instance.put(
+              'home:vault',
+              utf8.encode(jsonEncode({'vault': data, 'avatar': url})),
+              epoch: epoch,
+              kind: 'home',
+            );
+          }
+        }),
+      ]);
     } catch (e) {
       _connection.report(e);
       if (isConnectionFailure(e)) {
+        if (_initialAccountLoading) {
+          if (mounted) setState(() => _offlineStartup = true);
+          return;
+        }
         await _restoreHome();
         if (_cachedHome) return;
       }
       if (e is AuthException ||
-          (e is PostgrestException && e.code == '42501')) {
+          (e is PostgrestException &&
+              const ['42501', '401', '403'].contains(e.code))) {
         await RecentCache.instance.clear();
       }
       if (!mounted) return;
@@ -790,7 +854,10 @@ class _VaultsScreenState extends State<VaultsScreen> {
     } finally {
       _vaultLoadInProgress = false;
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _initialAccountLoading = false;
+        });
       }
     }
   }
@@ -997,9 +1064,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Future<void> _loadFamilyFeed() async {
     final familyId = _activeFamilyId?.trim();
+    final request = ++_feedRequest;
     final cacheEpoch = RecentCache.instance.generation;
-    bool current() => mounted && cacheEpoch == RecentCache.instance.generation
-        && familyId == _activeFamilyId?.trim();
+    bool current() =>
+        mounted &&
+        request == _feedRequest &&
+        cacheEpoch == RecentCache.instance.generation &&
+        familyId == _activeFamilyId?.trim();
     final nextPhotos = <String, List<_MemPhoto>>{};
     final nextVoices = <String, List<_VoiceNote>>{};
 
@@ -1017,10 +1088,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
     setState(() {
       _loadingFeed = true;
       _feedError = null;
-      _familyFeed = [];
-      _avatarUrlCache.clear();
-      _feedPhotosByMemoryId.clear();
-      _feedVoiceByMemoryId.clear();
+      if (_feedFamilyId != familyId) {
+        _familyFeed = [];
+        _avatarUrlCache.clear();
+        _feedPhotosByMemoryId.clear();
+        _feedVoiceByMemoryId.clear();
+      }
+      _feedFamilyId = familyId;
     });
 
     try {
@@ -1033,31 +1107,24 @@ class _VaultsScreenState extends State<VaultsScreen> {
                 .eq('user_id', currentUserId)
                 .timeout(const Duration(seconds: 12))
                 .then((rows) => List<Map<String, dynamic>>.from(rows));
-      final memberRowsFuture = _supabase
-          .from('family_members')
-          .select('user_id')
-          .eq('family_id', familyId)
-          .timeout(const Duration(seconds: 12))
-          .then((rows) => List<Map<String, dynamic>>.from(rows));
+      final memberRowsFuture = loadFamilyMembers(_supabase, familyId);
 
-      final hiddenRows = await hiddenRowsFuture;
+      final accessRows = await Future.wait([
+        hiddenRowsFuture,
+        memberRowsFuture,
+      ]);
+      final hiddenRows = accessRows[0];
       final hiddenVaultIds = hiddenRows
           .map((row) => (row['hidden_vault_id'] ?? '').toString().trim())
           .where((id) => id.isNotEmpty)
           .toSet();
 
-      final memberRows = await memberRowsFuture;
+      final memberRows = accessRows[1];
       final memberUserIds = memberRows
           .map((row) => (row['user_id'] ?? '').toString().trim())
           .where((id) => id.isNotEmpty)
           .toList();
-      final vaultRows = memberUserIds.isEmpty
-          ? <Map<String, dynamic>>[]
-          : await _supabase
-                .from('vaults')
-                .select('id, name, display_name, avatar_path, owner_id')
-                .inFilter('owner_id', memberUserIds)
-                .timeout(const Duration(seconds: 12));
+      final vaultRows = await loadFamilyVaults(_supabase, memberUserIds);
       final currentVaultId = (_vault?['id'] ?? '').toString();
       final now = DateTime.now();
       final cutoff = now.subtract(const Duration(days: 30));
@@ -1096,34 +1163,35 @@ class _VaultsScreenState extends State<VaultsScreen> {
       }
 
       final nextAvatarUrlCache = <String, String?>{};
-      final avatarEntries = await Future.wait(
-        visibleVaults.map((v) async {
-          final id = (v['id'] ?? '').toString();
-          final avatarPath = (v['avatar_path'] ?? '').toString().trim();
-          if (avatarPath.isEmpty) return MapEntry<String, String?>(id, null);
-          return MapEntry<String, String?>(
-            id,
-            await _signedAvatarUrl(avatarPath),
-          );
-        }),
+      final avatarUrlsFuture = batchedSignedUrls(
+        _supabase,
+        'avatars',
+        visibleVaults.map((v) => (v['avatar_path'] ?? '').toString()),
       );
-      for (final entry in avatarEntries) {
-        nextAvatarUrlCache[entry.key] = entry.value;
+
+      final memoryRows = <Map<String, dynamic>>[];
+      for (final batch in familyIdBatches(vaultIds)) {
+        memoryRows.addAll(
+          await _supabase
+              .from('memories')
+              .select(
+                'id, vault_id, life_stage, prompt_text, prompt_key, body, created_at, share_to_family_feed',
+              )
+              .inFilter('vault_id', batch)
+              .eq('share_to_family_feed', true)
+              .neq('prompt_key', 'about_me')
+              .order('created_at', ascending: false)
+              .limit(12)
+              .timeout(const Duration(seconds: 12)),
+        );
       }
+      memoryRows.sort(
+        (a, b) => (b['created_at'] ?? '').toString().compareTo(
+          (a['created_at'] ?? '').toString(),
+        ),
+      );
 
-      final memoryRows = await _supabase
-          .from('memories')
-          .select(
-            'id, vault_id, life_stage, prompt_text, prompt_key, body, created_at, share_to_family_feed',
-          )
-          .inFilter('vault_id', vaultIds)
-          .eq('share_to_family_feed', true)
-          .neq('prompt_key', 'about_me')
-          .order('created_at', ascending: false)
-          .limit(12)
-          .timeout(const Duration(seconds: 12));
-
-      final allMemories = List<Map<String, dynamic>>.from(memoryRows);
+      final allMemories = memoryRows.take(12);
       final memories = allMemories.where((m) {
         final createdRaw = (m['created_at'] ?? '').toString().trim();
         final created = DateTime.tryParse(createdRaw)?.toLocal();
@@ -1149,61 +1217,71 @@ class _VaultsScreenState extends State<VaultsScreen> {
             .order('created_at', ascending: false)
             .timeout(const Duration(seconds: 12));
 
-        final photoRows = await photoRowsFuture;
-        final photoEntries = await Future.wait(
-          List<Map<String, dynamic>>.from(photoRows).map((row) async {
-            final id = (row['id'] ?? '').toString();
-            final memoryId = (row['memory_id'] ?? '').toString();
-            final path = (row['path'] ?? '').toString().trim();
-            if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
+        final mediaRows = await Future.wait([photoRowsFuture, voiceRowsFuture]);
+        final photoRows = List<Map<String, dynamic>>.from(mediaRows[0]);
+        final voiceRows = List<Map<String, dynamic>>.from(mediaRows[1]);
+        final mediaUrls = await Future.wait([
+          batchedSignedUrls(
+            _supabase,
+            'memory_photos',
+            photoRows.map((row) => (row['path'] ?? '').toString()),
+          ),
+          batchedSignedUrls(
+            _supabase,
+            'memory_voice',
+            voiceRows.map((row) => (row['path'] ?? '').toString()),
+          ),
+        ]);
+        final photoEntries = photoRows.map((row) {
+          final id = (row['id'] ?? '').toString();
+          final memoryId = (row['memory_id'] ?? '').toString();
+          final path = (row['path'] ?? '').toString().trim();
+          if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
 
-            final url = await _signedUrl('memory_photos', path);
-            if (url == null || url.trim().isEmpty) return null;
+          final url = mediaUrls[0][path];
+          if (url == null || url.trim().isEmpty) return null;
 
-            return _MemPhoto(id: id, memoryId: memoryId, path: path, url: url);
-          }),
-        );
+          return _MemPhoto(id: id, memoryId: memoryId, path: path, url: url);
+        });
         for (final photo in photoEntries) {
           if (photo == null) continue;
-          nextPhotos
-              .putIfAbsent(photo.memoryId, () => [])
-              .add(photo);
+          nextPhotos.putIfAbsent(photo.memoryId, () => []).add(photo);
         }
 
-        final voiceRows = await voiceRowsFuture;
-        final voiceEntries = await Future.wait(
-          List<Map<String, dynamic>>.from(voiceRows).map((row) async {
-            final id = (row['id'] ?? '').toString();
-            final memoryId = (row['memory_id'] ?? '').toString();
-            final path = (row['path'] ?? '').toString().trim();
-            final title = (row['title'] ?? '').toString().trim();
-            final createdAt = (row['created_at'] ?? '').toString();
+        final voiceEntries = voiceRows.map((row) {
+          final id = (row['id'] ?? '').toString();
+          final memoryId = (row['memory_id'] ?? '').toString();
+          final path = (row['path'] ?? '').toString().trim();
+          final title = (row['title'] ?? '').toString().trim();
+          final createdAt = (row['created_at'] ?? '').toString();
 
-            if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
+          if (id.isEmpty || memoryId.isEmpty || path.isEmpty) return null;
 
-            final url = await _signedUrl('memory_voice', path);
-            if (url == null || url.trim().isEmpty) return null;
+          final url = mediaUrls[1][path];
+          if (url == null || url.trim().isEmpty) return null;
 
-            return MapEntry(
-              memoryId,
-              _VoiceNote(
-                id: id,
-                path: path,
-                title: title.isEmpty ? 'Voice note' : title,
-                url: url,
-                createdAt: createdAt,
-              ),
-            );
-          }),
-        );
+          return MapEntry(
+            memoryId,
+            _VoiceNote(
+              id: id,
+              path: path,
+              title: title.isEmpty ? 'Voice note' : title,
+              url: url,
+              createdAt: createdAt,
+            ),
+          );
+        });
         for (final entry in voiceEntries) {
           if (entry == null) continue;
-          nextVoices
-              .putIfAbsent(entry.key, () => [])
-              .add(entry.value);
+          nextVoices.putIfAbsent(entry.key, () => []).add(entry.value);
         }
       }
 
+      final avatarUrls = await avatarUrlsFuture;
+      for (final v in visibleVaults) {
+        nextAvatarUrlCache[(v['id'] ?? '').toString()] =
+            avatarUrls[(v['avatar_path'] ?? '').toString().trim()];
+      }
       final items = <_FeedItem>[];
       for (final m in memories) {
         final vaultId = (m['vault_id'] ?? '').toString();
@@ -1250,12 +1328,20 @@ class _VaultsScreenState extends State<VaultsScreen> {
     } on PostgrestException catch (e) {
       if (!current()) return;
       setState(() {
+        _familyFeed = [];
+        _feedPhotosByMemoryId.clear();
+        _feedVoiceByMemoryId.clear();
+        _avatarUrlCache.clear();
         _feedError = publicErrorMessage(e);
         _loadingFeed = false;
       });
     } catch (e) {
       if (!current()) return;
       setState(() {
+        _familyFeed = [];
+        _feedPhotosByMemoryId.clear();
+        _feedVoiceByMemoryId.clear();
+        _avatarUrlCache.clear();
         _feedError = publicErrorMessage(e);
         _loadingFeed = false;
       });
@@ -1491,9 +1577,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
     }
   }
 
-  Future<void> _ensureFamilyAndOpenTree({bool createAnother = false}) async {
+  Future<void> _ensureFamilyAndOpenTree() async {
     final familyId = _activeFamilyId?.trim();
-    if (!createAnother && familyId != null && familyId.isNotEmpty) {
+    if (familyId != null && familyId.isNotEmpty) {
       if (!mounted) return;
       Navigator.push(
         context,
@@ -1508,9 +1594,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
       context: context,
       builder: (ctx) => MediaQuery(
         data: MediaQuery.of(ctx).copyWith(viewInsets: EdgeInsets.zero),
-        child: _CreateFamilyDialog(
-          title: createAnother ? 'Create another family' : 'Invite your family',
-        ),
+        child: const _CreateFamilyDialog(title: 'Invite your family'),
       ),
     );
 
@@ -1640,38 +1724,24 @@ class _VaultsScreenState extends State<VaultsScreen> {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Your family trees',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    _familyMemberships.length == 1
+                        ? 'Your family tree'
+                        : 'Your family trees',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                PopupMenuButton<_VaultSettingsAction>(
-                  tooltip: 'Family tree actions',
-                  icon: const Icon(Icons.more_horiz),
-                  onSelected: _handleSettingsAction,
-                  itemBuilder: (ctx) => const [
-                    PopupMenuItem(
-                      value: _VaultSettingsAction.joinFamily,
-                      child: ListTile(
-                        leading: Icon(Icons.group_add),
-                        title: Text('Join another family'),
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: _VaultSettingsAction.createFamily,
-                      child: ListTile(
-                        leading: Icon(Icons.add_circle_outline),
-                        title: Text('Create another family'),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
-              'You can join more than one. Your home family opens by default.',
+              _familyMemberships.length == 1
+                  ? 'Your family tree and shared memories.'
+                  : 'Your existing families remain available.',
               style: TextStyle(color: Colors.black.withOpacity(0.62)),
             ),
             const SizedBox(height: 8),
@@ -1684,14 +1754,11 @@ class _VaultsScreenState extends State<VaultsScreen> {
               return ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Tooltip(
-                  message: 'Edit family photo',
+                  message: 'Edit family details',
                   child: InkWell(
                     customBorder: const CircleBorder(),
-                    onTap: () => _editFamilyPhoto(id),
+                    onTap: () => _editFamilyProfile(id),
                     child: CircleAvatar(
-                      backgroundImage: _familyPhotos[id] == null
-                          ? null
-                          : NetworkImage(_familyPhotos[id]!),
                       backgroundColor: isActive
                           ? const Color(0xFFE6D7EF)
                           : Colors.black.withOpacity(0.06),
@@ -1702,7 +1769,16 @@ class _VaultsScreenState extends State<VaultsScreen> {
                             )
                           : _familyPhotos[id] == null
                           ? const Icon(Icons.account_tree)
-                          : null,
+                          : ClipOval(
+                              child: VaultMedia.network(
+                                _familyPhotos[id]!,
+                                width: 40,
+                                height: 40,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) =>
+                                    const Icon(Icons.account_tree),
+                              ),
+                            ),
                     ),
                   ),
                 ),
@@ -1773,16 +1849,22 @@ class _VaultsScreenState extends State<VaultsScreen> {
                       CircleAvatar(
                         radius: 18,
                         backgroundColor: Colors.black.withOpacity(0.06),
-                        backgroundImage: item.hasAvatar
-                            ? NetworkImage(item.avatarUrl!)
-                            : null,
                         child: !item.hasAvatar
                             ? Icon(
                                 Icons.person,
                                 size: 18,
                                 color: Colors.black.withOpacity(0.55),
                               )
-                            : null,
+                            : ClipOval(
+                                child: VaultMedia.network(
+                                  item.avatarUrl!,
+                                  width: 36,
+                                  height: 36,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) =>
+                                      const Icon(Icons.person_outline),
+                                ),
+                              ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -2127,11 +2209,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
             style: TextStyle(color: Colors.black.withOpacity(0.62)),
           ),
           const SizedBox(height: 14),
-          if (_loadingFeed)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 18),
-              child: Center(child: CircularProgressIndicator()),
-            )
+          if (_loadingFeed && _familyFeed.isEmpty)
+            const FeedPlaceholder()
           else if (_feedError != null)
             Text(
               'Family feed load failed: $_feedError',
@@ -2184,16 +2263,22 @@ class _VaultsScreenState extends State<VaultsScreen> {
                               CircleAvatar(
                                 radius: 19,
                                 backgroundColor: Colors.black.withOpacity(0.06),
-                                backgroundImage: item.hasAvatar
-                                    ? NetworkImage(item.avatarUrl!)
-                                    : null,
                                 child: !item.hasAvatar
                                     ? Icon(
                                         Icons.person,
                                         size: 18,
                                         color: Colors.black.withOpacity(0.55),
                                       )
-                                    : null,
+                                    : ClipOval(
+                                        child: VaultMedia.network(
+                                          item.avatarUrl!,
+                                          width: 38,
+                                          height: 38,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, _, _) =>
+                                              const Icon(Icons.person_outline),
+                                        ),
+                                      ),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
@@ -2362,12 +2447,19 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_cachedHome || _connection.offline) {
-      return const RecentlyViewedScreen();
+    if (_initialAccountLoading ||
+        _loading && !_offlineStartup && !_cachedHome) {
+      return const StartupScreen();
+    }
+    if (_offlineStartup || _cachedHome || _connection.offline) {
+      return RecentlyViewedScreen(onReconnect: _retryOnline);
     }
     final hasAvatar =
         _vaultAvatarUrl != null && _vaultAvatarUrl!.trim().isNotEmpty;
     final createdLabel = _formatCreatedAt(_vault?['created_at']);
+    final compactActions =
+        MediaQuery.sizeOf(context).width < 360 ||
+        MediaQuery.textScalerOf(context).scale(16) > 20;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F0F7),
@@ -2380,7 +2472,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),
             onSelected: _handleSettingsAction,
-            itemBuilder: (ctx) => const [
+            itemBuilder: (ctx) => [
               PopupMenuItem(
                 value: _VaultSettingsAction.recentlyViewed,
                 child: ListTile(
@@ -2395,13 +2487,14 @@ class _VaultsScreenState extends State<VaultsScreen> {
                   title: Text('Refresh'),
                 ),
               ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.joinFamily,
-                child: ListTile(
-                  leading: Icon(Icons.group_add),
-                  title: Text('Join family'),
+              if (_familyMemberships.isEmpty)
+                const PopupMenuItem(
+                  value: _VaultSettingsAction.joinFamily,
+                  child: ListTile(
+                    leading: Icon(Icons.group_add),
+                    title: Text('Join family'),
+                  ),
                 ),
-              ),
               PopupMenuDivider(),
               PopupMenuItem(
                 value: _VaultSettingsAction.manageSubscription,
@@ -2426,6 +2519,14 @@ class _VaultsScreenState extends State<VaultsScreen> {
                   title: Text('AI data permission'),
                 ),
               ),
+              if (contentScreeningControlsEnabled)
+                const PopupMenuItem(
+                  value: _VaultSettingsAction.screeningPermission,
+                  child: ListTile(
+                    leading: Icon(Icons.shield_outlined),
+                    title: Text('Sharing safety permission'),
+                  ),
+                ),
               PopupMenuItem(
                 value: _VaultSettingsAction.deleteAccount,
                 child: ListTile(
@@ -2567,33 +2668,80 @@ class _VaultsScreenState extends State<VaultsScreen> {
                                   ),
                                   title: Text(
                                     (_vault!['name'] ?? '').toString(),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                   subtitle: Text(createdLabel),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        tooltip: 'Rename',
-                                        onPressed: () => _renameVault(
-                                          (_vault!['id'] ?? '').toString(),
-                                          (_vault!['name'] ?? '').toString(),
+                                  trailing: compactActions
+                                      ? PopupMenuButton<_VaultRowAction>(
+                                          tooltip: 'Vault actions',
+                                          onSelected: (action) {
+                                            final id = (_vault!['id'] ?? '')
+                                                .toString();
+                                            if (action ==
+                                                _VaultRowAction.rename) {
+                                              _renameVault(
+                                                id,
+                                                (_vault!['name'] ?? '')
+                                                    .toString(),
+                                              );
+                                            } else {
+                                              _deleteVault(id);
+                                            }
+                                          },
+                                          itemBuilder: (_) => const [
+                                            PopupMenuItem(
+                                              value: _VaultRowAction.rename,
+                                              child: ListTile(
+                                                leading: Icon(
+                                                  Icons.edit_outlined,
+                                                ),
+                                                title: Text('Rename'),
+                                              ),
+                                            ),
+                                            PopupMenuItem(
+                                              value: _VaultRowAction.delete,
+                                              child: ListTile(
+                                                leading: Icon(
+                                                  Icons.delete_outline,
+                                                ),
+                                                title: Text('Delete'),
+                                              ),
+                                            ),
+                                          ],
+                                        )
+                                      : Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            IconButton(
+                                              tooltip: 'Rename',
+                                              onPressed: () => _renameVault(
+                                                (_vault!['id'] ?? '')
+                                                    .toString(),
+                                                (_vault!['name'] ?? '')
+                                                    .toString(),
+                                              ),
+                                              icon: const Icon(Icons.edit),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Delete',
+                                              onPressed: () => _deleteVault(
+                                                (_vault!['id'] ?? '')
+                                                    .toString(),
+                                              ),
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                              ),
+                                            ),
+                                            IconButton(
+                                              tooltip: 'Open',
+                                              onPressed: _openVaultHome,
+                                              icon: const Icon(
+                                                Icons.chevron_right,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                        icon: const Icon(Icons.edit),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Delete',
-                                        onPressed: () => _deleteVault(
-                                          (_vault!['id'] ?? '').toString(),
-                                        ),
-                                        icon: const Icon(Icons.delete_outline),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Open',
-                                        onPressed: _openVaultHome,
-                                        icon: const Icon(Icons.chevron_right),
-                                      ),
-                                    ],
-                                  ),
                                 ),
                               ),
                               KeyedSubtree(
@@ -2709,7 +2857,9 @@ class _DeleteAccountConfirmationDialogState
     if (client.auth.currentUser?.id != userId) return false;
     final now = DateTime.now();
     return rows.any((row) {
-      final end = DateTime.tryParse(row['current_period_end']?.toString() ?? '');
+      final end = DateTime.tryParse(
+        row['current_period_end']?.toString() ?? '',
+      );
       return end == null || end.isAfter(now);
     });
   }

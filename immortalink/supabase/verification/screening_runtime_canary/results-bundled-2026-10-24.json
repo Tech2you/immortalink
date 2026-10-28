@@ -1,0 +1,86 @@
+{
+  "scope": "Generated single-photo packaging diagnostic only; no database, Storage, family data or AI calls",
+  "tools": {
+    "colima": "0.10.3",
+    "dockerCli": "29.9.2",
+    "dockerEngine": "29.5.2",
+    "lima": "2.2.1",
+    "profile": "heiro-build",
+    "cpus": 2,
+    "memoryGiB": 2,
+    "diskGiB": 20,
+    "rootDiskGiB": 20,
+    "profileStoppedAfterTest": true,
+    "defaultDockerContextUnchanged": true,
+    "loginServiceEnabled": false
+  },
+  "packaging": {
+    "binaryPackaging": "static-file",
+    "decoderVersion": "0.0.45",
+    "decoderBytes": 15425791,
+    "moduleCopiedUnchanged": true,
+    "licenseAndNoticesIncluded": true,
+    "localBundleBytes": 16086872,
+    "localBrotliQuality6Bytes": 4967409,
+    "localBundlerNetwork": "none",
+    "perStartDecoderDownload": false,
+    "compatibilityCorrection": "Use Deno.readFile, not Deno.stat, for bundled static assets; exact size/hash are still checked",
+    "initialPrototypeBundleBytes": 47760710,
+    "initialPrototypeOutcome": "Failed local fixture; whole npm package included unnecessary binary assets",
+    "localHarnessCorrection": "Use an isolated user worker with one-shot retirement; earlier accumulated workers lost the connection on the largest fixture. That earlier run had no OOM readback, so the cause is not proven."
+  },
+  "local": {
+    "startedAt": "2026-10-24T10:50:39.479Z",
+    "finishedAt": "2026-10-24T10:50:41.024Z",
+    "runtimeImage": "supabase/edge-runtime@sha256:d5b0545da7826404668c3a53809f217a9c7093526c7036c18e79ddc61e4cbe01",
+    "runtimeVersion": "1.70.0",
+    "memoryLimitMb": 256,
+    "cpuHardLimitMs": 2000,
+    "workerPolicy": "oneshot",
+    "containerOomKilled": false,
+    "containerRemoved": true,
+    "binaryVerified": true,
+    "decoderInitialized": true,
+    "probes": [
+      { "label": "no-credential", "status": 401 },
+      { "label": "2048x1536", "status": 200, "completed": 1, "outputBytes": 376364, "wallMs": 154 },
+      { "label": "4032x3024", "status": 200, "completed": 1, "outputBytes": 169865, "wallMs": 240 },
+      { "label": "6000x4000", "status": 200, "completed": 1, "outputBytes": 107072, "wallMs": 276 }
+    ]
+  },
+  "hosted": {
+    "startedAt": "2026-10-24T10:51:23.713Z",
+    "finishedAt": "2026-10-24T10:51:50.476Z",
+    "diagnosticId": "46e418c1-aada-4335-a246-9a8b72b02aa3",
+    "gatewayJwtVerified": true,
+    "probes": [
+      { "label": "no-credential", "status": 401, "uploadedBytes": 0 },
+      { "label": "public-app-key", "status": 401, "uploadedBytes": 0 },
+      { "label": "service-get", "status": 405, "uploadedBytes": 0 },
+      { "label": "service-empty-body", "status": 413, "uploadedBytes": 0 },
+      { "label": "2048x1536", "status": 200, "uploadedBytes": 2187694, "completed": 1, "outputBytes": 376364, "serializedBytes": 501898, "wallMs": 373 },
+      { "label": "4032x3024", "status": 200, "uploadedBytes": 5419306, "completed": 1, "outputBytes": 169865, "serializedBytes": 226566, "wallMs": 703 },
+      { "label": "6000x4000", "status": 200, "uploadedBytes": 9194397, "completed": 1, "outputBytes": 107072, "serializedBytes": 142842, "wallMs": 438 }
+    ],
+    "observedFinalLifecycle": {
+      "timestamp": "2026-10-24T10:51:49.323Z",
+      "executionId": "4d9d276b-f6e9-4dc8-a253-eb1995b2aa12",
+      "reason": "EarlyDrop",
+      "cpuTimeUsedMs": 1383,
+      "shutdownMemoryBytes": 56974150,
+      "servedBy": "supabase-edge-runtime-1.77.7 (compatible with Deno v2.1.4)",
+      "region": "eu-west-3"
+    },
+    "diagnosticAbsent": true,
+    "existingFunctions": 10,
+    "existingFunctionFingerprintsUnchanged": true,
+    "independentCleanupReadbackPassed": true
+  },
+  "regressions": { "tests": 318, "passed": 318, "failed": 0, "skipped": 0 },
+  "limitations": [
+    "Processing wall time is not CPU time or total upload latency; shutdown memory is not peak memory.",
+    "The complete database-ticket/child/parent/provider flow is not hosted-verified.",
+    "No classifier quality, unsupported-format, concurrency or adversarial worst-case guarantee.",
+    "No screening migration, app function, payment, production policy, phone build or activation was changed."
+  ]
+}

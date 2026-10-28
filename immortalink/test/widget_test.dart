@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:immortalink/main.dart';
 import 'package:immortalink/services/onboarding_invite_state.dart';
+import 'package:immortalink/widgets/startup_screen.dart';
 
 void main() {
   setUpAll(() async {
@@ -29,6 +30,17 @@ void main() {
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const MyApp());
+    expect(find.byType(StartupScreen), findsOneWidget);
+    expect(
+      find.image(const AssetImage('assets/images/immortalink_logo.png')),
+      findsOneWidget,
+    );
+    expect(
+      find.image(const AssetImage('assets/images/sign_in_logo_heiro.png')),
+      findsNothing,
+    );
+    expect(find.text('Create account'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
 
     expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).title, 'Heiro');
@@ -55,6 +67,7 @@ void main() {
     });
 
     await tester.pumpWidget(const MyApp());
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
 
     expect(find.text('Create account'), findsWidgets);
@@ -76,6 +89,7 @@ void main() {
     });
 
     await tester.pumpWidget(const MyApp());
+    await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
 
     expect(find.text('Sign in'), findsWidgets);

@@ -9,6 +9,7 @@ import 'package:immortalink/screens/recently_viewed_screen.dart';
 import 'package:immortalink/screens/create_memory_screen.dart';
 import 'package:immortalink/services/recent_cache.dart';
 import 'package:immortalink/widgets/vault_media.dart';
+import 'package:immortalink/widgets/vault_section_picker.dart';
 import 'package:immortalink/services/connection_status.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -31,10 +32,36 @@ void main() {
     await Supabase.initialize(
       url: 'http://localhost:54321',
       anonKey: 'test',
-      httpClient: MockClient((_) async {
+      authOptions: const FlutterAuthClientOptions(detectSessionInUri: false),
+      httpClient: MockClient((request) async {
+        if (request.url.path.endsWith('/token')) {
+          return http.Response(
+            jsonEncode({
+              'access_token': 'test-token',
+              'refresh_token': 'test-refresh',
+              'expires_in': 3600,
+              'token_type': 'bearer',
+              'user': {
+                'id': 'a',
+                'aud': 'authenticated',
+                'email': 'test@example.com',
+                'created_at': '2026-09-15T00:00:00Z',
+                'app_metadata': {},
+                'user_metadata': {},
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         networkCalls++;
         throw http.ClientException('private-host secret');
       }),
+    );
+    // Offline editing checks concern a signed-in account, not an auth denial.
+    await Supabase.instance.client.auth.signInWithPassword(
+      email: 'test@example.com',
+      password: 'test-only',
     );
     ConnectionStatus.instance.report(http.ClientException('offline'));
   });
@@ -68,6 +95,11 @@ void main() {
     expect(find.text('Vaults'), findsOneWidget);
     await tester.tap(find.text('Relative'));
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Shared memory'),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Shared memory'), findsOneWidget);
     expect(find.byType(FloatingActionButton), findsNothing);
     await tester.tap(find.byTooltip('Refresh'));
@@ -111,6 +143,11 @@ void main() {
       expect(find.text('Offline'), findsOneWidget);
       expect(find.text('Offline copy'), findsNothing);
       expect(find.textContaining('Recently viewed - read-only'), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('A recent story'),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('A recent story'), findsOneWidget);
       expect(find.byType(FloatingActionButton), findsNothing);
       expect(find.textContaining('private-host'), findsNothing);
@@ -165,8 +202,22 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Media'));
+      final mediaTab = find.descendant(
+        of: find.byType(VaultSectionPicker),
+        matching: find.text('Media'),
+      );
+      await tester.scrollUntilVisible(
+        mediaTab,
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(mediaTab);
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byType(GridView),
+        160,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.byType(GridView), findsOneWidget);
       for (final tile in find.byType(VaultMedia).evaluate()) {
         final size = (tile.renderObject as RenderBox).size;

@@ -73,6 +73,7 @@ void main() {
     );
     expect(menu.canLeave, isFalse);
     expect(menu.canEditName, isFalse);
+    expect(menu.canManageSuccessor, isFalse);
     menu.onSelected(FamilyTreeAction.refresh);
     await tester.pumpAndSettle();
     expect(networkCalls, 0);

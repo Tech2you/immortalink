@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import '../services/recent_cache.dart';
 import 'relationship_tree_screen.dart';
 import 'vault_home_screen.dart';
+import '../widgets/content_placeholder.dart';
 
 class RecentlyViewedScreen extends StatefulWidget {
-  const RecentlyViewedScreen({super.key, this.cache});
+  const RecentlyViewedScreen({super.key, this.cache, this.onReconnect});
   final RecentCache? cache;
+  final VoidCallback? onReconnect;
   @override
   State<RecentlyViewedScreen> createState() => _RecentlyViewedScreenState();
 }
@@ -97,6 +99,12 @@ class _RecentlyViewedScreenState extends State<RecentlyViewedScreen> {
       appBar: AppBar(
         title: const Text('Offline'),
         actions: [
+          if (widget.onReconnect != null)
+            IconButton(
+              tooltip: 'Try online',
+              onPressed: widget.onReconnect,
+              icon: const Icon(Icons.wifi),
+            ),
           IconButton(
             tooltip: 'Clear offline storage',
             onPressed: _clear,
@@ -105,7 +113,7 @@ class _RecentlyViewedScreenState extends State<RecentlyViewedScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Padding(padding: EdgeInsets.all(16), child: FeedPlaceholder())
           : CustomScrollView(
               slivers: [
                 SliverPadding(

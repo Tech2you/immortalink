@@ -1,0 +1,58 @@
+{
+  "date": "2026-10-24",
+  "project": "vbzyvaylfdhwowdbodmk",
+  "scope": "Approved temporary generated-JPEG diagnostics only; no database, Storage or AI requests",
+  "screeningActivated": false,
+  "existingAppFunctions": 10,
+  "allAttemptsRemoved": true,
+  "existingFunctionIdentitiesVersionsStatusesJwtFlagsAndHashesUnchanged": true,
+  "attempts": [
+    {
+      "functionId": "20c63e8e-a871-47ec-bff5-073da2a68406",
+      "startUtc": "2026-10-24T08:37:02Z",
+      "endUtc": "2026-10-24T08:37:17Z",
+      "result": "Service-key GET rejected with 401 before authorization stage; no image processing. Diagnostic auth subsequently changed to a pinned key fingerprint in a separate header with gateway JWT verification retained. No shared key changed."
+    },
+    {
+      "functionId": "1ca1fec6-ca98-475a-bf5f-3a62d1278d1d",
+      "startUtc": "2026-10-24T08:41:20Z",
+      "endUtc": "2026-10-24T08:41:37Z",
+      "outputEdge": 2048,
+      "imagesPerRequest": 4,
+      "inputDimensions": [2048, 1536],
+      "httpStatus": 546,
+      "shutdownReason": "CPUTime",
+      "cpuTimeUsedMs": 2064,
+      "memoryAtShutdownBytes": 104152324,
+      "lastStage": "serialized",
+      "largerFixturesNotAttempted": true
+    },
+    {
+      "functionId": "dd1cab7c-7ca6-4548-ab34-46cc8ed09d12",
+      "startUtc": "2026-10-24T08:49:17.252Z",
+      "endUtc": "2026-10-24T08:49:36.333Z",
+      "outputEdge": 1024,
+      "imagesPerRequest": 4,
+      "fixtures": [
+        {"dimensions": [2048, 1536], "httpStatus": 200, "completed": 4, "wallMs": 1019, "outputBytes": 1505852, "serializedBytes": 2008087},
+        {"dimensions": [4032, 3024], "httpStatus": 546, "shutdownReason": "CPUTime", "cpuTimeUsedMs": 2113, "memoryAtShutdownBytes": 61750637, "lastStage": "serialized"}
+      ],
+      "highResolutionFixtureNotAttempted": true
+    },
+    {
+      "functionId": "44e966d1-afd6-450e-9493-5e2ee54b3f51",
+      "startUtc": "2026-10-24T08:54:03.754Z",
+      "endUtc": "2026-10-24T08:54:25.716Z",
+      "outputEdge": 1024,
+      "imagesPerRequest": 1,
+      "controls": {"noCredential": 401, "publicAppKey": 401, "serviceGet": 405, "serviceEmptyBody": 413},
+      "fixtures": [
+        {"dimensions": [2048, 1536], "httpStatus": 200, "completed": 1, "uploadedBytes": 2188239, "wallMs": 741, "outputBytes": 376864, "serializedBytes": 502566},
+        {"dimensions": [4032, 3024], "httpStatus": 200, "completed": 1, "uploadedBytes": 5418063, "wallMs": 594, "outputBytes": 169842, "serializedBytes": 226534},
+        {"dimensions": [6000, 4000], "httpStatus": 200, "completed": 1, "uploadedBytes": 9194036, "wallMs": 1099, "outputBytes": 107368, "serializedBytes": 143238}
+      ],
+      "highResolutionShutdown": {"reason": "EarlyDrop", "cpuTimeUsedMs": 1188, "memoryAtShutdownBytes": 52860758}
+    }
+  ],
+  "interpretation": "Single generated JPEG requests passed. The four-photo worker is not safe to deploy as-is. This is not a worst-case, classifier-accuracy, production-packaging, concurrency or end-to-end publication guarantee. wallMs is measured from verified fixture through loader/normalization/serialization and excludes body upload. Lifecycle CPU and memory are separate observations, not peak-memory guarantees."
+}

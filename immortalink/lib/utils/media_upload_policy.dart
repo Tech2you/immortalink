@@ -12,6 +12,7 @@ class MediaUploadException implements Exception {
 }
 
 class MediaUploadPolicy {
+  static const int photoBatchMaxCount = 20;
   static const int avatarPhotoMaxBytes = 5 * 1024 * 1024;
   static const int photoMaxBytes = 12 * 1024 * 1024;
   static const int voiceMaxBytes = 25 * 1024 * 1024;
