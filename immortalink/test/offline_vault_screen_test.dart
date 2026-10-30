@@ -237,11 +237,25 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).first, 'Keep this draft');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.scrollUntilVisible(
+      find.text('Preserve memory'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(
       tester
-          .widget<TextButton>(find.widgetWithText(TextButton, 'Preserve'))
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Preserve memory'),
+          )
           .onPressed,
       isNull,
+    );
+    await tester.scrollUntilVisible(
+      find.text('Keep this draft'),
+      -200,
+      scrollable: find.byType(Scrollable).first,
     );
     expect(find.text('Keep this draft'), findsOneWidget);
     expect(find.textContaining('private-host'), findsNothing);

@@ -12,7 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../widgets/logo_watermark.dart';
 import '../widgets/vault_media.dart';
-import 'family_branch_screen.dart';
+import 'relationship_tree_screen.dart';
 import 'vault_companion_screen.dart';
 
 class VaultReadOnlyScreen extends StatefulWidget {
@@ -237,44 +237,6 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     return null;
   }
 
-  String _branchLabelForSlot(String slotKey) {
-    switch (slotKey) {
-      case 'mother':
-        return 'Mother';
-      case 'father':
-        return 'Father';
-      case 'maternal_gm':
-      case 'paternal_gm':
-        return 'Grandmother';
-      case 'maternal_gf':
-      case 'paternal_gf':
-        return 'Grandfather';
-      case 'maternal_ggm':
-      case 'paternal_ggm':
-        return 'Great-grandmother';
-      case 'maternal_ggf':
-      case 'paternal_ggf':
-        return 'Great-grandfather';
-      case 'child_1':
-      case 'child_2':
-      case 'child_3':
-      case 'child_4':
-        return 'Child';
-      case 'grandchild_1':
-      case 'grandchild_2':
-      case 'grandchild_3':
-      case 'grandchild_4':
-        return 'Grandchild';
-      case 'greatgrandchild_1':
-      case 'greatgrandchild_2':
-      case 'greatgrandchild_3':
-      case 'greatgrandchild_4':
-        return 'Great-grandchild';
-      default:
-        return 'Branch';
-    }
-  }
-
   Future<void> _openBranch() async {
     final familyId = (_familyId ?? '').trim();
     final slotKey = (_slotKey ?? '').trim();
@@ -287,11 +249,9 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => FamilyBranchScreen(
+        builder: (_) => RelationshipTreeScreen(
           familyId: familyId,
-          rootLabel: _branchLabelForSlot(slotKey),
-          rootSlotKey: slotKey,
-          direction: direction,
+          initialFocusKey: 'vault:${widget.vaultId}',
         ),
       ),
     );
@@ -2359,15 +2319,26 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
             enabled: !_loading && _error == null,
             onSelected: (action) async {
               if (action == 'report') {
-                await showContentReport(context, kind: 'vault', targetId: widget.vaultId);
+                await showContentReport(
+                  context,
+                  kind: 'vault',
+                  targetId: widget.vaultId,
+                );
               } else if (_ownerId != null) {
-                final blocked = await confirmMemberBlock(context,
-                  memberId: _ownerId!, memberName: _displayName ?? _vaultName, blocked: true);
+                final blocked = await confirmMemberBlock(
+                  context,
+                  memberId: _ownerId!,
+                  memberName: _displayName ?? _vaultName,
+                  blocked: true,
+                );
                 if (blocked && context.mounted) Navigator.pop(context);
               }
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'report', child: Text('Report vault or media')),
+              PopupMenuItem(
+                value: 'report',
+                child: Text('Report vault or media'),
+              ),
               PopupMenuItem(value: 'block', child: Text('Block member')),
             ],
           ),

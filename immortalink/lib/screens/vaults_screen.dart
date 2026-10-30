@@ -11,6 +11,11 @@ import 'recently_viewed_screen.dart';
 import 'content_safety_screen.dart';
 import '../widgets/vault_media.dart';
 import '../widgets/startup_screen.dart';
+import '../widgets/heiro_surface.dart';
+import '../widgets/story_feed_item.dart';
+import '../widgets/memory_creation_menu.dart';
+import 'create_memory_screen.dart';
+import 'heiro_settings_screen.dart';
 import '../widgets/content_placeholder.dart';
 import '../widgets/content_safety_actions.dart';
 
@@ -36,6 +41,10 @@ import 'relationship_tree_screen.dart';
 import 'join_family_screen.dart';
 
 enum _VaultSettingsAction {
+  openVault,
+  renameVault,
+  deleteVault,
+  familySettings,
   recentlyViewed,
   refresh,
   joinFamily,
@@ -50,8 +59,6 @@ enum _VaultSettingsAction {
   deleteAccount,
   signOut,
 }
-
-enum _VaultRowAction { rename, delete }
 
 class VaultsScreen extends StatefulWidget {
   const VaultsScreen({super.key});
@@ -433,6 +440,23 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Future<void> _handleSettingsAction(_VaultSettingsAction action) async {
     switch (action) {
+      case _VaultSettingsAction.openVault:
+        _openVaultHome();
+        return;
+      case _VaultSettingsAction.renameVault:
+        if (_vault != null) {
+          await _renameVault(
+            _vault!['id'].toString(),
+            (_vault!['name'] ?? '').toString(),
+          );
+        }
+        return;
+      case _VaultSettingsAction.deleteVault:
+        if (_vault != null) await _deleteVault(_vault!['id'].toString());
+        return;
+      case _VaultSettingsAction.familySettings:
+        await _openFamilySettings();
+        break;
       case _VaultSettingsAction.recentlyViewed:
         await Navigator.push(
           context,
@@ -704,21 +728,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (diff.inDays < 7) return '${diff.inDays}d ago';
     if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}w ago';
     return _formatCreatedAt(raw).replaceFirst('Created on ', '');
-  }
-
-  String _feedSubtitle(_FeedItem item) {
-    if (item.photoCount > 0 && item.voiceCount > 0) {
-      return 'shared a memory';
-    }
-    if (item.photoCount > 0) {
-      return item.body.trim().isNotEmpty ? 'added a memory' : 'shared media';
-    }
-    if (item.voiceCount > 0) {
-      return item.body.trim().isNotEmpty
-          ? 'added a memory'
-          : 'added a voice note';
-    }
-    return 'added a memory';
   }
 
   Future<void> _loadVault({bool showLoading = true}) async {
@@ -1212,7 +1221,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
             .timeout(const Duration(seconds: 12));
         final voiceRowsFuture = _supabase
             .from('memory_voice_notes')
-            .select('id, memory_id, path, title, created_at')
+            .select('id, memory_id, path, title, created_at, duration_seconds')
             .inFilter('memory_id', memoryIds)
             .order('created_at', ascending: false)
             .timeout(const Duration(seconds: 12));
@@ -1268,6 +1277,7 @@ class _VaultsScreenState extends State<VaultsScreen> {
               title: title.isEmpty ? 'Voice note' : title,
               url: url,
               createdAt: createdAt,
+              durationSeconds: (row['duration_seconds'] as num?)?.toInt(),
             ),
           );
         });
@@ -2161,288 +2171,417 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
   Widget _buildFeedSection(bool inFamily) {
     if (!inFamily) {
-      return Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(top: 14),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.black.withOpacity(0.08)),
-          color: Colors.white.withOpacity(0.18),
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Text(
+          'Family memories will appear here once you join or create a family.',
         ),
+      );
+    }
+    if (_loadingFeed && _familyFeed.isEmpty) return const FeedPlaceholder();
+    if (_feedError != null) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text('Family feed load failed: $_feedError'),
+      );
+    }
+    if (_familyFeed.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Family Feed',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+            Image.asset(
+              'assets/images/immortalink_logo.png',
+              height: 110,
+              width: 110,
+              excludeFromSemantics: true,
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Recent memories from your family will appear here once you join or create a family.',
-              style: TextStyle(color: Colors.black.withOpacity(0.62)),
+            const SizedBox(height: 24),
+            const Text(
+              'Your family feed starts here',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'No memories shared yet.',
+              style: TextStyle(color: Colors.black54),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _inviteFamily,
+              icon: const Icon(Icons.person_add_alt_1),
+              label: const Text('Invite family'),
+            ),
+            TextButton.icon(
+              onPressed: _vault == null ? null : _startMemory,
+              icon: const Icon(Icons.add),
+              label: const Text('Add a memory'),
             ),
           ],
         ),
       );
     }
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
-        color: Colors.white.withOpacity(0.16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Family Feed',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Recent memories from your family',
-            style: TextStyle(color: Colors.black.withOpacity(0.62)),
-          ),
-          const SizedBox(height: 14),
-          if (_loadingFeed && _familyFeed.isEmpty)
-            const FeedPlaceholder()
-          else if (_feedError != null)
-            Text(
-              'Family feed load failed: $_feedError',
-              style: TextStyle(color: Colors.black.withOpacity(0.62)),
-            )
-          else if (_familyFeed.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.black.withOpacity(0.08)),
-                color: Colors.white.withOpacity(0.36),
-              ),
-              child: Text(
-                'No family memories yet.',
-                style: TextStyle(color: Colors.black.withOpacity(0.62)),
-              ),
-            )
-          else
-            Column(
-              children: List.generate(_familyFeed.length, (i) {
-                final item = _familyFeed[i];
-                final previewPhoto = item.photos.isNotEmpty
-                    ? item.photos.first
-                    : null;
-                final showBody = item.body.trim().isNotEmpty;
-
-                return Container(
-                  margin: EdgeInsets.only(
-                    bottom: i == _familyFeed.length - 1 ? 0 : 12,
-                  ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(18),
-                    onTap: () => _openFeedMemory(item),
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: Colors.black.withOpacity(0.08),
-                        ),
-                        color: Colors.white.withOpacity(0.42),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 19,
-                                backgroundColor: Colors.black.withOpacity(0.06),
-                                child: !item.hasAvatar
-                                    ? Icon(
-                                        Icons.person,
-                                        size: 18,
-                                        color: Colors.black.withOpacity(0.55),
-                                      )
-                                    : ClipOval(
-                                        child: VaultMedia.network(
-                                          item.avatarUrl!,
-                                          width: 38,
-                                          height: 38,
-                                          fit: BoxFit.cover,
-                                          errorBuilder: (_, _, _) =>
-                                              const Icon(Icons.person_outline),
-                                        ),
-                                      ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.displayName,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      '${_feedSubtitle(item)}  •  ${_timeAgo(item.createdAt)}',
-                                      style: TextStyle(
-                                        color: Colors.black.withOpacity(0.58),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              MemoryReportMenu(memoryId: item.memoryId),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          if (previewPhoto != null || showBody)
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (previewPhoto != null)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(14),
-                                    child: _memoryPhotoImage(
-                                      previewPhoto.url,
-                                      width: 96,
-                                      height: 76,
-                                      gaplessPlayback: true,
-                                    ),
-                                  ),
-                                if (previewPhoto != null && showBody)
-                                  const SizedBox(width: 12),
-                                if (showBody)
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          item.promptText.isEmpty
-                                              ? 'Memory'
-                                              : item.promptText,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 15,
-                                          ),
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          item.body,
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            color: Colors.black.withOpacity(
-                                              0.72,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
-                            )
-                          else
-                            Text(
-                              item.promptText.isEmpty
-                                  ? 'Tap to open memory'
-                                  : item.promptText,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 15,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+    return Column(
+      children: _familyFeed
+          .map(
+            (item) => StoryFeedItem(
+              key: ValueKey(item.memoryId),
+              title: item.promptText,
+              body: item.body,
+              onOpen: () => _openFeedMemory(item),
+              author: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor: heiroIce,
+                    child: item.hasAvatar
+                        ? ClipOval(
+                            child: VaultMedia.network(
+                              item.avatarUrl!,
+                              width: 40,
+                              height: 40,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, _, _) =>
+                                  const Icon(Icons.person_outline),
                             ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _typeChip(item),
-                              if (item.photoCount > 0)
-                                _metaBadge(
-                                  Icons.photo_library_outlined,
-                                  '${item.photoCount} media file${item.photoCount == 1 ? '' : 's'}',
-                                ),
-                              if (item.voiceCount > 0)
-                                _metaBadge(
-                                  Icons.mic_none,
-                                  '${item.voiceCount} voice',
-                                ),
-                              _metaBadge(Icons.chevron_right, 'Tap to open'),
-                            ],
+                          )
+                        : const Icon(Icons.person_outline),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.displayName,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          '${_timeAgo(item.createdAt)} · Family',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black54,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              }),
+                  IconButton(
+                    tooltip: 'Open memory',
+                    onPressed: () => _openFeedMemory(item),
+                    icon: const Icon(Icons.open_in_full, size: 18),
+                  ),
+                  MemoryReportMenu(memoryId: item.memoryId),
+                ],
+              ),
+              photos: [
+                for (var i = 0; i < item.photos.length; i++)
+                  InkWell(
+                    onTap: () => _openPhotoGallery(item.photos, i),
+                    child: VaultMedia.network(
+                      item.photos[i].url,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                    ),
+                  ),
+              ],
+              recordings: [
+                for (final voice in item.voiceNotes)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    decoration: BoxDecoration(
+                      color: heiroIce,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                      leading: IconButton.filled(
+                        tooltip: _playingKey == voice.id && _isPlaying
+                            ? 'Pause recording'
+                            : 'Play recording',
+                        onPressed: () => _togglePlay(voice, playKey: voice.id),
+                        icon: Icon(
+                          _playingKey == voice.id && _isPlaying
+                              ? Icons.pause
+                              : Icons.play_arrow,
+                        ),
+                      ),
+                      title: Text(voice.title),
+                      trailing: voice.durationSeconds == null
+                          ? const Icon(Icons.mic_none, size: 18)
+                          : Text(
+                              '${voice.durationSeconds! ~/ 60}:${(voice.durationSeconds! % 60).toString().padLeft(2, '0')}',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                    ),
+                  ),
+              ],
             ),
-        ],
-      ),
+          )
+          .toList(),
     );
   }
 
-  Widget _typeChip(_FeedItem item) {
-    String label = 'Memory';
-    if (item.photoCount > 0 &&
-        item.voiceCount == 0 &&
-        item.body.trim().isEmpty) {
-      label = 'Media';
-    } else if (item.voiceCount > 0 &&
-        item.photoCount == 0 &&
-        item.body.trim().isEmpty) {
-      label = 'Voice';
+  Future<void> _startMemory() async {
+    if (_vault == null) return;
+    final vaultId = _vault!['id'].toString();
+    final userId = _supabase.auth.currentUser?.id;
+    final mode = await showMemoryCreationMenu(context);
+    if (mode == null || !mounted) return;
+    if (!await _connection.check()) {
+      _toast('Reconnect to add a memory.');
+      return;
     }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: const Color(0xFFEAE2F3).withOpacity(0.95),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF6E5A93),
+    if (!mounted || userId != _supabase.auth.currentUser?.id) return;
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CreateMemoryScreen(
+          vaultId: vaultId,
+          displayName: (_vault!['name'] ?? '').toString(),
+          avatarUrl: _vaultAvatarUrl,
+          initialMode: mode,
         ),
       ),
     );
+    if (saved == true && mounted) {
+      await _loadVault(showLoading: false);
+      _toast('Memory saved to your vault.');
+    }
   }
 
-  Widget _metaBadge(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: Colors.white.withOpacity(0.52),
-        border: Border.all(color: Colors.black.withOpacity(0.05)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: Colors.black.withOpacity(0.62)),
-          const SizedBox(width: 6),
-          Text(text, style: TextStyle(color: Colors.black.withOpacity(0.68))),
-        ],
+  void _openCurrentTree() {
+    if (_activeFamilyId != null) {
+      _openFamilyTree(_activeFamilyId!);
+    } else {
+      _ensureFamilyAndOpenTree();
+    }
+  }
+
+  Future<void> _openSettings() async {
+    final action = await Navigator.push<_VaultSettingsAction>(
+      context,
+      MaterialPageRoute(
+        builder: (pageContext) => HeiroSettingsScreen(
+          entries: [
+            if (_vault != null)
+              HeiroSettingsEntry(
+                group: 'My vault',
+                label: (_vault!['name'] ?? 'My vault').toString(),
+                icon: Icons.person_outline,
+                onTap: () =>
+                    Navigator.pop(pageContext, _VaultSettingsAction.openVault),
+              ),
+            for (final row in [
+              if (_vault != null)
+                (
+                  'My vault',
+                  'Rename vault',
+                  Icons.edit_outlined,
+                  _VaultSettingsAction.renameVault,
+                ),
+              (
+                'Account',
+                'Change password',
+                Icons.lock_reset,
+                _VaultSettingsAction.changePassword,
+              ),
+              (
+                'Account',
+                'Subscription and storage',
+                Icons.credit_card_outlined,
+                _VaultSettingsAction.manageSubscription,
+              ),
+              (
+                'Family',
+                'Family settings',
+                Icons.people_outline,
+                _VaultSettingsAction.familySettings,
+              ),
+              if (_familyMemberships.isEmpty)
+                (
+                  'Family',
+                  'Join family',
+                  Icons.group_add,
+                  _VaultSettingsAction.joinFamily,
+                ),
+              (
+                'Family',
+                'Offline memories',
+                Icons.offline_pin_outlined,
+                _VaultSettingsAction.recentlyViewed,
+              ),
+              (
+                'Family',
+                'Refresh',
+                Icons.refresh,
+                _VaultSettingsAction.refresh,
+              ),
+              (
+                'Privacy and safety',
+                'AI data permission',
+                Icons.privacy_tip_outlined,
+                _VaultSettingsAction.aiPermission,
+              ),
+              if (contentScreeningControlsEnabled)
+                (
+                  'Privacy and safety',
+                  'Sharing safety permission',
+                  Icons.shield_outlined,
+                  _VaultSettingsAction.screeningPermission,
+                ),
+              (
+                'Privacy and safety',
+                'Safety and blocked members',
+                Icons.shield_outlined,
+                _VaultSettingsAction.safety,
+              ),
+              (
+                'Help',
+                'Contact support',
+                Icons.help_outline,
+                _VaultSettingsAction.support,
+              ),
+              (
+                'Help',
+                'Privacy Policy',
+                Icons.policy_outlined,
+                _VaultSettingsAction.privacy,
+              ),
+              (
+                'Help',
+                'Terms of Use',
+                Icons.description_outlined,
+                _VaultSettingsAction.terms,
+              ),
+              (
+                'Account actions',
+                'Sign out',
+                Icons.logout,
+                _VaultSettingsAction.signOut,
+              ),
+              (
+                'Account actions',
+                'Delete account',
+                Icons.delete_forever_outlined,
+                _VaultSettingsAction.deleteAccount,
+              ),
+              if (_vault != null)
+                (
+                  'Account actions',
+                  'Delete vault',
+                  Icons.delete_outline,
+                  _VaultSettingsAction.deleteVault,
+                ),
+            ])
+              HeiroSettingsEntry(
+                group: row.$1,
+                label: row.$2,
+                icon: row.$3,
+                destructive:
+                    row.$4 == _VaultSettingsAction.deleteAccount ||
+                    row.$4 == _VaultSettingsAction.deleteVault,
+                onTap: () => Navigator.pop(pageContext, row.$4),
+              ),
+          ],
+        ),
       ),
     );
+    if (action != null && mounted) await _handleSettingsAction(action);
+  }
+
+  Future<void> _openFamilySettings() async {
+    final choice = await Navigator.push<({String action, String id})>(
+      context,
+      MaterialPageRoute(
+        builder: (pageContext) => HeiroSurface(
+          child: Scaffold(
+            appBar: AppBar(title: const Text('Family settings')),
+            body: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              children: [
+                if (_familyMemberships.isEmpty)
+                  ListTile(
+                    leading: const Icon(Icons.group_add),
+                    title: const Text('Create your family tree'),
+                    onTap: () =>
+                        Navigator.pop(pageContext, (action: 'create', id: '')),
+                  ),
+                for (final member in _familyMemberships) ...[
+                  ListTile(
+                    leading: const Icon(Icons.account_tree_outlined),
+                    title: Text((member['family_name'] ?? 'Family').toString()),
+                    subtitle: Text(
+                      member['is_primary'] == true
+                          ? 'Home family'
+                          : 'Family member',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.pop(pageContext, (
+                      action: 'tree',
+                      id: member['family_id'].toString(),
+                    )),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.edit_outlined),
+                    title: const Text('Edit family details'),
+                    onTap: () => Navigator.pop(pageContext, (
+                      action: 'edit',
+                      id: member['family_id'].toString(),
+                    )),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.person_add_alt_1),
+                    title: const Text('Invite family'),
+                    onTap: () => Navigator.pop(pageContext, (
+                      action: 'invite',
+                      id: member['family_id'].toString(),
+                    )),
+                  ),
+                  if (member['is_primary'] != true)
+                    ListTile(
+                      leading: const Icon(Icons.home_outlined),
+                      title: const Text('Make home family'),
+                      onTap: () => Navigator.pop(pageContext, (
+                        action: 'primary',
+                        id: member['family_id'].toString(),
+                      )),
+                    ),
+                  const Divider(),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    switch (choice.action) {
+      case 'invite':
+        await _inviteFamily(familyId: choice.id);
+      case 'tree':
+        _openFamilyTree(choice.id);
+      case 'edit':
+        await _editFamilyProfile(choice.id);
+      case 'primary':
+        await _makePrimaryFamily(choice.id);
+      case 'create':
+        await _ensureFamilyAndOpenTree();
+    }
+  }
+
+  Future<void> _inviteFamily({String? familyId}) async {
+    final id = familyId ?? _activeFamilyId;
+    if (id == null || id.isEmpty) return;
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            RelationshipTreeScreen(familyId: id, inviteOnOpen: true),
+      ),
+    );
+    if (mounted) await _loadVault(showLoading: false);
   }
 
   @override
@@ -2454,307 +2593,168 @@ class _VaultsScreenState extends State<VaultsScreen> {
     if (_offlineStartup || _cachedHome || _connection.offline) {
       return RecentlyViewedScreen(onReconnect: _retryOnline);
     }
-    final hasAvatar =
-        _vaultAvatarUrl != null && _vaultAvatarUrl!.trim().isNotEmpty;
-    final createdLabel = _formatCreatedAt(_vault?['created_at']);
-    final compactActions =
-        MediaQuery.sizeOf(context).width < 360 ||
-        MediaQuery.textScalerOf(context).scale(16) > 20;
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFF7F0F7),
-      appBar: AppBar(
-        title: const Text('Your Vault'),
-        backgroundColor: const Color(0xFFF7F0F7),
-        elevation: 0,
-        actions: [
-          PopupMenuButton<_VaultSettingsAction>(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
-            onSelected: _handleSettingsAction,
-            itemBuilder: (ctx) => [
-              PopupMenuItem(
-                value: _VaultSettingsAction.recentlyViewed,
-                child: ListTile(
-                  leading: Icon(Icons.offline_pin_outlined),
-                  title: Text('Recently viewed'),
-                ),
-              ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.refresh,
-                child: ListTile(
-                  leading: Icon(Icons.refresh),
-                  title: Text('Refresh'),
-                ),
-              ),
-              if (_familyMemberships.isEmpty)
-                const PopupMenuItem(
-                  value: _VaultSettingsAction.joinFamily,
-                  child: ListTile(
-                    leading: Icon(Icons.group_add),
-                    title: Text('Join family'),
-                  ),
-                ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: _VaultSettingsAction.manageSubscription,
-                child: ListTile(
-                  leading: Icon(Icons.credit_card_outlined),
-                  title: Text('Subscription'),
-                  subtitle: Text('Manage or cancel'),
-                ),
-              ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.changePassword,
-                child: ListTile(
-                  leading: Icon(Icons.lock_reset),
-                  title: Text('Change password'),
-                  subtitle: Text('Confirm current password'),
-                ),
-              ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.aiPermission,
-                child: ListTile(
-                  leading: Icon(Icons.privacy_tip_outlined),
-                  title: Text('AI data permission'),
-                ),
-              ),
-              if (contentScreeningControlsEnabled)
-                const PopupMenuItem(
-                  value: _VaultSettingsAction.screeningPermission,
-                  child: ListTile(
-                    leading: Icon(Icons.shield_outlined),
-                    title: Text('Sharing safety permission'),
-                  ),
-                ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.deleteAccount,
-                child: ListTile(
-                  leading: Icon(Icons.delete_forever_outlined),
-                  title: Text('Delete account'),
-                  subtitle: Text('Permanent'),
-                ),
-              ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.privacy,
-                child: ListTile(
-                  leading: Icon(Icons.policy_outlined),
-                  title: Text('Privacy Policy'),
-                ),
-              ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.terms,
-                child: ListTile(
-                  leading: Icon(Icons.description_outlined),
-                  title: Text('Terms of Use'),
-                ),
-              ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.safety,
-                child: ListTile(
-                  leading: Icon(Icons.shield_outlined),
-                  title: Text('Safety and blocked members'),
-                ),
-              ),
-              PopupMenuItem(
-                value: _VaultSettingsAction.support,
-                child: ListTile(
-                  leading: Icon(Icons.help_outline),
-                  title: Text('Contact support'),
-                ),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: _VaultSettingsAction.signOut,
-                child: ListTile(
-                  leading: Icon(Icons.logout),
-                  title: Text('Sign out'),
-                ),
-              ),
-            ],
+    final membership = _familyMemberships.firstWhere(
+      (row) => row['family_id'] == _activeFamilyId,
+      orElse: () => <String, dynamic>{},
+    );
+    return HeiroSurface(
+      child: Scaffold(
+        appBar: AppBar(
+          title: Image.asset(
+            'assets/images/immortalink_logo.png',
+            height: 48,
+            width: 58,
+            fit: BoxFit.contain,
+            semanticLabel: 'Heiro',
           ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Center(
-                child: Opacity(
-                  opacity: 0.08,
-                  child: Image.asset(
-                    'assets/images/immortalink_logo.png',
-                    width: 520,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
+          centerTitle: false,
+          actions: [
+            IconButton(
+              tooltip: 'New memory',
+              onPressed: _vault == null ? null : _startMemory,
+              icon: const Icon(Icons.add_circle, color: heiroBlue),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : (_error != null)
-                ? VaultLoadFailure(
-                    error: _error!,
-                    onRetry: _loadVault,
-                    onRecentlyViewed: () => _handleSettingsAction(
-                      _VaultSettingsAction.recentlyViewed,
+            IconButton(
+              tooltip: 'Settings',
+              onPressed: _openSettings,
+              icon: const Icon(Icons.settings_outlined),
+            ),
+          ],
+        ),
+        body: _error != null
+            ? VaultLoadFailure(
+                error: _error!,
+                onRetry: _loadVault,
+                onRecentlyViewed: () =>
+                    _handleSettingsAction(_VaultSettingsAction.recentlyViewed),
+              )
+            : _vault == null
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('No vault yet', style: TextStyle(fontSize: 18)),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: _createVault,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Create your vault'),
                     ),
-                  )
-                : (_vault == null
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
+                  ],
+                ),
+              )
+            : Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Column(
+                    children: [
+                      InkWell(
+                        onTap: _openFamilySettings,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                          child: Row(
                             children: [
-                              const Text(
-                                'No vault yet',
-                                style: TextStyle(fontSize: 18),
-                              ),
-                              const SizedBox(height: 12),
-                              ElevatedButton.icon(
-                                onPressed: _createVault,
-                                icon: const Icon(Icons.add),
-                                label: const Text('Create your vault'),
-                              ),
-                            ],
-                          ),
-                        )
-                      : RefreshIndicator(
-                          onRefresh: () => _loadVault(showLoading: false),
-                          child: ListView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            controller: _scrollController,
-                            children: [
-                              _familyTreesCard(),
-                              const SizedBox(height: 12),
-                              Card(
-                                color: Colors.white.withOpacity(0.36),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  side: BorderSide(
-                                    color: Colors.black.withOpacity(0.08),
-                                  ),
-                                ),
-                                elevation: 0,
-                                child: ListTile(
-                                  onTap: _openVaultHome,
-                                  leading: CircleAvatar(
-                                    radius: 18,
-                                    backgroundColor: Colors.black.withOpacity(
-                                      0.08,
-                                    ),
-                                    child: !hasAvatar
-                                        ? Icon(
-                                            Icons.person,
-                                            size: 18,
-                                            color: Colors.black.withOpacity(
-                                              0.6,
-                                            ),
-                                          )
-                                        : ClipOval(
-                                            child: VaultMedia.network(
-                                              _vaultAvatarUrl!,
-                                              width: 36,
-                                              height: 36,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (_, _, _) =>
-                                                  const Icon(
-                                                    Icons.person_outline,
-                                                  ),
-                                            ),
-                                          ),
-                                  ),
-                                  title: Text(
-                                    (_vault!['name'] ?? '').toString(),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: Text(createdLabel),
-                                  trailing: compactActions
-                                      ? PopupMenuButton<_VaultRowAction>(
-                                          tooltip: 'Vault actions',
-                                          onSelected: (action) {
-                                            final id = (_vault!['id'] ?? '')
-                                                .toString();
-                                            if (action ==
-                                                _VaultRowAction.rename) {
-                                              _renameVault(
-                                                id,
-                                                (_vault!['name'] ?? '')
-                                                    .toString(),
-                                              );
-                                            } else {
-                                              _deleteVault(id);
-                                            }
-                                          },
-                                          itemBuilder: (_) => const [
-                                            PopupMenuItem(
-                                              value: _VaultRowAction.rename,
-                                              child: ListTile(
-                                                leading: Icon(
-                                                  Icons.edit_outlined,
-                                                ),
-                                                title: Text('Rename'),
-                                              ),
-                                            ),
-                                            PopupMenuItem(
-                                              value: _VaultRowAction.delete,
-                                              child: ListTile(
-                                                leading: Icon(
-                                                  Icons.delete_outline,
-                                                ),
-                                                title: Text('Delete'),
-                                              ),
-                                            ),
-                                          ],
+                              ClipOval(
+                                child: SizedBox(
+                                  width: 36,
+                                  height: 36,
+                                  child: _familyPhotos[_activeFamilyId] == null
+                                      ? Image.asset(
+                                          'assets/images/immortalink_logo.png',
+                                          fit: BoxFit.contain,
+                                          semanticLabel: 'Family photo',
                                         )
-                                      : Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            IconButton(
-                                              tooltip: 'Rename',
-                                              onPressed: () => _renameVault(
-                                                (_vault!['id'] ?? '')
-                                                    .toString(),
-                                                (_vault!['name'] ?? '')
-                                                    .toString(),
-                                              ),
-                                              icon: const Icon(Icons.edit),
-                                            ),
-                                            IconButton(
-                                              tooltip: 'Delete',
-                                              onPressed: () => _deleteVault(
-                                                (_vault!['id'] ?? '')
-                                                    .toString(),
-                                              ),
-                                              icon: const Icon(
-                                                Icons.delete_outline,
-                                              ),
-                                            ),
-                                            IconButton(
-                                              tooltip: 'Open',
-                                              onPressed: _openVaultHome,
-                                              icon: const Icon(
-                                                Icons.chevron_right,
-                                              ),
-                                            ),
-                                          ],
+                                      : VaultMedia.network(
+                                          _familyPhotos[_activeFamilyId]!,
+                                          width: 36,
+                                          height: 36,
+                                          fit: BoxFit.cover,
+                                          gaplessPlayback: true,
                                         ),
                                 ),
                               ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  (membership['family_name'] ?? 'Your family')
+                                      .toString(),
+                                ),
+                              ),
+                              const Icon(Icons.expand_more, size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DecoratedBox(
+                              decoration: const BoxDecoration(
+                                border: Border(
+                                  bottom: BorderSide(
+                                    color: heiroBlue,
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                              child: TextButton(
+                                onPressed: () {
+                                  if (_scrollController.hasClients) {
+                                    _scrollController.animateTo(
+                                      0,
+                                      duration: const Duration(
+                                        milliseconds: 200,
+                                      ),
+                                      curve: Curves.easeOut,
+                                    );
+                                  }
+                                },
+                                child: const Text('Feed'),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: TextButton(
+                              onPressed: _openCurrentTree,
+                              child: const Text('Tree'),
+                            ),
+                          ),
+                          Expanded(
+                            child: TextButton(
+                              onPressed: _openVaultHome,
+                              child: const Text('My vault'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: RefreshIndicator(
+                          onRefresh: () => _loadVault(showLoading: false),
+                          child: ListView(
+                            controller: _scrollController,
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              if (_familyMemberships.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: _familyTreesCard(),
+                                ),
                               KeyedSubtree(
                                 key: _familyFeedKey,
                                 child: _buildFeedSection(
                                   _familyMemberships.isNotEmpty,
                                 ),
                               ),
+                              const SizedBox(height: 32),
                             ],
                           ),
-                        )),
-          ),
-        ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
       ),
     );
   }
@@ -3789,6 +3789,7 @@ class _VoiceNote {
   final String title;
   final String url;
   final String createdAt;
+  final int? durationSeconds;
 
   const _VoiceNote({
     required this.id,
@@ -3796,5 +3797,6 @@ class _VoiceNote {
     required this.title,
     required this.url,
     required this.createdAt,
+    this.durationSeconds,
   });
 }

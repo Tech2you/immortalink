@@ -10,6 +10,16 @@ bool isConnectionFailure(Object error) =>
     error is AuthRetryableFetchException;
 
 String publicErrorMessage(Object error) {
+  if (error is PostgrestException) {
+    switch (error.message) {
+      case 'RELATIONSHIP_ANCESTRY_CYCLE':
+      case 'RELATIONSHIP_SELF_LINK':
+        return 'This connection conflicts with the existing family tree. Check the selected relative.';
+      case 'RELATIONSHIP_PERSON_UNAVAILABLE':
+      case 'INVALID_SHARED_PARENT':
+        return 'A selected relative is no longer available. Refresh the tree and try again.';
+    }
+  }
   if (isSingleFamilyMembershipError(error)) {
     return singleFamilyMembershipMessage;
   }

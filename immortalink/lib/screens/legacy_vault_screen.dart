@@ -21,7 +21,7 @@ import '../widgets/profile_photo_cropper.dart';
 import '../widgets/vault_section_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'family_branch_screen.dart';
+import 'relationship_tree_screen.dart';
 import 'vault_companion_screen.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import '../utils/image_upload_optimizer.dart';
@@ -197,44 +197,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     return null;
   }
 
-  String _branchLabelForSlot(String slotKey) {
-    switch (slotKey) {
-      case 'mother':
-        return 'Mother';
-      case 'father':
-        return 'Father';
-      case 'maternal_gm':
-      case 'paternal_gm':
-        return 'Grandmother';
-      case 'maternal_gf':
-      case 'paternal_gf':
-        return 'Grandfather';
-      case 'maternal_ggm':
-      case 'paternal_ggm':
-        return 'Great-grandmother';
-      case 'maternal_ggf':
-      case 'paternal_ggf':
-        return 'Great-grandfather';
-      case 'child_1':
-      case 'child_2':
-      case 'child_3':
-      case 'child_4':
-        return 'Child';
-      case 'grandchild_1':
-      case 'grandchild_2':
-      case 'grandchild_3':
-      case 'grandchild_4':
-        return 'Grandchild';
-      case 'greatgrandchild_1':
-      case 'greatgrandchild_2':
-      case 'greatgrandchild_3':
-      case 'greatgrandchild_4':
-        return 'Great-grandchild';
-      default:
-        return 'Branch';
-    }
-  }
-
   Future<void> _openBranch() async {
     final row = _row;
     if (row == null) {
@@ -253,11 +215,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => FamilyBranchScreen(
+        builder: (_) => RelationshipTreeScreen(
           familyId: widget.familyId,
-          rootLabel: _branchLabelForSlot(slotKey),
-          rootSlotKey: slotKey,
-          direction: direction,
+          initialFocusKey: 'legacy:${widget.legacyMemberId}',
         ),
       ),
     );

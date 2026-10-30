@@ -1,6 +1,7 @@
 import 'dart:math';
 import '../utils/public_error.dart';
 import 'dart:async';
+import '../widgets/brand_loading.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../services/recent_cache.dart';
@@ -9,6 +10,8 @@ import '../services/family_directory.dart';
 
 import 'package:flutter/material.dart';
 import '../utils/family_placeholder.dart';
+import '../utils/relationship_tree_geometry.dart';
+import '../services/family_relationship_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'legacy_vault_screen.dart';
@@ -29,12 +32,16 @@ class RelationshipTreeScreen extends StatefulWidget {
   final String familyId;
   final bool cachedOnly;
   final RecentCache? cache;
+  final bool inviteOnOpen;
+  final String? initialFocusKey;
 
   const RelationshipTreeScreen({
     super.key,
     required this.familyId,
     this.cachedOnly = false,
     this.cache,
+    this.inviteOnOpen = false,
+    this.initialFocusKey,
   });
 
   @override
@@ -50,10 +57,12 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
   static const _legacyAvatarBucket = 'vault_photos';
 
   bool _loading = true;
+  bool _openedInvite = false;
   bool _offline = false;
   late final _cache = widget.cache ?? RecentCache.instance;
   Timer? _cacheExpiryTimer;
   bool _familySettingsBusy = false;
+  bool _creatingRelative = false;
   bool _isFamilyMember = false;
   bool _isFamilyOwner = false;
   String? _error;
@@ -137,7 +146,10 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         _people = people;
         _relationships = relationships;
         _viewer = people.where((p) => p.key == data['viewer']).firstOrNull;
-        _focus = _viewer ?? people.firstOrNull;
+        _focus =
+            people.where((p) => p.key == widget.initialFocusKey).firstOrNull ??
+            _viewer ??
+            people.firstOrNull;
         _focusHistory.clear();
         if (_focus != null) _focusHistory.add(_focus!);
         _isFamilyMember = false;
@@ -333,7 +345,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       final viewer = uid == null
           ? null
           : people.where((person) => person.ownerId == uid).firstOrNull;
-      final wantedFocus = keepFocusKey ?? _focus?.key;
+      final wantedFocus = keepFocusKey ?? _focus?.key ?? widget.initialFocusKey;
       final focus = wantedFocus == null
           ? viewer
           : peopleByKey[wantedFocus] ?? viewer;
@@ -383,6 +395,15 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         }
         _loading = false;
       });
+      if (widget.inviteOnOpen &&
+          !_openedInvite &&
+          _isFamilyMember &&
+          viewer != null) {
+        _openedInvite = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _chooseInviteRelationship();
+        });
+      }
     } catch (e) {
       if (epoch == _cache.generation &&
           (e is AuthException ||
@@ -602,10 +623,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       );
       if (!mounted) return;
       // The root route owns session changes; a bare vault screen does not.
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        '/',
-        (route) => false,
-      );
+      Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -780,10 +798,34 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
     );
   }
 
-  String _inviteCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    final random = Random.secure();
-    return List.generate(10, (_) => chars[random.nextInt(chars.length)]).join();
+  Future<void> _chooseInviteRelationship() async {
+    final viewer = _viewer;
+    if (viewer == null || _offline || !_isFamilyMember) return;
+    final kind = await showModalBottomSheet<_RelativeKind>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'Invite a relative of ${viewer.name}',
+                style: Theme.of(ctx).textTheme.titleMedium,
+              ),
+            ),
+            for (final kind in _RelativeKind.values)
+              ListTile(
+                leading: const Icon(Icons.person_add_alt_1),
+                title: Text('Invite ${_kindLabel(kind)}'),
+                onTap: () => Navigator.pop(ctx, kind),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (kind != null && mounted && !_offline) await _createInvite(kind, viewer);
   }
 
   Future<List<_TreePerson>?> _chooseParentsForSibling({
@@ -883,38 +925,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         .toList();
   }
 
-  Future<void> _insertParentChildRelationship({
-    required String parentType,
-    required String parentId,
-    required String childType,
-    required String childId,
-  }) async {
-    await _supabase.from('family_relationships').insert({
-      'family_id': widget.familyId,
-      'parent_type': parentType,
-      'parent_id': parentId,
-      'child_type': childType,
-      'child_id': childId,
-      'relationship_kind': 'parent_child',
-    });
-  }
-
-  Future<void> _insertSpouseRelationship({
-    required String firstType,
-    required String firstId,
-    required String secondType,
-    required String secondId,
-  }) async {
-    await _supabase.from('family_relationships').insert({
-      'family_id': widget.familyId,
-      'parent_type': firstType,
-      'parent_id': firstId,
-      'child_type': secondType,
-      'child_id': secondId,
-      'relationship_kind': 'spouse',
-    });
-  }
-
   Future<List<_TreePerson>?> _choosePartnersForParent({
     required _TreePerson focus,
     required String parentName,
@@ -990,14 +1000,13 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         .toList();
   }
 
-  Future<void> _chooseChildrenForSpouse({
+  Future<List<_TreePerson>?> _chooseChildrenForSpouse({
     required _TreePerson focus,
-    required String spouseType,
-    required String spouseId,
     required String spouseName,
   }) async {
     final children = _childrenOf(focus);
-    if (children.isEmpty || !mounted) return;
+    if (!mounted) return null;
+    if (children.isEmpty) return [];
     final selected = <String>{};
     final result = await showDialog<Set<String>>(
       context: context,
@@ -1012,7 +1021,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$spouseName is now connected as ${focus.name}’s spouse. Select only the children they also parent.',
+                  '$spouseName will be connected as ${focus.name}’s spouse. Select only the children they also parent.',
                 ),
                 const SizedBox(height: 10),
                 Container(
@@ -1073,35 +1082,17 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         ),
       ),
     );
-    if (result == null || result.isEmpty) return;
-
-    try {
-      for (final child in children.where(
-        (child) => result.contains(child.key),
-      )) {
-        await _insertParentChildRelationship(
-          parentType: spouseType,
-          parentId: spouseId,
-          childType: child.type,
-          childId: child.id,
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
-    }
+    if (result == null) return null;
+    return children.where((child) => result.contains(child.key)).toList();
   }
 
-  Future<void> _chooseSiblingsForParent({
+  Future<List<_TreePerson>?> _chooseSiblingsForParent({
     required _TreePerson focus,
-    required String parentType,
-    required String parentId,
     required String parentName,
   }) async {
     final siblings = _siblingsOf(focus);
-    if (siblings.isEmpty || !mounted) return;
+    if (!mounted) return null;
+    if (siblings.isEmpty) return [];
 
     final selected = <String>{};
     final result = await showDialog<Set<String>>(
@@ -1119,7 +1110,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$parentName is now connected as ${focus.name}’s parent. '
+                  '$parentName will be connected as ${focus.name}’s parent. '
                   'Select only the siblings who are also their children.',
                 ),
                 const SizedBox(height: 10),
@@ -1184,89 +1175,56 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       ),
     );
 
-    if (result == null || result.isEmpty) return;
-
-    try {
-      for (final sibling in siblings.where(
-        (sibling) => result.contains(sibling.key),
-      )) {
-        await _insertParentChildRelationship(
-          parentType: parentType,
-          parentId: parentId,
-          childType: sibling.type,
-          childId: sibling.id,
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
-    }
+    if (result == null) return null;
+    return siblings.where((sibling) => result.contains(sibling.key)).toList();
   }
 
-  Future<void> _chooseOtherParentForChild({
+  Future<Map<String, dynamic>?> _chooseOtherParentForChild({
     required _TreePerson focus,
-    required String childType,
-    required String childId,
+    bool includeExisting = true,
     required String childName,
   }) async {
-    if (!mounted) return;
-    final spouses = _spousesOf(focus);
+    if (!mounted) return null;
+    final spouses = includeExisting ? _spousesOf(focus) : <_TreePerson>[];
     String selection = 'none';
 
     final result = await showDialog<String>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
+          insetPadding: _relationshipDialogInsetPadding(dialogContext),
           title: Text('Choose $childName’s other parent'),
-          content: SizedBox(
-            width: 480,
-            height: min(520, 230 + spouses.length * 54).toDouble(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'A spouse is never automatically made a parent. Choose the correct person for this child.',
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Only spouses are listed here. If the other parent is missing, add them as a spouse first or use the placeholder option.',
-                  style: TextStyle(color: Color(0xFF6B5875)),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: RadioGroup<String>(
-                    groupValue: selection,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setDialogState(() => selection = value);
-                      }
-                    },
-                    child: ListView(
-                      children: [
-                        const RadioListTile<String>(
-                          value: 'none',
-                          title: Text('No other parent selected'),
-                        ),
-                        const RadioListTile<String>(
-                          value: 'placeholder',
-                          title: Text('Parent not added yet'),
-                          subtitle: Text(
-                            'Create a visible placeholder that can be replaced later',
-                          ),
-                        ),
-                        for (final person in spouses)
-                          RadioListTile<String>(
-                            value: person.key,
-                            title: Text(person.name),
-                            subtitle: Text('${focus.name}’s spouse'),
-                          ),
-                      ],
-                    ),
+          content: _relationshipDialogContent(
+            dialogContext,
+            child: RadioGroup<String>(
+              groupValue: selection,
+              onChanged: (value) {
+                if (value != null) setDialogState(() => selection = value);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Only the selected person will be linked as a parent.',
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  const RadioListTile<String>(
+                    value: 'none',
+                    title: Text('No other parent selected'),
+                  ),
+                  const RadioListTile<String>(
+                    value: 'placeholder',
+                    title: Text('Parent not added yet'),
+                  ),
+                  for (final person in spouses)
+                    RadioListTile<String>(
+                      value: person.key,
+                      title: Text(person.name),
+                      subtitle: Text('${focus.name}’s spouse'),
+                    ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -1282,187 +1240,104 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         ),
       ),
     );
-    if (result == null || result == 'none') return;
-
-    try {
-      if (result == 'placeholder') {
-        await _supabase.rpc(
-          'create_legacy_relative',
-          params: {
-            'p_family_id': widget.familyId,
-            'p_anchor_type': childType,
-            'p_anchor_id': childId,
-            'p_relation': 'parent',
-            'p_name': 'Parent not added yet',
-            'p_display_name': 'Parent not added yet',
-            'p_birth_year': null,
-            'p_death_year': null,
-            'p_about_me_text':
-                'Placeholder created because the child’s other parent has not been added yet.',
-          },
-        );
-      } else {
-        final parent = spouses.firstWhere((person) => person.key == result);
-        await _insertParentChildRelationship(
-          parentType: parent.type,
-          parentId: parent.id,
-          childType: childType,
-          childId: childId,
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
-    }
+    if (result == null) return null;
+    if (result == 'none') return {'type': 'none'};
+    if (result == 'placeholder') return {'type': 'placeholder'};
+    final person = spouses.firstWhere((person) => person.key == result);
+    return {'type': person.type, 'id': person.id};
   }
 
-  Future<void> _createInvite(_RelativeKind kind, _TreePerson focus) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return;
+  List<Map<String, String>> _nodeRefs(List<_TreePerson> people) =>
+      (people.toList()..sort((a, b) => a.key.compareTo(b.key)))
+          .map((p) => {'type': p.type, 'id': p.id})
+          .toList();
 
+  Future<Map<String, dynamic>?> _relationshipChoices(
+    _RelativeKind kind,
+    _TreePerson focus,
+    String name,
+    int gap,
+  ) async {
+    List<_TreePerson> parents = [], partners = [], children = [];
+    Map<String, dynamic>? otherParent;
+    if (kind == _RelativeKind.sibling) {
+      final selected = await _chooseParentsForSibling(
+        focus: focus,
+        siblingName: name,
+      );
+      if (selected == null) return null;
+      parents = selected;
+    }
+    if (kind == _RelativeKind.parent && gap == 0) {
+      final selected = await _choosePartnersForParent(
+        focus: focus,
+        parentName: name,
+      );
+      if (selected == null) return null;
+      partners = selected;
+      final selectedChildren = await _chooseSiblingsForParent(
+        focus: focus,
+        parentName: name,
+      );
+      if (selectedChildren == null) return null;
+      children = selectedChildren;
+    }
+    if (kind == _RelativeKind.spouse) {
+      final selected = await _chooseChildrenForSpouse(
+        focus: focus,
+        spouseName: name,
+      );
+      if (selected == null) return null;
+      children = selected;
+    }
+    if (kind == _RelativeKind.child) {
+      final selected = await _chooseOtherParentForChild(
+        focus: focus,
+        childName: name,
+        includeExisting: gap == 0,
+      );
+      if (selected == null) return null;
+      if (selected['type'] != 'none') otherParent = selected;
+    }
+    return {
+      'anchor': {'type': focus.type, 'id': focus.id},
+      'relation': _kindLabel(kind),
+      'gap': gap,
+      'shared_parents': _nodeRefs(parents),
+      'partners': _nodeRefs(partners),
+      'children': _nodeRefs(children),
+      'other_parent': otherParent,
+    };
+  }
+
+  Future<void> _createInvite(
+    _RelativeKind kind,
+    _TreePerson focus, {
+    int gap = 0,
+  }) async {
+    if (_creatingRelative || _supabase.auth.currentUser == null || _offline) {
+      return;
+    }
+    _creatingRelative = true;
     try {
-      final code = _inviteCode();
-      final expiresAt = DateTime.now().add(const Duration(days: 7)).toUtc();
-      final viewerVaultId = _viewer?.id;
-      if (viewerVaultId == null) {
-        throw Exception('You need your own vault before inviting relatives.');
-      }
-
-      List<_TreePerson>? siblingParents;
-      if (kind == _RelativeKind.sibling) {
-        siblingParents = await _chooseParentsForSibling(
-          focus: focus,
-          siblingName: 'the invited sibling',
-        );
-        if (siblingParents == null) return;
-      }
-
-      List<_TreePerson>? parentPartners;
-      if (kind == _RelativeKind.parent) {
-        parentPartners = await _choosePartnersForParent(
-          focus: focus,
-          parentName: 'the invited parent',
-        );
-        if (parentPartners == null) return;
-      }
-
-      final inserted = await _supabase
-          .from('family_invites')
-          .insert({
-            'family_id': widget.familyId,
-            'created_by': user.id,
-            'invite_code': code,
-            'slot_key': null,
-            'expires_at': expiresAt.toIso8601String(),
-            'inviter_vault_id': viewerVaultId,
-          })
-          .select('id')
-          .maybeSingle();
-
-      final inviteId = (inserted?['id'] ?? '').toString().trim();
-      if (inviteId.isEmpty) throw Exception('The invite could not be created.');
-
-      late String firstType;
-      late String firstId;
-      late String secondType;
-      late String secondId;
-      var relationshipKind = 'parent_child';
-
-      switch (kind) {
-        case _RelativeKind.parent:
-          firstType = 'invite';
-          firstId = inviteId;
-          secondType = focus.type;
-          secondId = focus.id;
-        case _RelativeKind.child:
-          firstType = focus.type;
-          firstId = focus.id;
-          secondType = 'invite';
-          secondId = inviteId;
-        case _RelativeKind.spouse:
-          firstType = focus.type;
-          firstId = focus.id;
-          secondType = 'invite';
-          secondId = inviteId;
-          relationshipKind = 'spouse';
-        case _RelativeKind.sibling:
-          secondType = 'invite';
-          secondId = inviteId;
-          if (siblingParents!.isEmpty) {
-            firstType = focus.type;
-            firstId = focus.id;
-            relationshipKind = 'sibling';
-          } else {
-            final parent = siblingParents.first;
-            firstType = parent.type;
-            firstId = parent.id;
-          }
-      }
-
-      await _supabase.from('family_relationships').insert({
-        'family_id': widget.familyId,
-        'parent_type': firstType,
-        'parent_id': firstId,
-        'child_type': secondType,
-        'child_id': secondId,
-        'relationship_kind': relationshipKind,
-      });
-
-      if (kind == _RelativeKind.sibling) {
-        for (final parent in siblingParents!.skip(1)) {
-          await _insertParentChildRelationship(
-            parentType: parent.type,
-            parentId: parent.id,
-            childType: 'invite',
-            childId: inviteId,
-          );
-        }
-      }
-
-      if (kind == _RelativeKind.parent) {
-        for (final partner in parentPartners ?? const <_TreePerson>[]) {
-          await _insertSpouseRelationship(
-            firstType: 'invite',
-            firstId: inviteId,
-            secondType: partner.type,
-            secondId: partner.id,
-          );
-        }
-      }
-
-      if (!mounted) return;
-      if (kind == _RelativeKind.spouse) {
-        await _chooseChildrenForSpouse(
-          focus: focus,
-          spouseType: 'invite',
-          spouseId: inviteId,
-          spouseName: 'The invited spouse',
-        );
-      } else if (kind == _RelativeKind.child) {
-        await _chooseOtherParentForChild(
-          focus: focus,
-          childType: 'invite',
-          childId: inviteId,
-          childName: 'the invited child',
-        );
-      } else if (kind == _RelativeKind.parent) {
-        await _chooseSiblingsForParent(
-          focus: focus,
-          parentType: 'invite',
-          parentId: inviteId,
-          parentName: 'The invited parent',
-        );
-      }
+      final choices = await _relationshipChoices(
+        kind,
+        focus,
+        'the invited relative',
+        gap,
+      );
+      if (choices == null || !mounted) return;
+      final result = await FamilyRelationshipService(
+        _supabase,
+      ).create(widget.familyId, {...choices, 'mode': 'invite'});
       if (!mounted) return;
       await showFamilyInviteDialog(
         context: context,
         title: 'Invite ${_kindLabel(kind)}',
-        code: code,
-        expiresAt: expiresAt,
+        code: result['invite_code'] as String,
+        expiresAt: DateTime.parse(result['expires_at'] as String),
       );
-      await _load(keepFocusKey: focus.key);
+      if (mounted) await _load(keepFocusKey: focus.key);
     } catch (e) {
       if (!mounted) return;
       if (isEverRootFamilyUpgradeError(e)) {
@@ -1470,17 +1345,19 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           context,
           message: e is PostgrestException ? e.message : null,
         );
-        return;
-      }
-      if (isEverRootQuotaError(e)) {
+      } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(everRootQuotaMessageFromError(e))),
+          SnackBar(
+            content: Text(
+              isEverRootQuotaError(e)
+                  ? everRootQuotaMessageFromError(e)
+                  : publicErrorMessage(e),
+            ),
+          ),
         );
-        return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(publicErrorMessage(e))));
+    } finally {
+      _creatingRelative = false;
     }
   }
 
@@ -1739,143 +1616,46 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                         return;
                       }
 
-                      List<_TreePerson>? siblingParents;
-                      if (kind == _RelativeKind.sibling) {
-                        siblingParents = await _chooseParentsForSibling(
-                          focus: focus,
-                          siblingName: name,
-                        );
-                        if (siblingParents == null) {
-                          return;
-                        }
-                        if (!dialogContext.mounted) return;
-                      }
-
-                      List<_TreePerson>? parentPartners;
-                      final isGapLineage = lineagePlaceholderCount > 0;
-
-                      if (kind == _RelativeKind.parent && !isGapLineage) {
-                        parentPartners = await _choosePartnersForParent(
-                          focus: focus,
-                          parentName: name,
-                        );
-                        if (parentPartners == null) return;
-                        if (!dialogContext.mounted) return;
-                      }
-
                       setDialogState(() {
                         saving = true;
                         error = null;
                       });
-
                       try {
-                        var anchor = focus;
-                        var createKind = kind;
-                        final siblingOnly =
-                            kind == _RelativeKind.sibling &&
-                            siblingParents!.isEmpty;
-                        if (kind == _RelativeKind.sibling && !siblingOnly) {
-                          anchor = siblingParents!.first;
-                          createKind = _RelativeKind.child;
-                        } else if (siblingOnly) {
-                          createKind = _RelativeKind.child;
-                        } else if (grandchildWithMissingParent) {
-                          anchor = await _createMissingParentPlaceholder(focus);
-                        } else if (isGapLineage) {
-                          anchor = await _createLineagePlaceholderChain(
-                            focus,
-                            kind,
-                            lineagePlaceholderCount,
-                          );
-                        }
-                        final created = await _supabase.rpc(
-                          'create_legacy_relative',
-                          params: {
-                            'p_family_id': widget.familyId,
-                            'p_anchor_type': anchor.type,
-                            'p_anchor_id': anchor.id,
-                            'p_relation': _kindLabel(createKind),
-                            'p_name': name,
-                            'p_display_name': null,
-                            'p_birth_year': birthYear,
-                            'p_death_year': deathYear,
-                            'p_about_me_text':
-                                aboutController.text.trim().isEmpty
-                                ? null
-                                : aboutController.text.trim(),
-                          },
+                        final gap = grandchildWithMissingParent
+                            ? 1
+                            : lineagePlaceholderCount;
+                        final choices = await _relationshipChoices(
+                          kind,
+                          focus,
+                          name,
+                          gap,
                         );
-                        final createdId = (created ?? '').toString().trim();
-                        if (createdId.isEmpty) {
-                          throw Exception(
-                            'The legacy relative was created without an id.',
-                          );
-                        }
-                        if (kind == _RelativeKind.sibling) {
-                          if (siblingOnly) {
-                            await _supabase
-                                .from('family_relationships')
-                                .update({'relationship_kind': 'sibling'})
-                                .eq('family_id', widget.familyId)
-                                .eq('parent_type', focus.type)
-                                .eq('parent_id', focus.id)
-                                .eq('child_type', 'legacy')
-                                .eq('child_id', createdId);
-                          } else {
-                            for (final parent in siblingParents!.skip(1)) {
-                              await _insertParentChildRelationship(
-                                parentType: parent.type,
-                                parentId: parent.id,
-                                childType: 'legacy',
-                                childId: createdId,
-                              );
-                            }
-                          }
-                        }
-                        if (kind == _RelativeKind.parent && !isGapLineage) {
-                          for (final partner
-                              in parentPartners ?? const <_TreePerson>[]) {
-                            await _insertSpouseRelationship(
-                              firstType: 'legacy',
-                              firstId: createdId,
-                              secondType: partner.type,
-                              secondId: partner.id,
-                            );
-                          }
-                        }
+                        if (choices == null || !dialogContext.mounted) return;
+                        await FamilyRelationshipService(
+                          _supabase,
+                        ).create(widget.familyId, {
+                          ...choices,
+                          'mode': 'legacy',
+                          'name': name,
+                          'birth_year': birthYear,
+                          'death_year': deathYear,
+                          'about': aboutController.text.trim(),
+                        });
                         if (!dialogContext.mounted) return;
                         Navigator.pop(dialogContext);
-                        await Future<void>.delayed(Duration.zero);
-                        final createdName = name;
-                        if (kind == _RelativeKind.spouse) {
-                          await _chooseChildrenForSpouse(
-                            focus: focus,
-                            spouseType: 'legacy',
-                            spouseId: createdId,
-                            spouseName: createdName,
-                          );
-                        } else if (kind == _RelativeKind.child) {
-                          await _chooseOtherParentForChild(
-                            focus: anchor,
-                            childType: 'legacy',
-                            childId: createdId,
-                            childName: createdName,
-                          );
-                        } else if (kind == _RelativeKind.parent &&
-                            !isGapLineage) {
-                          await _chooseSiblingsForParent(
-                            focus: focus,
-                            parentType: 'legacy',
-                            parentId: createdId,
-                            parentName: createdName,
-                          );
-                        }
-                        await _load(keepFocusKey: focus.key);
+                        if (mounted) await _load(keepFocusKey: focus.key);
                       } catch (e) {
-                        setDialogState(() {
-                          saving = false;
-                          error = e.toString();
-                        });
+                        if (dialogContext.mounted) {
+                          setDialogState(() {
+                            error = isEverRootQuotaError(e)
+                                ? everRootQuotaMessageFromError(e)
+                                : publicErrorMessage(e);
+                          });
+                        }
+                      } finally {
+                        if (dialogContext.mounted) {
+                          setDialogState(() => saving = false);
+                        }
                       }
                     },
               child: Text(saving ? 'Saving...' : 'Create profile'),
@@ -1883,37 +1663,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
           ],
         ),
       ),
-    );
-  }
-
-  Future<_TreePerson> _createMissingParentPlaceholder(_TreePerson focus) async {
-    final id = await _supabase.rpc(
-      'create_legacy_relative',
-      params: {
-        'p_family_id': widget.familyId,
-        'p_anchor_type': focus.type,
-        'p_anchor_id': focus.id,
-        'p_relation': 'child',
-        'p_name': 'Parent not added yet',
-        'p_display_name': 'Parent not added yet',
-        'p_birth_year': null,
-        'p_death_year': null,
-        'p_about_me_text':
-            'Placeholder created because a descendant was added first.',
-      },
-    );
-    final placeholderId = (id ?? '').toString().trim();
-    if (placeholderId.isEmpty) {
-      throw Exception('Could not create the parent placeholder.');
-    }
-    return _TreePerson(
-      type: 'legacy',
-      id: placeholderId,
-      name: 'Parent not added yet',
-      ownerId: null,
-      slotKey: null,
-      avatarUrl: null,
-      isPlaceholder: true,
     );
   }
 
@@ -1948,10 +1697,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                 onTap: () async {
                   Navigator.pop(sheetContext);
                   try {
-                    final placeholder = await _createMissingParentPlaceholder(
-                      focus,
-                    );
-                    await _createInvite(_RelativeKind.child, placeholder);
+                    await _createInvite(_RelativeKind.child, focus, gap: 1);
                   } catch (e) {
                     if (!mounted) return;
                     if (isEverRootFamilyUpgradeError(e)) {
@@ -1994,57 +1740,6 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         ),
       ),
     );
-  }
-
-  Future<_TreePerson> _createLineagePlaceholderChain(
-    _TreePerson focus,
-    _RelativeKind direction,
-    int count,
-  ) async {
-    var anchor = focus;
-    for (int index = 0; index < count; index++) {
-      final generation = index + 1;
-      final name = direction == _RelativeKind.parent
-          ? switch (generation) {
-              1 => 'Parent not added yet',
-              2 => 'Grandparent not added yet',
-              _ => 'Predecessor not added yet',
-            }
-          : switch (generation) {
-              1 => 'Child not added yet',
-              2 => 'Grandchild not added yet',
-              _ => 'Descendant not added yet',
-            };
-      final id = await _supabase.rpc(
-        'create_legacy_relative',
-        params: {
-          'p_family_id': widget.familyId,
-          'p_anchor_type': anchor.type,
-          'p_anchor_id': anchor.id,
-          'p_relation': _kindLabel(direction),
-          'p_name': name,
-          'p_display_name': name,
-          'p_birth_year': null,
-          'p_death_year': null,
-          'p_about_me_text':
-              'Placeholder created to preserve a skipped family-tree generation.',
-        },
-      );
-      final placeholderId = (id ?? '').toString().trim();
-      if (placeholderId.isEmpty) {
-        throw Exception('Could not create the lineage placeholder.');
-      }
-      anchor = _TreePerson(
-        type: 'legacy',
-        id: placeholderId,
-        name: name,
-        ownerId: null,
-        slotKey: null,
-        avatarUrl: null,
-        isPlaceholder: true,
-      );
-    }
-    return anchor;
   }
 
   Future<void> _showLineageContinuationOptions(
@@ -2131,12 +1826,11 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                         );
                         if (!confirmed) return;
                         try {
-                          final anchor = await _createLineagePlaceholderChain(
-                            focus,
+                          await _createInvite(
                             direction,
-                            placeholderCount,
+                            focus,
+                            gap: placeholderCount,
                           );
-                          await _createInvite(direction, anchor);
                         } catch (e) {
                           if (!context.mounted) return;
                           if (isEverRootFamilyUpgradeError(e)) {
@@ -2322,8 +2016,11 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       grandchildren.length + 1,
       greatGrandchildren.length + 1,
     ].reduce(max);
-    final sideCount = siblings.length + spouses.length + 2;
-    final width = max(1700.0, max(widestRow * 190.0, sideCount * 180.0 + 500));
+    final width = relationshipTreeWidth(
+      widestGeneration: widestRow,
+      siblings: siblings.length,
+      spouses: spouses.length,
+    );
     const height = 2200.0;
     final center = Offset(width / 2, 1100);
     final bubbles = <_BubbleSpec>[];
@@ -2579,7 +2276,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
         ],
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const BrandLoading()
           : _error != null
           ? Center(
               child: Padding(

@@ -7,6 +7,7 @@ const lifecycle = await readFile(new URL('../migrations/20260928223253_sponsorsh
 const returning = await readFile(new URL('../migrations/20260929111512_returning_family_sponsor.sql', import.meta.url), 'utf8');
 const isolation = await readFile(new URL('../migrations/20261001221344_apple_environment_isolation.sql', import.meta.url), 'utf8');
 const retiredHistory = await readFile(new URL('../migrations/20261011205859_acknowledge_retired_apple_history.sql', import.meta.url), 'utf8');
+const repurchase = await readFile(new URL('../migrations/20261028120027_verified_apple_repurchase_after_expiry.sql', import.meta.url), 'utf8');
 const a = '00000000-0000-4000-8000-000000000001';
 const b = '00000000-0000-4000-8000-000000000002';
 const f = '00000000-0000-4000-8000-000000000003';
@@ -35,6 +36,7 @@ async function fixture() {
   await db.exec(returning);
   await db.exec(isolation);
   await db.exec(retiredHistory);
+  await db.exec(repurchase);
   return db;
 }
 function transaction(user=b, original='original-b', delta=0) {
@@ -42,6 +44,159 @@ function transaction(user=b, original='original-b', delta=0) {
     appAccountToken:user,environment:'Sandbox',productId:'everroots.family.monthly',
     purchaseDate:Date.now()+delta,signedDate:Date.now()+delta,expiresDate:Date.now()+86400000 };
 }
+
+const g = '00000000-0000-4000-8000-000000000004';
+async function expiredRebindingFixture(target=g) {
+  const db = await fixture();
+  await db.exec(`insert into family_groups values('${g}'); insert into family_members values('${g}','${a}','member');`);
+  await db.query('select begin_family_sponsorship($1)', [f]);
+  const old = {...transaction(), purchaseDate:Date.now()-1000};
+  await apply(db,old);
+  old.expiresDate=Date.now()-500;
+  await db.exec("update family_entitlements set current_period_end=now()-interval '500 milliseconds',status='expired',plan='free'; delete from family_sponsor_reservations");
+  await db.query("select set_config('test.uid',$1,false)",[a]);
+  const prepare = () => db.query('select prepare_verified_apple_repurchase($1,$2,$3) r',[JSON.stringify(old),target,a]);
+  const claim = (tx, user=a, source='client_validation', family=target, notification=null) => db.query(
+    'select apply_verified_family_subscription($1,$2,$3,$4,$5) r',[JSON.stringify(tx),family,user,source,notification]).then(r=>r.rows[0].r);
+  const newPurchase = () => ({...transaction(a),transactionReason:'PURCHASE',transactionId:'new-purchase'});
+  return {db,old,prepare,claim,newPurchase};
+}
+
+test('expiry acknowledgement changes no ownership; new checkout and signed purchase can rebind',async()=>{
+  const {db,old,prepare,claim,newPurchase}=await expiredRebindingFixture(); try {
+    const binding=(await db.query('select * from apple_sponsor_bindings')).rows;
+    assert.equal((await prepare()).rows[0].r.code,'APPLE_EXPIRED_HISTORY');
+    assert.deepEqual((await db.query('select * from apple_sponsor_bindings')).rows,binding);
+    await assert.rejects(claim(old),/APPLE_PURCHASE_ALREADY_BOUND/);
+    await assert.rejects(claim(newPurchase()),/APPLE_PURCHASE_ALREADY_BOUND/);
+    await db.query('select begin_family_sponsorship($1)',[g]);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    const fresh=newPurchase();
+    // A re-signed old expiry notification must not invalidate the fresh checkout.
+    await db.exec("update apple_sponsor_bindings set last_signed_at=now()");
+    // Notification arriving before client verification must not reward old family.
+    assert.equal((await claim(fresh,null,'server_notification',null)).code,'APPLE_PURCHASER_MISMATCH');
+    assert.equal((await claim(fresh)).status,'active');
+    const current=(await db.query('select * from family_entitlements where family_id=$1',[g])).rows[0];
+    assert.equal(current.billing_owner_user_id,a);
+    assert.equal(current.apple_original_transaction_id,'original-b');
+    const previous=(await db.query('select * from family_entitlements where family_id=$1',[f])).rows[0];
+    assert.equal(previous.status,'expired');
+    assert.equal(previous.apple_original_transaction_id,null);
+    assert.equal(previous.provider_subscription_id,'original-b');
+    assert.equal((await db.query('select count(*)::int n from apple_sponsor_reassignments')).rows[0].n,1);
+    assert.equal((await db.query('select count(*)::int n from apple_repurchase_checks')).rows[0].n,0);
+    assert.equal((await claim(fresh)).applied,true); // idempotent retry
+    const before=(await db.query('select * from family_entitlements')).rows;
+    assert.equal((await claim({...old,revocationDate:Date.now(),signedDate:Date.now()},null,'server_notification',null,'REFUND')).code,'APPLE_PURCHASER_MISMATCH');
+    assert.equal((await claim({...old,appAccountToken:a},null,'server_notification',null)).code,'APPLE_EVENT_PREVIOUS_SPONSOR');
+    assert.deepEqual((await db.query('select * from family_entitlements')).rows,before);
+    // Subsequent verified renewal belongs only to the new purchaser/family.
+    assert.equal((await claim({...fresh,purchaseDate:fresh.purchaseDate+1,signedDate:Date.now()+1,transactionReason:'RENEWAL'},null,'server_notification',null)).applied,true);
+    assert.equal((await claim({...fresh,purchaseDate:fresh.purchaseDate+1,signedDate:Date.now()+2,
+      revocationDate:Date.now()},null,'server_notification',null,'REFUND')).status,'refunded');
+    assert.equal((await db.query('select status from family_entitlements where family_id=$1',[g])).rows[0].status,'refunded');
+  } finally {await db.close();}
+});
+
+test('same-family expired sponsor replacement still requires a genuinely new purchase',async()=>{
+  const {db,prepare,claim,newPurchase}=await expiredRebindingFixture(f); try {
+    await prepare();
+    await db.query('select begin_family_sponsorship($1)',[f]);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    assert.equal((await claim(newPurchase())).status,'active');
+    assert.equal((await db.query('select billing_owner_user_id from family_entitlements where family_id=$1',[f])).rows[0].billing_owner_user_id,a);
+  } finally {await db.close();}
+});
+
+test('a later second repurchase requires a fresh expiry check and cannot reuse the first proof',async()=>{
+  const {db,prepare,claim,newPurchase}=await expiredRebindingFixture(); try {
+    await prepare();
+    await db.query('select begin_family_sponsorship($1)',[g]);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    const first=newPurchase();
+    await claim(first);
+    await db.exec("update family_entitlements set current_period_end=now()-interval '1 second',status='expired'; delete from family_sponsor_reservations");
+    await db.query("select set_config('test.uid',$1,false)",[b]);
+    const old={...first,expiresDate:Date.now()-1};
+    const second={...transaction(b),transactionReason:'PURCHASE',transactionId:'second-new-purchase'};
+    await assert.rejects(claim(second,b,'client_validation',f),/APPLE_PURCHASE_ALREADY_BOUND/);
+    await db.query('select prepare_verified_apple_repurchase($1,$2,$3)',[JSON.stringify(old),f,b]);
+    await db.query('select begin_family_sponsorship($1)',[f]);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    second.purchaseDate=Date.now(); second.signedDate=Date.now();
+    assert.equal((await claim(second,b,'client_validation',f)).status,'active');
+    assert.equal((await db.query('select count(*)::int n from apple_sponsor_reassignments')).rows[0].n,2);
+  } finally {await db.close();}
+});
+
+test('repurchase rejects renewals, old tokens, replay, unreserved or expired checks and membership loss',async()=>{
+  const {db,old,prepare,claim,newPurchase}=await expiredRebindingFixture(); try {
+    await prepare();
+    await db.query('select begin_family_sponsorship($1)',[g]);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    const good=newPurchase();
+    const bad=[{transactionReason:'RENEWAL'},{appAccountToken:b},{appAccountToken:null},
+      {purchaseDate:old.purchaseDate},{expiresDate:1},{revocationDate:Date.now()},
+      {transactionId:old.transactionId},{bundleId:'another.app'},{productId:'unknown'},
+      {signedDate:null}];
+    for(const patch of bad) {
+      await assert.rejects(claim({...good,...patch}));
+      assert.equal((await db.query('select purchaser_id from apple_sponsor_bindings')).rows[0].purchaser_id,b);
+      assert.equal((await db.query('select count(*)::int n from apple_sponsor_reassignments')).rows[0].n,0);
+    }
+    await db.exec("update apple_repurchase_checks set valid_until=now()-interval '1 second'");
+    await assert.rejects(claim(good),/APPLE_PURCHASE_ALREADY_BOUND/);
+    await db.exec('delete from family_sponsor_reservations');
+    await prepare();
+    await db.exec('delete from family_sponsor_checkout_attempts');
+    await assert.rejects(claim(newPurchase()),/APPLE_PURCHASE_ALREADY_BOUND/);
+    await db.query('select begin_family_sponsorship($1)',[g]);
+    await db.query('delete from family_members where family_id=$1',[g]);
+    await assert.rejects(prepare(),/FAMILY_MEMBERSHIP_REQUIRED/);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    await assert.rejects(claim(newPurchase()),/FAMILY_MEMBERSHIP_REQUIRED/);
+  } finally {await db.close();}
+});
+
+test('active/grace chain, target coverage, environment changes and concurrent binding changes block transfer',async()=>{
+  const {db,old,prepare,claim,newPurchase}=await expiredRebindingFixture(); try {
+    for(const status of ['active','grace_period']) {
+      await db.query("update family_entitlements set status=$1,current_period_end=now()+interval '1 day'",[status]);
+      await assert.rejects(prepare(),/APPLE_PREVIOUS_PLAN_NOT_ENDED/);
+    }
+    await db.exec("update family_entitlements set status='expired',current_period_end=now()-interval '1 second'");
+    await prepare();
+    await db.query('select begin_family_sponsorship($1)',[g]);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    await assert.rejects(claim({...newPurchase(),environment:'Production'}),/APPLE_ENVIRONMENT_MISMATCH/);
+    await db.exec("update apple_sponsor_bindings set last_purchase_at=now()+interval '1 second'");
+    await assert.rejects(claim(newPurchase()),/APPLE_PURCHASE_ALREADY_BOUND/);
+    await db.query('update apple_sponsor_bindings set last_purchase_at=to_timestamp($1/1000.0)',[old.purchaseDate]);
+    await assert.rejects(prepare(),/SPONSOR_PURCHASE_IN_PROGRESS/);
+    await db.exec('delete from family_sponsor_reservations');
+    await prepare();
+    await db.query('select begin_family_sponsorship($1)',[g]);
+    await db.query("insert into family_entitlements(family_id,status,current_period_end) values($1,'active',now()+interval '1 day')",[g]);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    await assert.rejects(claim(newPurchase()),/FAMILY_ALREADY_SPONSORED/);
+    await db.exec('delete from family_sponsor_reservations');
+    await db.exec("update family_entitlements set apple_environment='production',status='expired',current_period_end=now()-interval '1 second'");
+    await assert.rejects(prepare(),/APPLE_ENVIRONMENT_MISMATCH/);
+  } finally {await db.close();}
+});
+
+test('repurchase proof and audit are private and not client-callable',async()=>{
+  const db=await fixture(); try {
+    for(const role of ['anon','authenticated']) {
+      for(const table of ['apple_repurchase_checks','apple_sponsor_reassignments']) {
+        assert.equal((await db.query('select has_table_privilege($1,$2,\'select,insert,update,delete\') allowed',[role,table])).rows[0].allowed,false);
+        assert.equal((await db.query('select relrowsecurity enabled from pg_class where relname=$1',[table])).rows[0].enabled,true);
+      }
+      assert.equal((await db.query("select has_function_privilege($1,'prepare_verified_apple_repurchase(jsonb,uuid,uuid)','execute') allowed",[role])).rows[0].allowed,false);
+    }
+  } finally {await db.close();}
+});
 test('sandbox cannot overwrite an expired production family or bypass the public wrapper', async () => {
   const db=await fixture(); try {
     await db.query('select begin_family_sponsorship($1)',[f]);

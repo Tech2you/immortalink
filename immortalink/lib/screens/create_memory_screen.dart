@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'record_memory_screen.dart';
+import '../widgets/heiro_surface.dart';
 import '../widgets/ai_processing_consent.dart';
 import '../services/connection_status.dart';
 import '../utils/public_error.dart';
@@ -26,6 +28,7 @@ class CreateMemoryScreen extends StatefulWidget {
   final String initialMode;
   final String? displayName;
   final String? avatarUrl;
+  final WebAudioRecorder? recorder;
 
   const CreateMemoryScreen({
     super.key,
@@ -34,6 +37,7 @@ class CreateMemoryScreen extends StatefulWidget {
     this.initialMode = 'text',
     this.displayName,
     this.avatarUrl,
+    this.recorder,
   });
 
   @override
@@ -47,7 +51,8 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   final _whenController = TextEditingController();
   final _peopleController = TextEditingController();
   final _locationController = TextEditingController();
-  final WebAudioRecorder _recorder = createWebAudioRecorder();
+  late final WebAudioRecorder _recorder =
+      widget.recorder ?? createWebAudioRecorder();
   final AudioPlayer _previewPlayer = AudioPlayer();
 
   final List<_PendingPhoto> _photos = [];
@@ -57,6 +62,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   bool _showDetails = false;
   bool _saving = false;
   bool _pickingPhotos = false;
+  bool _recordingVoice = false;
   final _connection = ConnectionStatus.instance;
   void _connectionChanged() {
     if (mounted) setState(() {});
@@ -179,179 +185,92 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   }
 
   Future<void> _recordVoice() async {
-    if (!_recorder.isSupported) {
-      _toast('Recording is not supported on this device yet.');
+    if (_saving || _recordingVoice || !_recorder.isSupported) {
+      if (!_recorder.isSupported) {
+        _toast('Recording is not supported on this device yet.');
+      }
       return;
     }
-
-    String? error;
-    int seconds = 0;
-    bool stopping = false;
-    bool startScheduled = false;
-    DateTime? startedAt;
-    Timer? timer;
-
-    final recorded =
-        await showModalBottomSheet<({RecordedAudio audio, int seconds})>(
-          context: context,
-          isDismissible: false,
-          enableDrag: false,
-          isScrollControlled: true,
-          builder: (sheetContext) => StatefulBuilder(
-            builder: (sheetContext, setSheetState) {
-              void updateElapsed() {
-                final started = startedAt;
-                if (started == null) return;
-                seconds = DateTime.now().difference(started).inSeconds;
-              }
-
-              Future<void> start() async {
-                if (_recorder.isRecording || stopping || error != null) return;
-                try {
-                  await _recorder.start();
-                  startedAt = DateTime.now();
-                  seconds = 0;
-                  if (sheetContext.mounted) setSheetState(() {});
-                  timer?.cancel();
-                  timer = Timer.periodic(const Duration(seconds: 1), (_) {
-                    updateElapsed();
-                    if (sheetContext.mounted) setSheetState(() {});
-                  });
-                } catch (e) {
-                  if (sheetContext.mounted) {
-                    setSheetState(() => error = publicErrorMessage(e));
-                  }
-                }
-              }
-
-              if (!startScheduled) {
-                startScheduled = true;
-                WidgetsBinding.instance.addPostFrameCallback((_) => start());
-              }
-              final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
-              final remaining = (seconds % 60).toString().padLeft(2, '0');
-
-              return SafeArea(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    22,
-                    16,
-                    22,
-                    22 + MediaQuery.of(sheetContext).viewInsets.bottom,
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.black26,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      const Icon(
-                        Icons.graphic_eq,
-                        size: 54,
-                        color: Color(0xFF76558F),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Recording your memory',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Speak naturally. You can listen before preserving it.',
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        '$minutes:$remaining',
-                        style: const TextStyle(
-                          fontSize: 34,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (error != null) ...[
-                        const SizedBox(height: 12),
-                        Text(error!, style: const TextStyle(color: Colors.red)),
-                      ],
-                      const SizedBox(height: 22),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: stopping
-                                  ? null
-                                  : () async {
-                                      timer?.cancel();
-                                      await _recorder.cancel();
-                                      if (sheetContext.mounted) {
-                                        Navigator.pop(sheetContext);
-                                      }
-                                    },
-                              child: const Text('Cancel'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: stopping || !_recorder.isRecording
-                                  ? null
-                                  : () async {
-                                      setSheetState(() => stopping = true);
-                                      timer?.cancel();
-                                      try {
-                                        updateElapsed();
-                                        final audio = await _recorder.stop();
-                                        if (sheetContext.mounted) {
-                                          Navigator.pop(sheetContext, (
-                                            audio: audio,
-                                            seconds: seconds <= 0 ? 1 : seconds,
-                                          ));
-                                        }
-                                      } catch (e) {
-                                        setSheetState(() {
-                                          error = publicErrorMessage(e);
-                                          stopping = false;
-                                        });
-                                      }
-                                    },
-                              icon: const Icon(Icons.stop_circle_outlined),
-                              label: const Text('Stop and keep'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
+    setState(() => _recordingVoice = true);
+    try {
+      final userId = _client.auth.currentUser?.id;
+      await _previewPlayer.stop();
+      if (!mounted) return;
+      setState(() => _playingVoiceIndex = null);
+      final recorded = await Navigator.push<RecordedMemoryVoice>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => RecordMemoryScreen(
+            recorder: _recorder,
+            defaultTitle: 'Voice note ${_voices.length + 1}',
           ),
-        );
-
-    timer?.cancel();
-    if (recorded == null || !mounted) return;
-    final voiceError = MediaUploadPolicy.validateBytes(
-      MediaUploadKind.voice,
-      recorded.audio.bytes.length,
-      fileName: 'voice.${recorded.audio.extension}',
-      contentType: recorded.audio.mimeType,
-    );
-    if (voiceError != null) {
-      _toast(voiceError);
-      return;
-    }
-    setState(() {
-      _voices.add(
-        _PendingVoice(audio: recorded.audio, seconds: recorded.seconds),
+        ),
       );
-    });
+      if (recorded == null ||
+          !mounted ||
+          userId != _client.auth.currentUser?.id) {
+        return;
+      }
+      final voiceError = MediaUploadPolicy.validateBytes(
+        MediaUploadKind.voice,
+        recorded.audio.bytes.length,
+        fileName: 'voice.${recorded.audio.extension}',
+        contentType: recorded.audio.mimeType,
+      );
+      if (voiceError != null) {
+        _toast(voiceError);
+        return;
+      }
+      setState(
+        () => _voices.add(
+          _PendingVoice(
+            audio: recorded.audio,
+            seconds: recorded.seconds,
+            title: recorded.title,
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _recordingVoice = false);
+    }
+  }
+
+  Future<void> _renamePendingVoice(int index) async {
+    final voice = _voices[index];
+    final controller = TextEditingController(text: voice.title);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename recording'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 100,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(labelText: 'Recording name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (controller.text.trim().isNotEmpty) {
+                Navigator.pop(context, controller.text.trim());
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    // The route transition can still be using the field after the result resolves.
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    controller.dispose();
+    if (name != null && mounted && _voices.contains(voice)) {
+      setState(() => voice.title = name);
+    }
   }
 
   String _voiceLength(int totalSeconds) {
@@ -460,7 +379,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
             'vault_id': widget.vaultId,
             'memory_id': memoryId,
             'path': path,
-            'title': 'Voice note',
+            'title': _voices[index].title,
             'duration_seconds': _voices[index].seconds,
           })
           .select('id')
@@ -486,7 +405,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   }
 
   Future<void> _save() async {
-    if (_saving || _pickingPhotos) return;
+    if (_saving || _pickingPhotos || _recordingVoice) return;
     final title = _titleController.text.trim();
     final body = _bodyController.text.trim();
     if (body.isEmpty && _photos.isEmpty && _voices.isEmpty) {
@@ -629,7 +548,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         itemBuilder: (_, index) {
           final photo = _photos[index];
           return ClipRRect(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(8),
             child: Stack(
               children: [
                 Container(
@@ -671,286 +590,303 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('New memory'),
-        actions: [
-          TextButton(
-            onPressed: _saving || _pickingPhotos || _connection.offline
-                ? null
-                : _save,
-            child: Text(
-              _saving ? 'Preserving…' : 'Preserve',
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: ListView(
-              padding: const EdgeInsets.all(18),
-              children: [
-                if (_connection.offline)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      'You are offline. Reconnect to preserve this memory. Your text stays here while this screen is open.',
+    return HeiroSurface(
+      child: Scaffold(
+        appBar: AppBar(title: const Text('New memory')),
+        body: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: ListView(
+                padding: const EdgeInsets.all(18),
+                children: [
+                  if (_connection.offline)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 16),
+                      child: Text(
+                        'You are offline. Reconnect to preserve this memory. Your text stays here while this screen is open.',
+                      ),
+                    ),
+                  _profileRow(),
+                  const SizedBox(height: 22),
+                  TextField(
+                    controller: _titleController,
+                    enabled: !_saving,
+                    textCapitalization: TextCapitalization.sentences,
+                    textInputAction: TextInputAction.done,
+                    onEditingComplete: () =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
+                    maxLength: 100,
+                    decoration: InputDecoration(
+                      hintText: 'Title this memory (optional)',
+                      counterText: '',
+                      prefixIcon: const Icon(Icons.title),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.42),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                   ),
-                _profileRow(),
-                const SizedBox(height: 22),
-                TextField(
-                  controller: _titleController,
-                  enabled: !_saving,
-                  textCapitalization: TextCapitalization.sentences,
-                  textInputAction: TextInputAction.done,
-                  onEditingComplete: () =>
-                      FocusManager.instance.primaryFocus?.unfocus(),
-                  maxLength: 100,
-                  decoration: InputDecoration(
-                    hintText: 'Title this memory (optional)',
-                    counterText: '',
-                    prefixIcon: const Icon(Icons.title),
-                    filled: true,
-                    fillColor: Colors.white.withValues(alpha: 0.42),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide.none,
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _bodyController,
+                    minLines: 4,
+                    maxLines: 16,
+                    autofocus: widget.initialMode == 'text',
+                    enabled: !_saving,
+                    style: const TextStyle(fontSize: 18, height: 1.45),
+                    decoration: InputDecoration(
+                      hintText: 'What would you like to remember?',
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.55),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _bodyController,
-                  minLines: 7,
-                  maxLines: 16,
-                  autofocus: widget.initialMode == 'text',
-                  enabled: !_saving,
-                  style: const TextStyle(fontSize: 18, height: 1.45),
-                  decoration: InputDecoration(
-                    hintText: 'What would you like to remember?',
-                    filled: true,
-                    fillColor: Colors.white.withValues(alpha: 0.55),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      borderSide: BorderSide.none,
+                  if (_photos.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      '${_photos.length} / ${MediaUploadPolicy.photoBatchMaxCount} selected',
                     ),
-                  ),
-                ),
-                if (_photos.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  Text(
-                    '${_photos.length} / ${MediaUploadPolicy.photoBatchMaxCount} selected',
-                  ),
-                  const SizedBox(height: 8),
-                  _photoPreview(),
-                ],
-                if (_pickingPhotos)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: LinearProgressIndicator(
-                      semanticsLabel: 'Preparing selected media',
+                    const SizedBox(height: 8),
+                    _photoPreview(),
+                  ],
+                  if (_pickingPhotos)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: LinearProgressIndicator(
+                        semanticsLabel: 'Preparing selected media',
+                      ),
                     ),
-                  ),
-                if (_voices.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  ...List.generate(_voices.length, (index) {
-                    final voice = _voices[index];
-                    final isPlaying = _playingVoiceIndex == index;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Card(
-                        elevation: 0,
-                        color: const Color(0xFFF2E7F5),
-                        child: ListTile(
-                          leading: IconButton.filled(
-                            tooltip: isPlaying ? 'Pause' : 'Listen to take',
-                            onPressed: _saving
-                                ? null
-                                : () => _toggleVoicePreview(index),
-                            icon: Icon(
-                              isPlaying ? Icons.pause : Icons.play_arrow,
+                  if (_voices.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    ...List.generate(_voices.length, (index) {
+                      final voice = _voices[index];
+                      final isPlaying = _playingVoiceIndex == index;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Card(
+                          elevation: 0,
+                          color: heiroIce,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ListTile(
+                            leading: IconButton.filled(
+                              tooltip: isPlaying ? 'Pause' : 'Listen to take',
+                              onPressed: _saving
+                                  ? null
+                                  : () => _toggleVoicePreview(index),
+                              icon: Icon(
+                                isPlaying ? Icons.pause : Icons.play_arrow,
+                              ),
+                            ),
+                            title: Text(voice.title),
+                            subtitle: Text(
+                              '${_voiceLength(voice.seconds)}${isPlaying ? ' · Playing' : ''}',
+                            ),
+                            trailing: PopupMenuButton<String>(
+                              tooltip: 'Recording options',
+                              enabled: !_saving,
+                              onSelected: (action) {
+                                if (action == 'rename') {
+                                  _renamePendingVoice(index);
+                                }
+                                if (action == 'remove') _removeVoice(index);
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                  value: 'rename',
+                                  child: Text('Rename'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'remove',
+                                  child: Text('Remove'),
+                                ),
+                              ],
                             ),
                           ),
-                          title: Text('Voice note ${index + 1}'),
-                          subtitle: Text(
-                            '${_voiceLength(voice.seconds)} · ${isPlaying ? 'Playing' : 'Tap play to check this take'}',
-                          ),
-                          trailing: IconButton(
-                            tooltip: 'Remove this take',
-                            onPressed: _saving
-                                ? null
-                                : () => _removeVoice(index),
-                            icon: const Icon(Icons.close),
-                          ),
                         ),
-                      ),
-                    );
-                  }),
-                ],
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _saving || _pickingPhotos ? null : _pickPhotos,
-                      icon: const Icon(Icons.photo_library_outlined),
-                      label: Text(_photos.isEmpty ? 'Add media' : 'More media'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: _saving ? null : _recordVoice,
-                      icon: const Icon(Icons.mic_none),
-                      label: Text(
-                        _voices.isEmpty
-                            ? 'Record voice'
-                            : 'Add another voice note',
-                      ),
-                    ),
+                      );
+                    }),
                   ],
-                ),
-                const SizedBox(height: 18),
-                Card(
-                  elevation: 0,
-                  color: Colors.white.withValues(alpha: 0.38),
-                  child: Column(
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
                     children: [
-                      ListTile(
-                        leading: const Icon(Icons.tune),
-                        title: const Text('Add details'),
-                        subtitle: const Text(
-                          'Mood, when, where, or who was there',
+                      OutlinedButton.icon(
+                        onPressed: _saving || _pickingPhotos
+                            ? null
+                            : _pickPhotos,
+                        icon: const Icon(Icons.photo_library_outlined),
+                        label: Text(
+                          _photos.isEmpty ? 'Add media' : 'More media',
                         ),
-                        trailing: Icon(
-                          _showDetails ? Icons.expand_less : Icons.expand_more,
-                        ),
-                        onTap: () =>
-                            setState(() => _showDetails = !_showDetails),
                       ),
-                      if (_showDetails)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          child: Column(
-                            children: [
-                              const Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  'How did this memory feel?',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children:
-                                      const [
-                                        'Happy',
-                                        'Playful',
-                                        'Proud',
-                                        'Grateful',
-                                        'Nostalgic',
-                                        'Calm',
-                                        'Surprised',
-                                        'Sad',
-                                        'Difficult',
-                                        'Mixed feelings',
-                                      ].map((mood) {
-                                        return ChoiceChip(
-                                          label: Text(mood),
-                                          selected: _selectedMood == mood,
-                                          onSelected: _saving
-                                              ? null
-                                              : (selected) => setState(() {
-                                                  _selectedMood = selected
-                                                      ? mood
-                                                      : null;
-                                                }),
-                                        );
-                                      }).toList(),
-                                ),
-                              ),
-                              const SizedBox(height: 14),
-                              TextField(
-                                controller: _whenController,
-                                textInputAction: TextInputAction.done,
-                                onEditingComplete: () => FocusManager
-                                    .instance
-                                    .primaryFocus
-                                    ?.unfocus(),
-                                decoration: const InputDecoration(
-                                  prefixIcon: Icon(
-                                    Icons.calendar_today_outlined,
-                                  ),
-                                  labelText: 'When was this?',
-                                  hintText:
-                                      'For example: Summer 2019 or when I was 10',
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              TextField(
-                                controller: _peopleController,
-                                textInputAction: TextInputAction.done,
-                                onEditingComplete: () => FocusManager
-                                    .instance
-                                    .primaryFocus
-                                    ?.unfocus(),
-                                decoration: const InputDecoration(
-                                  prefixIcon: Icon(Icons.people_outline),
-                                  labelText: 'Who was there?',
-                                  hintText: 'Names or a short description',
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              TextField(
-                                controller: _locationController,
-                                textInputAction: TextInputAction.done,
-                                onEditingComplete: () => FocusManager
-                                    .instance
-                                    .primaryFocus
-                                    ?.unfocus(),
-                                decoration: const InputDecoration(
-                                  prefixIcon: Icon(Icons.location_on_outlined),
-                                  labelText: 'Where did it happen?',
-                                ),
-                              ),
-                            ],
-                          ),
+                      OutlinedButton.icon(
+                        onPressed: _saving || _recordingVoice
+                            ? null
+                            : _recordVoice,
+                        icon: const Icon(Icons.mic_none),
+                        label: Text(
+                          _voices.isEmpty
+                              ? 'Record voice'
+                              : 'Add another voice note',
                         ),
+                      ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 10),
-                SwitchListTile.adaptive(
-                  value: _shareToFamilyFeed,
-                  onChanged: _saving
-                      ? null
-                      : (value) => setState(() => _shareToFamilyFeed = value),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                  title: const Text('Share to family feed'),
-                  subtitle: Text(
-                    _shareToFamilyFeed
-                        ? 'Your family can discover this memory in their feed.'
-                        : 'This memory will stay only in your vault.',
+                  const SizedBox(height: 18),
+                  Card(
+                    elevation: 0,
+                    color: Colors.white.withValues(alpha: 0.38),
+                    child: Column(
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.tune),
+                          title: const Text('Add details'),
+                          trailing: Icon(
+                            _showDetails
+                                ? Icons.expand_less
+                                : Icons.expand_more,
+                          ),
+                          onTap: () =>
+                              setState(() => _showDetails = !_showDetails),
+                        ),
+                        if (_showDetails)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: Column(
+                              children: [
+                                const Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    'How did this memory feel?',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children:
+                                        const [
+                                          'Happy',
+                                          'Playful',
+                                          'Proud',
+                                          'Grateful',
+                                          'Nostalgic',
+                                          'Calm',
+                                          'Surprised',
+                                          'Sad',
+                                          'Difficult',
+                                          'Mixed feelings',
+                                        ].map((mood) {
+                                          return ChoiceChip(
+                                            label: Text(mood),
+                                            selected: _selectedMood == mood,
+                                            onSelected: _saving
+                                                ? null
+                                                : (selected) => setState(() {
+                                                    _selectedMood = selected
+                                                        ? mood
+                                                        : null;
+                                                  }),
+                                          );
+                                        }).toList(),
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                TextField(
+                                  controller: _whenController,
+                                  textInputAction: TextInputAction.done,
+                                  onEditingComplete: () => FocusManager
+                                      .instance
+                                      .primaryFocus
+                                      ?.unfocus(),
+                                  decoration: const InputDecoration(
+                                    prefixIcon: Icon(
+                                      Icons.calendar_today_outlined,
+                                    ),
+                                    labelText: 'When was this?',
+                                    hintText:
+                                        'For example: Summer 2019 or when I was 10',
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _peopleController,
+                                  textInputAction: TextInputAction.done,
+                                  onEditingComplete: () => FocusManager
+                                      .instance
+                                      .primaryFocus
+                                      ?.unfocus(),
+                                  decoration: const InputDecoration(
+                                    prefixIcon: Icon(Icons.people_outline),
+                                    labelText: 'Who was there?',
+                                    hintText: 'Names or a short description',
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                TextField(
+                                  controller: _locationController,
+                                  textInputAction: TextInputAction.done,
+                                  onEditingComplete: () => FocusManager
+                                      .instance
+                                      .primaryFocus
+                                      ?.unfocus(),
+                                  decoration: const InputDecoration(
+                                    prefixIcon: Icon(
+                                      Icons.location_on_outlined,
+                                    ),
+                                    labelText: 'Where did it happen?',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  onPressed: _saving || _pickingPhotos || _connection.offline
-                      ? null
-                      : _save,
-                  icon: const Icon(Icons.auto_awesome_outlined),
-                  label: Text(
-                    _saving ? 'Preserving memory…' : 'Preserve memory',
+                  const SizedBox(height: 10),
+                  SwitchListTile.adaptive(
+                    value: _shareToFamilyFeed,
+                    onChanged: _saving
+                        ? null
+                        : (value) => setState(() => _shareToFamilyFeed = value),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    title: const Text('Share to family feed'),
+                    subtitle: Text(
+                      _shareToFamilyFeed
+                          ? 'Your family can discover this memory in their feed.'
+                          : 'This memory will stay only in your vault.',
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 18),
+                  FilledButton.icon(
+                    onPressed:
+                        _saving ||
+                            _pickingPhotos ||
+                            _recordingVoice ||
+                            _connection.offline
+                        ? null
+                        : _save,
+                    icon: const Icon(Icons.check),
+                    label: Text(
+                      _saving ? 'Preserving memory…' : 'Preserve memory',
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -977,5 +913,11 @@ class _PendingVoice {
   final RecordedAudio audio;
   final int seconds;
 
-  const _PendingVoice({required this.audio, required this.seconds});
+  String title;
+
+  _PendingVoice({
+    required this.audio,
+    required this.seconds,
+    required this.title,
+  });
 }

@@ -6,6 +6,7 @@ import { appleVerificationDiagnostic, createNotificationVerifier } from "../appl
 import { AppleEnvironment, AppleTransactionLookupError, lookupAppleTransaction } from "../_shared/apple_environment.ts";
 import { transactionEnvironment } from "./transaction_environment.ts";
 import { ownershipDiagnostic } from "./ownership_diagnostic.ts";
+import { recoverExpiredForeignPurchase, verifiedExpiredHistory } from "./expired_purchase_history.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -161,6 +162,41 @@ serve(async (req) => {
     if (!originalTransactionId) {
       return json(400, { code: "APPLE_TRANSACTION_INVALID", error: "Could not verify this purchase." });
     }
+    const expiredHistory = await recoverExpiredForeignPurchase({
+      transaction, userId: user.id, familyId,
+      findBinding: async (originalId) => {
+        const { data, error } = await admin.from("apple_sponsor_bindings")
+          .select("purchaser_id,family_id").eq("original_transaction_id", originalId).maybeSingle();
+        if (error) throw error;
+        return data;
+      },
+      verifyCurrent: async () => {
+        if (verifiedEnvironment !== "production" && verifiedEnvironment !== "sandbox") {
+          throw new Error("APPLE_ENVIRONMENT_MISMATCH");
+        }
+        const verifier = getVerifier(verifiedEnvironment);
+        return await verifiedExpiredHistory({ originalId: originalTransactionId,
+          environment: verifiedEnvironment, token: await createAppleServerToken(), bundleId, products: productMap(),
+          verifyTransaction: (signed) => verifier.verifyAndDecodeTransaction(signed),
+          verifyRenewal: (signed) => verifier.verifyAndDecodeRenewalInfo(signed),
+        });
+      },
+      prepare: async (latest) => {
+        const { data, error } = await admin.rpc("prepare_verified_apple_repurchase", {
+          p_transaction: latest, p_family_id: familyId, p_user_id: user.id,
+        });
+        if (error) throw error;
+        return data;
+      },
+    });
+    if (expiredHistory) {
+      console.info("Apple expired history checked", { code: "APPLE_EXPIRED_HISTORY",
+        environment: verifiedEnvironment,
+        request_kind: body.purpose === "history" ? "history" : "purchase",
+      });
+      // This response never grants access or restores the previous owner's plan.
+      return json(200, { ok: true, history: expiredHistory });
+    }
     const { data: result, error } = await admin.rpc("apply_verified_family_subscription", {
       p_transaction: transaction,
       p_family_id: familyId,
@@ -189,7 +225,9 @@ serve(async (req) => {
   } catch (e) {
     const message = e && typeof e === "object" && "message" in e ? String(e.message) : "";
     const allowed = ["FAMILY_MEMBERSHIP_REQUIRED", "APPLE_PURCHASE_ALREADY_BOUND", "APPLE_PURCHASER_MISMATCH",
-      "APPLE_PURCHASER_UNVERIFIED", "APPLE_ENVIRONMENT_MISMATCH"];
+      "APPLE_PURCHASER_UNVERIFIED", "APPLE_ENVIRONMENT_MISMATCH", "APPLE_HISTORY_CHECK_UNAVAILABLE",
+      "APPLE_PREVIOUS_PLAN_NOT_ENDED", "FAMILY_ALREADY_SPONSORED", "APPLE_SUBSCRIPTION_INACTIVE",
+      "SPONSOR_PURCHASE_IN_PROGRESS"];
     const code = allowed.includes(message) ? message
       : e instanceof AppleTransactionLookupError && e.status === 401
       ? "APPLE_API_AUTHENTICATION_FAILED" : "APPLE_VALIDATION_FAILED";

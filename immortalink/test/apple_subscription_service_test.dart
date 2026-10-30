@@ -20,7 +20,9 @@ class FakeFunctions implements FunctionsClient {
     if (invocation.memberName == #invoke) {
       calls++;
       lastBody = invocation.namedArguments[#body];
-      final value = result;
+      final value = result is Object Function(Object?)
+          ? (result as Object Function(Object?))(lastBody)
+          : result;
       if (value is Future<FunctionResponse>) return value;
       return value is FunctionResponse
           ? Future<FunctionResponse>.value(value)
@@ -459,6 +461,229 @@ void main() {
           expect(backend.reservations, 1);
           expect(store.lastPurchase, isNotNull);
           expect(store.completed, 0);
+        },
+      );
+
+      FunctionResponse expiredHistory() => FunctionResponse(
+        status: 200,
+        data: {
+          'ok': true,
+          'history': {
+            'code': 'APPLE_EXPIRED_HISTORY',
+            'status': 'expired',
+            'product_id': productId,
+          },
+        },
+      );
+
+      test(
+        'verified expired foreign history permits only a new checkout, not a restore grant',
+        () async {
+          previous = savedPurchase()..pendingCompletePurchase = false;
+          backend.functions.result = expiredHistory();
+          await service.restore();
+          expect(service.canSponsor, true);
+          expect(service.hasActiveSponsor, false);
+          expect(service.message, contains('previous Apple plan has ended'));
+          expect(store.completed, 0);
+          expect(backend.reservations, 0);
+          expect(store.lastPurchase, isNull);
+          await service.buy(productId);
+          expect(
+            backend.functions.calls,
+            2,
+          ); // no stale history cache before checkout
+          expect((backend.functions.lastBody as Map)['purpose'], 'history');
+          expect(backend.reservations, 1);
+          expect(
+            store.lastPurchase?.applicationUserName,
+            backend.auth.currentUser!.id,
+          );
+          expect(store.completed, 0);
+          verified();
+          store.updates.add([savedPurchase()]);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          expect(
+            (backend.functions.lastBody as Map).containsKey('purpose'),
+            false,
+          );
+          expect(store.completed, 1);
+          expect(service.message, 'Family plan updated.');
+        },
+      );
+
+      test(
+        'verified expired unfinished history allows a new checkout without finishing or granting it',
+        () async {
+          unfinished = [savedPurchase()];
+          backend.functions.result = expiredHistory();
+          await service.buy(productId);
+          expect(store.completed, 0);
+          expect(store.lastPurchase, isNotNull);
+          expect(backend.reservations, 1);
+          expect(service.hasActiveSponsor, false);
+          expect(service.error, isNull);
+          expect(backend.releases, 0);
+        },
+      );
+
+      test(
+        'restore acknowledges multiple expired unfinished replays without buying',
+        () async {
+          unfinished = [savedPurchase(), savedPurchase()];
+          backend.functions.result = expiredHistory();
+          await service.restore();
+          expect(backend.functions.calls, 2);
+          expect(service.message, contains('previous Apple plan has ended'));
+          expect(service.canSponsor, true);
+          expect(service.hasActiveSponsor, false);
+          expect(store.completed, 0);
+          expect(store.lastPurchase, isNull);
+          expect(backend.reservations, 0);
+        },
+      );
+
+      test(
+        'purchased stream replay receives the same expired-history treatment',
+        () async {
+          backend.functions.result = expiredHistory();
+          store.updates.add([savedPurchase()]);
+          await pumpEventQueue();
+          expect(
+            (backend.functions.lastBody as Map).containsKey('purpose'),
+            false,
+          );
+          expect(service.message, contains('previous Apple plan has ended'));
+          expect(service.canSponsor, true);
+          expect(store.completed, 0);
+          expect(store.lastPurchase, isNull);
+        },
+      );
+
+      test(
+        'an expired replay cannot clear a checkout still waiting for Apple',
+        () async {
+          await service.buy(productId);
+          expect(service.purchasePending, true);
+          backend.functions.result = expiredHistory();
+          store.updates.add([savedPurchase()]);
+          await pumpEventQueue();
+          expect(service.purchasePending, true);
+          expect(backend.releases, 0);
+          expect(store.completed, 0);
+          await service.buy(productId);
+          expect(backend.reservations, 1);
+        },
+      );
+
+      test('an expired replay cannot clear an uncertain new charge', () async {
+        store.purchaseError = PlatformException(code: 'bridge_failed');
+        await service.buy(productId);
+        final error = service.error;
+        backend.functions.result = expiredHistory();
+        store.updates.add([savedPurchase()]);
+        await pumpEventQueue();
+        expect(service.canSponsor, false);
+        expect(service.error, error);
+        expect(backend.releases, 0);
+        expect(store.completed, 0);
+        await service.buy(productId);
+        expect(backend.reservations, 1);
+      });
+
+      test(
+        'an expired replay cannot mask another rejected unfinished charge',
+        () async {
+          unfinished = [savedPurchase(), savedPurchase()];
+          var call = 0;
+          backend.functions.result = (Object? _) => ++call == 1
+              ? expiredHistory()
+              : FunctionException(
+                  status: 400,
+                  details: {'code': 'APPLE_PURCHASE_ALREADY_BOUND'},
+                );
+          await service.buy(productId);
+          expect(service.canSponsor, false);
+          expect(store.lastPurchase, isNull);
+          expect(backend.reservations, 0);
+          expect(store.completed, 0);
+        },
+      );
+
+      test(
+        'malformed expired-history responses never permit checkout',
+        () async {
+          unfinished = [savedPurchase()];
+          for (final patch in [
+            {'code': 'unknown'},
+            {'status': 'active'},
+            {'product_id': 'another-product'},
+          ]) {
+            backend.functions.result = FunctionResponse(
+              status: 200,
+              data: {
+                'ok': true,
+                'history': {
+                  'code': 'APPLE_EXPIRED_HISTORY',
+                  'status': 'expired',
+                  'product_id': productId,
+                  ...patch,
+                },
+              },
+            );
+            await service.restore();
+            expect(service.canSponsor, false);
+            expect(store.completed, 0);
+            expect(store.lastPurchase, isNull);
+          }
+        },
+      );
+
+      test(
+        'expired history replayed by StoreKit restore is acknowledged without completing it',
+        () async {
+          final history = PurchaseDetails(
+            productID: productId,
+            purchaseID: 'old-restored',
+            verificationData: PurchaseVerificationData(
+              localVerificationData: '',
+              serverVerificationData: 'signed-old-history',
+              source: 'app_store',
+            ),
+            transactionDate: null,
+            status: PurchaseStatus.restored,
+          );
+          backend.functions.result = expiredHistory();
+          store.onRestore = () async {
+            store.updates.add([history]);
+          };
+          await service.restore();
+          expect(service.canSponsor, true);
+          expect(service.hasActiveSponsor, false);
+          expect((backend.functions.lastBody as Map)['purpose'], 'history');
+          expect(store.completed, 0);
+          expect(store.lastPurchase, isNull);
+        },
+      );
+
+      test(
+        'Apple status outage and an active previous plan both keep checkout closed',
+        () async {
+          previous = savedPurchase()..pendingCompletePurchase = false;
+          for (final code in [
+            'APPLE_HISTORY_CHECK_UNAVAILABLE',
+            'APPLE_PREVIOUS_PLAN_NOT_ENDED',
+          ]) {
+            backend.functions.result = FunctionException(
+              status: 400,
+              details: {'code': code},
+            );
+            await service.restore();
+            expect(service.canSponsor, false);
+            expect(store.lastPurchase, isNull);
+            expect(store.completed, 0);
+            expect(backend.reservations, 0);
+          }
         },
       );
 

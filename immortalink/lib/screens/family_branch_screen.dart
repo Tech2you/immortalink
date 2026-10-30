@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'family_tree_screen.dart';
+import 'relationship_tree_screen.dart';
 import 'legacy_vault_screen.dart';
 import 'vault_home_screen.dart';
 import 'vault_readonly_screen.dart';
@@ -615,7 +615,7 @@ class _FamilyBranchScreenState extends State<FamilyBranchScreen> {
 
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(
-        builder: (_) => FamilyTreeScreen(familyId: widget.familyId),
+        builder: (_) => RelationshipTreeScreen(familyId: widget.familyId),
       ),
       (route) => route.isFirst,
     );

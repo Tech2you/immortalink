@@ -118,7 +118,7 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(find.text('Offline'), findsNothing);
-      expect(find.text('Your Vault'), findsOneWidget);
+      expect(find.byWidgetPredicate((w) => w is Image && w.semanticLabel == 'Heiro'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       expect(tester.takeException(), isNull);
 

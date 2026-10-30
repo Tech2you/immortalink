@@ -378,25 +378,45 @@ void main() {
     await close(tester);
     memberships = [member(firstFamily, primary: true)];
     await show(tester, const VaultsScreen());
-    expect(find.text('Your family tree'), findsOneWidget);
-    expect(find.text('Your family tree and shared memories.'), findsOneWidget);
+    expect(find.text('Tree'), findsOneWidget);
+    expect(find.text('My vault'), findsOneWidget);
     expect(find.text('Strauss family'), findsOneWidget);
     expect(find.text('Create your family tree'), findsNothing);
     expect(find.text('Join with invite code'), findsNothing);
     expect(find.text('Join another family'), findsNothing);
     expect(find.text('Create another family'), findsNothing);
     expect(find.byTooltip('Family tree actions'), findsNothing);
+    expect(find.text('Heiro'), findsNothing);
+    expect(find.byIcon(Icons.lock_outline), findsNothing);
+    expect(find.text('Invite family'), findsOneWidget);
+    await captureLoading(tester, 'ui34-empty-feed');
+    await tester.tap(find.text('Invite family'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RelationshipTreeScreen), findsOneWidget);
+    expect(find.text('Invite parent'), findsOneWidget);
+    expect(find.text('Invite sibling'), findsOneWidget);
+    expect(joinCalls, isEmpty);
+    await tester.tapAt(const Offset(10, 120));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Join family'), findsNothing);
-    expect(find.text('Subscription'), findsOneWidget);
+    expect(find.text('Subscription and storage'), findsOneWidget);
     await close(tester);
 
     // A regular member can rename from both entry points, without gaining
     // owner-only successor controls or bypassing a server permission failure.
     await show(tester, const VaultsScreen());
-    await tester.tap(find.byTooltip('Edit family details'));
+    await tester.tap(
+      find.text('Strauss family').evaluate().isNotEmpty
+          ? find.text('Strauss family')
+          : find.text('Tree rename'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit family details'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit family name'));
     await tester.pumpAndSettle();
@@ -414,7 +434,7 @@ void main() {
     });
     expect(find.text('Renamed family'), findsOneWidget);
 
-    await tester.tap(find.text('Renamed family'));
+    await tester.tap(find.text('Tree'));
     await settle(tester);
     await tester.tap(find.byTooltip('Family tree settings'));
     await tester.pumpAndSettle();
@@ -433,7 +453,13 @@ void main() {
     await close(tester);
     await show(tester, const VaultsScreen());
     rejectRename = true;
-    await tester.tap(find.byTooltip('Edit family details'));
+    await tester.tap(
+      find.text('Strauss family').evaluate().isNotEmpty
+          ? find.text('Strauss family')
+          : find.text('Tree rename'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit family details'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Edit family name'));
     await tester.pumpAndSettle();
@@ -454,16 +480,14 @@ void main() {
     rejectRename = false;
     memberships = [member(firstFamily, primary: true), member(secondFamily)];
     await show(tester, const VaultsScreen());
-    expect(find.text('Your family trees'), findsOneWidget);
-    expect(
-      find.text('Your existing families remain available.'),
-      findsOneWidget,
-    );
+    expect(find.text('Tree'), findsOneWidget);
     expect(find.text('Join another family'), findsNothing);
     expect(find.text('Create another family'), findsNothing);
     expect(find.byTooltip('Family tree actions'), findsNothing);
 
     for (final family in familyNames.entries) {
+      await tester.tap(find.byIcon(Icons.expand_more));
+      await tester.pumpAndSettle();
       expect(find.text(family.value), findsOneWidget);
       await tester.tap(find.text(family.value));
       await settle(tester);
@@ -509,7 +533,7 @@ void main() {
     expect(avatarRequested, isTrue);
     expect(avatarGate!.isCompleted, isFalse);
     expect(find.text('Strauss family'), findsOneWidget);
-    expect(find.text('Your family tree'), findsOneWidget);
+    expect(find.text('Tree'), findsOneWidget);
     expect(find.byTooltip('Settings'), findsOneWidget);
     avatarGate!.complete();
     await settle(tester);
@@ -535,6 +559,7 @@ void main() {
     feedGate!.complete();
     await settle(tester);
     expect(find.text('A sample family story'), findsOneWidget);
+    expect(find.text('Invite family'), findsNothing);
 
     // Refresh leaves the verified feed in place until its replacement arrives.
     feedGate = Completer<void>();
@@ -591,7 +616,7 @@ void main() {
       await tester.pumpWidget(const MyApp());
       await tester.pump(const Duration(milliseconds: 350));
       await settle(tester);
-      expect(find.text('Frank Strauss'), findsOneWidget);
+      expect(find.text('My vault'), findsOneWidget);
 
       if (legacyTree) {
         Navigator.of(tester.element(find.byType(VaultsScreen))).push(
@@ -602,7 +627,7 @@ void main() {
         await pumpLegacyTree(tester);
         await tester.tap(find.byTooltip('Leave family'));
       } else {
-        await tester.tap(find.text('Strauss family'));
+        await tester.tap(find.text('Tree'));
         await settle(tester);
         await tester.tap(find.byTooltip('Family tree settings'));
         await tester.pumpAndSettle();
@@ -625,13 +650,13 @@ void main() {
       expect(leaveCalls, ['leave_family']);
       expect(memberships, isEmpty);
       expect(hasVault, isTrue);
-      expect(find.text('Frank Strauss'), findsOneWidget);
+      expect(find.text('My vault'), findsOneWidget);
       expect(find.text('No vault yet'), findsNothing);
       expect(find.byType(AuthGate), findsOneWidget);
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Sign out'));
+      await tester.scrollUntilVisible(find.text('Sign out'), 350);
       await tester.tap(find.text('Sign out'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
@@ -640,7 +665,7 @@ void main() {
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Sign out'));
+      await tester.scrollUntilVisible(find.text('Sign out'), 350);
       await tester.tap(find.text('Sign out'));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(ElevatedButton, 'Sign out'));
@@ -663,7 +688,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
       await settle(tester);
       expect(find.byType(SignInScreen), findsNothing);
-      expect(find.text('Frank Strauss'), findsOneWidget);
+      expect(find.text('My vault'), findsOneWidget);
       expect(find.text('Join with invite code'), findsOneWidget);
       expect(vaultInserts, 0);
       expect(deletionCalls, 0);
@@ -684,11 +709,18 @@ void main() {
         await pumpLegacyTree(tester);
         expect(find.byType(AuthGate, skipOffstage: false), findsOneWidget);
         expect(
-          Navigator.of(tester.element(find.byType(FamilyTreeScreen))).canPop(),
+          Navigator.of(
+            tester.element(find.byType(RelationshipTreeScreen)),
+          ).canPop(),
           isTrue,
         );
-        await tester.tap(find.byTooltip('Sign out'));
-        await pumpLegacyTree(tester);
+        Navigator.of(tester.element(find.byType(RelationshipTreeScreen))).pop();
+        await settle(tester);
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(find.text('Sign out'), 350);
+        await tester.tap(find.text('Sign out'));
+        await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(ElevatedButton, 'Sign out'));
         await settle(tester);
         await tester.pump(const Duration(milliseconds: 350));
@@ -702,7 +734,7 @@ void main() {
           ),
         );
         await settle(tester);
-        expect(find.text('Frank Strauss'), findsOneWidget);
+        expect(find.text('My vault'), findsOneWidget);
         expect(find.byType(SignInScreen), findsNothing);
         expect(deletionCalls, 0);
       }

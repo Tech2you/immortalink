@@ -187,8 +187,10 @@ void main() {
         expect(find.byType(FeedPlaceholder), findsNothing);
         expect(
           tester
-              .widget<OutlinedButton>(
-                find.widgetWithText(OutlinedButton, 'Edit profile'),
+              .widget<IconButton>(
+                find.byWidgetPredicate(
+                  (w) => w is IconButton && w.tooltip == 'Edit profile',
+                ),
               )
               .onPressed,
           isNull,
@@ -197,7 +199,7 @@ void main() {
           await expectLater(
             find.byType(MaterialApp),
             matchesGoldenFile(
-              '../build/loading-31-qa/cached-${variant.name}.png',
+              '../build/ui-preview-33-qa/cached-${variant.name}.png',
             ),
           );
         }
@@ -212,8 +214,10 @@ void main() {
         expect(find.text('Offline'), findsNothing);
         expect(
           tester
-              .widget<OutlinedButton>(
-                find.widgetWithText(OutlinedButton, 'Edit profile'),
+              .widget<IconButton>(
+                find.byWidgetPredicate(
+                  (w) => w is IconButton && w.tooltip == 'Edit profile',
+                ),
               )
               .onPressed,
           isNotNull,
@@ -222,7 +226,7 @@ void main() {
           await expectLater(
             find.byType(MaterialApp),
             matchesGoldenFile(
-              '../build/loading-31-qa/live-${variant.name}.png',
+              '../build/ui-preview-33-qa/live-${variant.name}.png',
             ),
           );
         }
@@ -243,6 +247,32 @@ void main() {
         pending = null;
         await tester.pumpAndSettle();
         expect(tester.getRect(find.text('Saved story 3')), storyRect);
+
+        await tester.scrollUntilVisible(
+          find.text('About'),
+          -400,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.tap(find.text('About'));
+        await tester.pumpAndSettle();
+        expect(find.text('About me (Text)'), findsNothing);
+        expect(find.text('Upload VN'), findsNothing);
+        expect(find.byTooltip('Edit about me'), findsOneWidget);
+        await tester.scrollUntilVisible(
+          find.text('Voice introduction'),
+          250,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        if (const bool.fromEnvironment('LOADING_VISUAL_QA')) {
+          await expectLater(
+            find.byType(MaterialApp),
+            matchesGoldenFile(
+              '../build/ui-preview-34-qa/about-${variant.name}.png',
+            ),
+          );
+        }
+        expect(tester.takeException(), isNull);
 
         // Revoked access must remove stale data, not preserve it for smoothness.
         denied = true;

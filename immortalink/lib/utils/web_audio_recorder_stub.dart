@@ -39,6 +39,12 @@ class _DeviceAudioRecorder implements WebAudioRecorder {
   }
 
   @override
+  Future<void> pause() => _recorder.pause();
+
+  @override
+  Future<void> resume() => _recorder.resume();
+
+  @override
   Future<RecordedAudio> stop() async {
     if (!_recording) throw StateError('Not recording.');
     final savedPath = await _recorder.stop() ?? _path;

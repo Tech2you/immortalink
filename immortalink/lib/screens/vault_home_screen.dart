@@ -28,8 +28,13 @@ import '../utils/vault_media_upload.dart';
 import '../widgets/vault_media.dart';
 import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
+import '../widgets/heiro_surface.dart';
+import '../widgets/brand_loading.dart';
+import '../widgets/memory_creation_menu.dart';
 import 'create_memory_screen.dart';
-import 'family_branch_screen.dart';
+import 'edit_about_screen.dart';
+import 'record_memory_screen.dart';
+import '../services/about_me_service.dart';
 import 'relationship_tree_screen.dart';
 import 'vault_companion_screen.dart';
 
@@ -105,14 +110,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   bool _loadingAboutMe = true;
   bool _savingAboutMe = false;
   String? _aboutMeError;
-  String? _aboutMeMemoryId; // created by index_memory (prompt_key=about_me)
+  String? _aboutDraft;
 
   bool _loadingAboutPhotos = true;
   bool _uploadingAboutPhoto = false;
   String? _aboutPhotoError;
   List<Map<String, String>> _aboutPhotos = []; // {path,url}
-  final PageController _aboutController = PageController();
-  int _aboutIndex = 0;
 
   // --- Memory photos ---
   bool _loadingMemoryPhotos = true;
@@ -201,6 +204,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       _displayName = null;
       _vaultName = 'Your Vault';
       _aboutMeController.clear();
+      _aboutDraft = null;
       _cachedView = true;
       _hasContent = false;
       _loading = false;
@@ -374,7 +378,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
     _autoSlideTimer?.cancel();
     _highlightController.dispose();
-    _aboutController.dispose();
     _aboutMeController.dispose();
     _player.dispose();
     _recorder.dispose();
@@ -489,44 +492,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     return null;
   }
 
-  String _branchLabelForSlot(String slotKey) {
-    switch (slotKey) {
-      case 'mother':
-        return 'Mother';
-      case 'father':
-        return 'Father';
-      case 'maternal_gm':
-      case 'paternal_gm':
-        return 'Grandmother';
-      case 'maternal_gf':
-      case 'paternal_gf':
-        return 'Grandfather';
-      case 'maternal_ggm':
-      case 'paternal_ggm':
-        return 'Great-grandmother';
-      case 'maternal_ggf':
-      case 'paternal_ggf':
-        return 'Great-grandfather';
-      case 'child_1':
-      case 'child_2':
-      case 'child_3':
-      case 'child_4':
-        return 'Child';
-      case 'grandchild_1':
-      case 'grandchild_2':
-      case 'grandchild_3':
-      case 'grandchild_4':
-        return 'Grandchild';
-      case 'greatgrandchild_1':
-      case 'greatgrandchild_2':
-      case 'greatgrandchild_3':
-      case 'greatgrandchild_4':
-        return 'Great-grandchild';
-      default:
-        return 'Branch';
-    }
-  }
-
   Future<void> _openBranch() async {
     final familyId = (_familyId ?? '').trim();
     final slotKey = (_slotKey ?? '').trim();
@@ -539,11 +504,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => FamilyBranchScreen(
+        builder: (_) => RelationshipTreeScreen(
           familyId: familyId,
-          rootLabel: _branchLabelForSlot(slotKey),
-          rootSlotKey: slotKey,
-          direction: direction,
+          initialFocusKey: 'vault:${widget.vaultId}',
         ),
       ),
     );
@@ -940,102 +903,70 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     final canOpenFamilyTree = (_familyId ?? widget.familyId ?? '')
         .trim()
         .isNotEmpty;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFF2E5F6), Color(0xFFFFFBFF)],
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Stack(
-            clipBehavior: Clip.none,
+          Row(
             children: [
-              CircleAvatar(
-                radius: 48,
-                backgroundColor: Colors.white,
-                child: !hasAvatar
-                    ? const Icon(Icons.person_outline, size: 44)
-                    : ClipOval(
-                        child: VaultMedia.network(
-                          _avatarUrl!,
-                          cachedOnly: _readOnly,
-                          width: 96,
-                          height: 96,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-              ),
-              Positioned(
-                right: -5,
-                bottom: -4,
-                child: Material(
-                  color: const Color(0xFF76558F),
-                  shape: const CircleBorder(),
-                  child: IconButton(
-                    tooltip: 'Change profile photo',
-                    onPressed: _readOnly || _savingAvatar
-                        ? null
-                        : _pickAndUploadAvatar,
-                    icon: _savingAvatar
-                        ? const SizedBox.square(
-                            dimension: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+              Tooltip(
+                message: 'Change profile photo',
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: _readOnly || _savingAvatar
+                      ? null
+                      : _pickAndUploadAvatar,
+                  child: CircleAvatar(
+                    radius: 32,
+                    backgroundColor: heiroIce,
+                    child: !hasAvatar
+                        ? const Icon(Icons.person_outline, size: 32)
+                        : ClipOval(
+                            child: VaultMedia.network(
+                              _avatarUrl!,
+                              cachedOnly: _readOnly,
+                              width: 64,
+                              height: 64,
+                              fit: BoxFit.cover,
                             ),
-                          )
-                        : const Icon(
-                            Icons.camera_alt_outlined,
-                            size: 18,
-                            color: Colors.white,
                           ),
                   ),
                 ),
               ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Edit profile',
+                onPressed: _readOnly ? null : _renameVault,
+                icon: const Icon(Icons.edit_outlined, size: 20),
+              ),
             ],
           ),
-          const SizedBox(height: 14),
-          Text(
-            name,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            'Your stories, voice and moments — kept together.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.black.withOpacity(0.58)),
-          ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 12),
           Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 10,
-            runSpacing: 10,
+            spacing: 12,
+            runSpacing: 8,
             children: [
-              FilledButton.icon(
+              TextButton.icon(
                 onPressed: _readOnly ? null : _openAskAI,
                 icon: const Icon(Icons.auto_awesome_outlined, size: 18),
                 label: const Text('Ask my AI'),
               ),
               if (canOpenFamilyTree)
-                OutlinedButton.icon(
+                TextButton.icon(
                   onPressed: _readOnly ? null : _openHomeFamilyTree,
                   icon: const Icon(Icons.account_tree_outlined, size: 18),
                   label: const Text('Family tree'),
                 ),
-              OutlinedButton.icon(
-                onPressed: _readOnly ? null : _renameVault,
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                label: const Text('Edit profile'),
-              ),
             ],
           ),
         ],
@@ -1514,7 +1445,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     setState(() {
       _loadingAboutMe = !_hasContent;
       _aboutMeError = null;
-      _aboutMeMemoryId = null;
     });
 
     try {
@@ -1523,15 +1453,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .select('id, body')
           .eq('vault_id', widget.vaultId)
           .eq('prompt_key', 'about_me')
+          .order('created_at')
           .limit(1)
           .maybeSingle();
 
       if (!mounted || epoch != _cache.generation) return;
 
-      final id = (row?['id'] ?? '').toString().trim();
       final body = (row?['body'] ?? '').toString();
-
-      _aboutMeMemoryId = id.isEmpty ? null : id;
 
       if (!_savingAboutMe) {
         _aboutMeController.text = body;
@@ -1548,52 +1476,47 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  Future<void> _saveAboutMeText() async {
-    final text = _aboutMeController.text.trim();
-    if (text.isEmpty) {
-      _toast('About me text can’t be empty.');
-      return;
-    }
+  Future<void> _editAboutMe() async {
+    if (_readOnly || _loadingAboutMe || _aboutMeError != null) return;
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EditAboutScreen(
+          initialText: _aboutDraft ?? _aboutMeController.text,
+          onChanged: (text) => _aboutDraft = text,
+          onSave: _saveAboutMeText,
+        ),
+      ),
+    );
+  }
 
-    setState(() {
-      _savingAboutMe = true;
-      _aboutMeError = null;
-    });
-
+  Future<void> _saveAboutMeText(String text) async {
+    if (_readOnly || _savingAboutMe) throw StateError('Editing unavailable');
+    final epoch = _cache.generation;
+    setState(() => _savingAboutMe = true);
     try {
-      final token = _client.auth.currentSession?.accessToken.trim();
-      if (token == null || token.isEmpty) {
-        throw Exception('Missing session token. Please sign in again.');
-      }
-
-      final res = await _client.functions.invoke(
-        'index_memory',
-        headers: {
-          'Authorization': 'Bearer $token',
-          'authorization': 'Bearer $token',
-        },
-        body: {
-          'vault_id': widget.vaultId,
-          'source': 'about_me',
-          'about_me_text': text,
-        },
+      final id = await AboutMeService(
+        _client,
+      ).save(vaultId: widget.vaultId, text: text);
+      if (!mounted || epoch != _cache.generation) return;
+      setState(() {
+        _aboutMeController.text = text;
+        _aboutDraft = null;
+        _aboutMeError = null;
+      });
+      // Persistence succeeds independently of optional, consent-checked indexing.
+      unawaited(
+        IndexingService.indexMemory(
+          vaultId: widget.vaultId,
+          memoryId: id,
+        ).catchError((_) => 0),
       );
-
-      if (res.status != 200) {
-        throw Exception(
-          'index_memory (about_me) failed: HTTP ${res.status}: ${res.data}',
-        );
-      }
-
-      await _loadAboutMe();
-      _toast('About me saved.');
+      unawaited(_refreshVault());
     } catch (e) {
       _connection.report(e);
-      _toast(publicErrorMessage(e));
+      rethrow;
     } finally {
-      if (mounted) {
-        setState(() => _savingAboutMe = false);
-      }
+      if (mounted) setState(() => _savingAboutMe = false);
     }
   }
 
@@ -1634,7 +1557,6 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         if (epoch != _cache.generation) return;
         _aboutPhotos = items;
         _loadingAboutPhotos = false;
-        _aboutIndex = _aboutIndex.clamp(0, (items.length - 1).clamp(0, 999));
       });
     } catch (e) {
       _connection.report(e);
@@ -1729,14 +1651,14 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  void _openAboutGallery() {
+  void _openAboutGallery({int initialIndex = 0}) {
     if (_aboutPhotos.isEmpty) return;
 
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        final pc = PageController();
-        int idx = 0;
+        final pc = PageController(initialPage: initialIndex);
+        int idx = initialIndex;
 
         final maxH = MediaQuery.of(ctx).size.height * 0.85;
         final maxW = MediaQuery.of(ctx).size.width * 0.95;
@@ -1860,190 +1782,119 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Widget _aboutMeSection() {
-    const double previewHeight = 220;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
-        color: Colors.white.withOpacity(0.25),
-      ),
+    final text = _aboutMeController.text.trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Text(
-                'About me (Text)',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const Spacer(),
-              SizedBox(
-                height: 40,
-                child: OutlinedButton.icon(
-                  onPressed: _savingAboutMe ? null : _saveAboutMeText,
-                  icon: const Icon(Icons.save_outlined),
-                  label: Text(_savingAboutMe ? 'Saving…' : 'Save'),
+              const Expanded(
+                child: Text(
+                  'About me',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
+              ),
+              IconButton(
+                tooltip: 'Edit about me',
+                onPressed: _readOnly || _loadingAboutMe || _aboutMeError != null
+                    ? null
+                    : _editAboutMe,
+                icon: const Icon(Icons.edit_outlined),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Write details the AI should always know (birthdate, personality, values, fun facts, background).',
-            style: TextStyle(color: Colors.black.withOpacity(0.65)),
-          ),
-          const SizedBox(height: 10),
           if (_loadingAboutMe && !_readOnly)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: CircularProgressIndicator(),
-              ),
-            )
+            const ContentPlaceholder(width: double.infinity, height: 80)
           else if (_aboutMeError != null)
-            Text(
-              'About me load issue (MVP): $_aboutMeError',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
-            )
-          else
-            TextField(
-              readOnly: _readOnly,
-              controller: _aboutMeController,
-              minLines: 5,
-              maxLines: 10,
-              decoration: InputDecoration(
-                hintText:
-                    'Example: I was born in… I value… People describe me as…',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.35),
-              ),
-            ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Text(
-                'About me media',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const Spacer(),
-              SizedBox(
-                height: 40,
-                child: OutlinedButton.icon(
-                  onPressed: _uploadingAboutPhoto ? null : _uploadAboutPhoto,
-                  icon: const Icon(Icons.add_photo_alternate_outlined),
-                  label: Text(
-                    _uploadingAboutPhoto ? 'Uploading…' : 'Add media',
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (_loadingAboutPhotos && !_readOnly)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else if (_aboutPhotoError != null)
-            Text(
-              'Photo load issue (MVP): $_aboutPhotoError',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
-            )
-          else if (_aboutPhotos.isEmpty)
             Row(
               children: [
-                Icon(Icons.photo, color: Colors.black.withOpacity(0.45)),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'No About me photos yet. Add 1–3 that represent you (portrait, favourite place, milestone).',
-                    style: TextStyle(color: Colors.black.withOpacity(0.60)),
-                  ),
+                const Expanded(child: Text("Couldn't load your biography.")),
+                IconButton(
+                  tooltip: 'Retry biography',
+                  onPressed: _loadAboutMe,
+                  icon: const Icon(Icons.refresh),
                 ),
               ],
             )
           else
-            InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: _openAboutGallery,
-              child: Column(
-                children: [
-                  SizedBox(
-                    height: previewHeight,
-                    width: double.infinity,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Container(
-                        color: Colors.black,
-                        child: PageView.builder(
-                          controller: _aboutController,
-                          itemCount: _aboutCount,
-                          onPageChanged: (i) => setState(() => _aboutIndex = i),
-                          itemBuilder: (_, i) {
-                            final url = _aboutPhotos[i]['url'] ?? '';
-                            final path = _aboutPhotos[i]['path'] ?? '';
-                            return Stack(
-                              children: [
-                                Positioned.fill(
-                                  child: VaultMedia.network(
-                                    url,
-                                    cachedOnly: _readOnly,
-                                    fit: BoxFit.contain,
-                                    alignment: Alignment.center,
-                                    gaplessPlayback: true,
-                                  ),
-                                ),
-                                Positioned(
-                                  top: 10,
-                                  right: 10,
-                                  child: InkWell(
-                                    onTap: () => _deleteAboutPhoto(path),
-                                    child: CircleAvatar(
-                                      radius: 16,
-                                      backgroundColor: Colors.black.withOpacity(
-                                        0.55,
-                                      ),
-                                      child: const Icon(
-                                        Icons.delete_outline,
-                                        size: 18,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const Positioned(
-                                  left: 12,
-                                  bottom: 12,
-                                  child: Text(
-                                    'Tap to view all',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
+            Text(
+              text.isEmpty ? 'No biography yet.' : text,
+              style: TextStyle(
+                height: 1.5,
+                color: text.isEmpty ? Colors.black54 : null,
+              ),
+            ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Photos',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Add about photo',
+                onPressed: _readOnly || _uploadingAboutPhoto
+                    ? null
+                    : _uploadAboutPhoto,
+                icon: Icon(
+                  _uploadingAboutPhoto
+                      ? Icons.hourglass_top
+                      : Icons.add_photo_alternate_outlined,
+                ),
+              ),
+            ],
+          ),
+          if (_loadingAboutPhotos && !_readOnly)
+            const ContentPlaceholder(width: double.infinity, height: 100)
+          else if (_aboutPhotoError != null)
+            Row(
+              children: [
+                const Expanded(child: Text("Couldn't load your photos.")),
+                IconButton(
+                  tooltip: 'Retry photos',
+                  onPressed: _loadAboutPhotos,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            )
+          else if (_aboutPhotos.isEmpty)
+            const Text(
+              'No photos yet.',
+              style: TextStyle(color: Colors.black54),
+            )
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (var i = 0; i < _aboutCount; i++) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  Expanded(
+                    child: AspectRatio(
+                      aspectRatio: 1,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: InkWell(
+                          onTap: () => _openAboutGallery(initialIndex: i),
+                          child: VaultMedia.network(
+                            _aboutPhotos[i]['url'] ?? '',
+                            cachedOnly: _readOnly,
+                            fit: BoxFit.cover,
+                            gaplessPlayback: true,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  _dots(
-                    _aboutCount,
-                    _aboutIndex.clamp(0, (_aboutCount - 1).clamp(0, 99)),
-                  ),
                 ],
-              ),
+                for (var i = _aboutCount; i < 3; i++) ...[
+                  const SizedBox(width: 8),
+                  const Expanded(child: SizedBox()),
+                ],
+              ],
             ),
         ],
       ),
@@ -2156,12 +2007,11 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _client.from('vault_core_voice_note').upsert({
         'vault_id': widget.vaultId,
         'path': path,
-        'title': 'About me voice note',
+        'title': file.name.replaceFirst(RegExp(r'\.[^.]+$'), ''),
       }, onConflict: 'vault_id');
 
-      await _indexCoreVoiceNote();
-
       await _loadCoreVoice();
+      unawaited(_indexCoreVoiceNote().catchError((_) {}));
       _toast('Saved.');
     } catch (e) {
       _connection.report(e);
@@ -2172,49 +2022,50 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _recordCoreVoice() async {
-    await _openRecordDialog(
-      title: 'Record “About me” voice',
-      subtitle:
-          'Optional: share a quick intro, fun fact, moral code, or biggest achievement.',
-      onSave: (rec, _) async {
-        setState(() => _savingCoreVoice = true);
-
-        final userId = _client.auth.currentUser?.id;
-        if (userId == null) throw Exception('Not signed in');
-
-        final ts = DateTime.now().millisecondsSinceEpoch;
-        final path = '${_voicePrefix(userId)}/core_$ts.${rec.extension}';
-        MediaUploadPolicy.validateListOrThrow(
-          MediaUploadKind.voice,
-          rec.bytes,
-          fileName: 'voice.${rec.extension}',
-          contentType: rec.mimeType,
-        );
-
-        await _client.storage
-            .from(_voiceBucket)
-            .uploadBinary(
-              path,
-              Uint8List.fromList(rec.bytes),
-              fileOptions: FileOptions(
-                upsert: false,
-                contentType: rec.mimeType,
-              ),
-            );
-
-        await _client.from('vault_core_voice_note').upsert({
-          'vault_id': widget.vaultId,
-          'path': path,
-          'title': 'About me voice note',
-        }, onConflict: 'vault_id');
-
-        await _indexCoreVoiceNote();
-
-        await _loadCoreVoice();
-        if (mounted) setState(() => _savingCoreVoice = false);
-        _toast('Saved.');
-      },
+    if (_readOnly || _savingCoreVoice) return;
+    final take = await Navigator.push<RecordedMemoryVoice>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RecordMemoryScreen(
+          recorder: _recorder,
+          defaultTitle: 'A little about me',
+        ),
+      ),
     );
+    if (take == null || !mounted || _readOnly) return;
+    setState(() => _savingCoreVoice = true);
+    try {
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) throw const AuthException('Not signed in');
+      final rec = take.audio;
+      MediaUploadPolicy.validateListOrThrow(
+        MediaUploadKind.voice,
+        rec.bytes,
+        fileName: 'voice.${rec.extension}',
+        contentType: rec.mimeType,
+      );
+      final path =
+          '${_voicePrefix(userId)}/core_${DateTime.now().millisecondsSinceEpoch}.${rec.extension}';
+      await _client.storage
+          .from(_voiceBucket)
+          .uploadBinary(
+            path,
+            Uint8List.fromList(rec.bytes),
+            fileOptions: FileOptions(upsert: false, contentType: rec.mimeType),
+          );
+      await _client.from('vault_core_voice_note').upsert({
+        'vault_id': widget.vaultId,
+        'path': path,
+        'title': take.title,
+      }, onConflict: 'vault_id');
+      await _loadCoreVoice();
+      unawaited(_indexCoreVoiceNote().catchError((_) {}));
+      _toast('Voice introduction saved.');
+    } catch (e) {
+      await _handleUploadError(e, 'Save failed');
+    } finally {
+      if (mounted) setState(() => _savingCoreVoice = false);
+    }
   }
 
   Future<void> _deleteCoreVoice() async {
@@ -2356,75 +2207,91 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Widget _coreVoiceSection() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
-        color: Colors.white.withOpacity(0.25),
-      ),
+    final voice = _coreVoice;
+    final playing = _playingKey == 'core:${widget.vaultId}' && _isPlaying;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
+          Row(
             children: [
-              const Text(
-                'About me (Voice)',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              SizedBox(
-                height: 40,
-                child: OutlinedButton.icon(
-                  onPressed: _savingCoreVoice ? null : _uploadCoreVoiceFile,
-                  icon: const Icon(Icons.file_upload_outlined),
-                  label: Text(_savingCoreVoice ? 'Saving…' : 'Upload VN'),
+              const Expanded(
+                child: Text(
+                  'Voice introduction',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
               ),
-              SizedBox(
-                height: 40,
-                child: OutlinedButton.icon(
-                  onPressed: (_savingCoreVoice || !_recorder.isSupported)
-                      ? null
-                      : _recordCoreVoice,
-                  icon: const Icon(Icons.mic_none),
-                  label: const Text('Record VN'),
-                ),
+              PopupMenuButton<String>(
+                tooltip: 'Voice introduction options',
+                enabled: !_readOnly && !_savingCoreVoice,
+                onSelected: (value) {
+                  if (value == 'import') _uploadCoreVoiceFile();
+                  if (value == 'rename') _renameCoreVoice();
+                  if (value == 'delete') _deleteCoreVoice();
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'import',
+                    child: Text('Import audio'),
+                  ),
+                  if (voice != null) ...[
+                    const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Text('Delete recording'),
+                    ),
+                  ],
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Optional: a short 20–60s voice intro helps the AI sound more “real”.',
-            style: TextStyle(color: Colors.black.withOpacity(0.65)),
-          ),
-          const SizedBox(height: 10),
           if (_loadingCoreVoice && !_readOnly)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: CircularProgressIndicator(),
-              ),
-            )
+            const ContentPlaceholder(width: double.infinity, height: 64)
           else if (_coreVoiceError != null)
-            Text(
-              'About me load issue (MVP): $_coreVoiceError',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+            Row(
+              children: [
+                const Expanded(child: Text("Couldn't load your recording.")),
+                IconButton(
+                  tooltip: 'Retry recording',
+                  onPressed: _loadCoreVoice,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
             )
-          else if (_coreVoice == null)
-            Text(
-              'No voice yet. Record a short 20–60s intro.',
-              style: TextStyle(color: Colors.black.withOpacity(0.60)),
+          else if (voice != null)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: IconButton(
+                tooltip: playing ? 'Pause introduction' : 'Play introduction',
+                icon: Icon(
+                  playing ? Icons.pause_circle_filled : Icons.play_circle_fill,
+                  color: heiroBlue,
+                  size: 36,
+                ),
+                onPressed: () =>
+                    _togglePlay(voice, playKey: 'core:${widget.vaultId}'),
+              ),
+              title: Text(voice.title),
             )
           else
-            _voiceTile(
-              _coreVoice!,
-              playKey: 'core:${widget.vaultId}',
-              onDelete: _deleteCoreVoice,
-              onRename: _renameCoreVoice,
+            const Text(
+              'No introduction yet.',
+              style: TextStyle(color: Colors.black54),
+            ),
+          if (!_readOnly)
+            TextButton.icon(
+              onPressed: _savingCoreVoice || !_recorder.isSupported
+                  ? null
+                  : _recordCoreVoice,
+              icon: const Icon(Icons.mic_none),
+              label: Text(
+                _savingCoreVoice
+                    ? 'Saving...'
+                    : voice == null
+                    ? 'Record introduction'
+                    : 'Replace recording',
+              ),
             ),
         ],
       ),
@@ -3374,7 +3241,9 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (!mounted || epoch != _cache.generation) return;
 
       setState(() {
-        _memories = List<Map<String, dynamic>>.from(data);
+        _memories = List<Map<String, dynamic>>.from(
+          data,
+        ).where((row) => row['prompt_key'] != 'about_me').toList();
       });
 
       await Future.wait([
@@ -3432,78 +3301,60 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
+  Future<void> _chooseMemory() async {
+    if (_readOnly) return;
+    final mode = await showMemoryCreationMenu(context);
+    if (mode != null && mounted && !_readOnly) {
+      _openAddMemory(initialMode: mode);
+    }
+  }
+
   Widget _memoryComposerCard() {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.72),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.black.withOpacity(0.07)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 18,
-            offset: const Offset(0, 7),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: _readOnly ? null : () => _openAddMemory(),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF7F0F8),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.auto_stories_outlined),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'What memory would you like to preserve next?',
-                      style: TextStyle(color: Colors.black.withOpacity(0.68)),
-                    ),
-                  ),
-                  const Icon(Icons.arrow_forward, size: 18),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _composerAction(Icons.edit_note, 'Write a memory', 'text'),
-              _composerAction(
-                Icons.photo_camera_outlined,
-                'Add media',
-                'photo',
-              ),
-              _composerAction(Icons.mic_none, 'Record voice', 'voice'),
-            ],
-          ),
+          _composerAction(Icons.edit_note, 'Write a memory', 'text'),
+          _composerAction(Icons.photo_library_outlined, 'Add media', 'photo'),
+          _composerAction(Icons.mic_none, 'Record voice', 'voice'),
         ],
       ),
     );
   }
 
   Widget _composerAction(IconData icon, String label, String mode) {
-    return ActionChip(
-      avatar: Icon(icon, size: 18, color: const Color(0xFF76558F)),
+    return OutlinedButton.icon(
+      icon: Icon(icon, size: 18),
       label: Text(label),
       onPressed: _readOnly ? null : () => _openAddMemory(initialMode: mode),
     );
   }
 
   Widget _socialHighlightsSection() {
+    if (!_loadingPhotos && _featuredPhotos.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Highlights',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Add highlight',
+              onPressed: _readOnly || _uploadingPhoto
+                  ? null
+                  : _uploadFeaturedPhoto,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+            ),
+          ],
+        ),
+      );
+    }
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
@@ -4450,124 +4301,136 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_showOffline ? 'Offline' : 'Your Vault'),
-        centerTitle: false,
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-            onPressed: _refreshing ? null : _refreshVault,
-          ),
-          PopupMenuButton<String>(
-            enabled: !_readOnly,
-            tooltip: 'More options',
-            onSelected: (value) {
-              if (value == 'rename') _renameVault();
-              if (value == 'index') _reindexVaultNow();
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                value: 'rename',
-                child: ListTile(
-                  leading: Icon(Icons.edit_outlined),
-                  title: Text('Edit vault name'),
-                ),
+    return HeiroSurface(
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_showOffline ? 'Offline' : 'Your Vault'),
+          centerTitle: false,
+          actions: [
+            if (!_readOnly)
+              IconButton(
+                tooltip: 'New memory',
+                onPressed: _chooseMemory,
+                icon: const Icon(Icons.add_circle, color: heiroBlue),
               ),
-              PopupMenuItem(
-                value: 'index',
-                enabled: !_reindexing,
-                child: ListTile(
-                  leading: Icon(
-                    _reindexing ? Icons.hourglass_top : Icons.auto_fix_high,
-                  ),
-                  title: Text(_reindexing ? 'Updating AI…' : 'Update AI index'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-      floatingActionButton: _readOnly
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () => _openAddMemory(),
-              icon: const Icon(Icons.add),
-              label: const Text('Memory'),
+            IconButton(
+              tooltip: 'Refresh',
+              icon: const Icon(Icons.refresh),
+              onPressed: _refreshing ? null : _refreshVault,
             ),
-      body: LogoWatermark(
-        opacity: 0.03,
-        size: 760,
-        child: _error != null && !_hasContent
-            ? Center(child: Text('Load failed: $_error'))
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 920),
-                  child: RefreshIndicator(
-                    onRefresh: _refreshVault,
-                    child: ListView(
-                      key: const PageStorageKey('vault-content'),
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                      children: [
-                        _vaultAvatarHeader(),
-                        _memoryComposerCard(),
-                        _socialHighlightsSection(),
-                        _vaultSectionPicker(),
-                        if (_selectedVaultSection == 0) ...[
-                          if (_loading && !_hasContent)
-                            const FeedPlaceholder()
-                          else if (_memories.isEmpty)
-                            Container(
-                              padding: const EdgeInsets.all(28),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.55),
-                                borderRadius: BorderRadius.circular(22),
-                              ),
-                              child: Column(
-                                children: [
-                                  const Icon(
-                                    Icons.auto_stories_outlined,
-                                    size: 42,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  const Text(
-                                    'Your story starts here',
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  const Text(
-                                    'Preserve a moment for the people you love.',
-                                  ),
-                                  const SizedBox(height: 14),
-                                  FilledButton.icon(
-                                    onPressed: _readOnly
-                                        ? null
-                                        : () => _openAddMemory(),
-                                    icon: const Icon(Icons.add),
-                                    label: const Text(
-                                      'Share your first memory',
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          else
-                            ..._memories.map(_socialMemoryCard),
-                        ],
-                        if (_selectedVaultSection == 1) ...[
-                          _readOnlySection(_aboutMeSection()),
-                          _readOnlySection(_coreVoiceSection()),
-                        ],
-                        if (_selectedVaultSection == 2) _mediaSection(),
-                      ],
+            PopupMenuButton<String>(
+              enabled: !_readOnly,
+              tooltip: 'More options',
+              onSelected: (value) {
+                if (value == 'rename') _renameVault();
+                if (value == 'index') _reindexVaultNow();
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'rename',
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('Edit vault name'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'index',
+                  enabled: !_reindexing,
+                  child: ListTile(
+                    leading: Icon(
+                      _reindexing ? Icons.hourglass_top : Icons.auto_fix_high,
+                    ),
+                    title: Text(
+                      _reindexing ? 'Updating AI…' : 'Update AI index',
                     ),
                   ),
                 ),
+              ],
+            ),
+          ],
+        ),
+        body: _loading && !_hasContent
+            ? const BrandLoading()
+            : LogoWatermark(
+                opacity: 0.03,
+                size: 760,
+                child: _error != null && !_hasContent
+                    ? Center(child: Text('Load failed: $_error'))
+                    : Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 920),
+                          child: RefreshIndicator(
+                            onRefresh: _refreshVault,
+                            child: ListView(
+                              key: const PageStorageKey('vault-content'),
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                16,
+                                16,
+                                32,
+                              ),
+                              children: [
+                                _vaultAvatarHeader(),
+                                if (_selectedVaultSection == 0) ...[
+                                  _memoryComposerCard(),
+                                  _socialHighlightsSection(),
+                                ],
+                                _vaultSectionPicker(),
+                                if (_selectedVaultSection == 0) ...[
+                                  if (_loading && !_hasContent)
+                                    const FeedPlaceholder()
+                                  else if (_memories.isEmpty)
+                                    Container(
+                                      padding: const EdgeInsets.all(28),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.55),
+                                        borderRadius: BorderRadius.circular(22),
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          const Icon(
+                                            Icons.auto_stories_outlined,
+                                            size: 42,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          const Text(
+                                            'Your story starts here',
+                                            style: TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          const Text(
+                                            'Preserve a moment for the people you love.',
+                                          ),
+                                          const SizedBox(height: 14),
+                                          FilledButton.icon(
+                                            onPressed: _readOnly
+                                                ? null
+                                                : () => _openAddMemory(),
+                                            icon: const Icon(Icons.add),
+                                            label: const Text(
+                                              'Share your first memory',
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else
+                                    ..._memories.map(_socialMemoryCard),
+                                ],
+                                if (_selectedVaultSection == 1) ...[
+                                  _readOnlySection(_aboutMeSection()),
+                                  _readOnlySection(_coreVoiceSection()),
+                                ],
+                                if (_selectedVaultSection == 2) _mediaSection(),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
               ),
       ),
     );
