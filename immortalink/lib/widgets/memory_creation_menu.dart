@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'heiro_surface.dart';
+import '../utils/vault_media_upload.dart';
 
 Future<String?> showMemoryCreationMenu(BuildContext context) {
   return showModalBottomSheet<String>(
@@ -20,9 +21,11 @@ Future<String?> showMemoryCreationMenu(BuildContext context) {
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
                 ),
               ),
-              for (final entry in const [
+              for (final entry in [
                 ('text', Icons.edit_note, 'Write a memory'),
                 ('photo', Icons.photo_library_outlined, 'Add photos'),
+                if (supportsVaultCamera)
+                  ('camera', Icons.photo_camera_outlined, 'Take photo'),
                 ('voice', Icons.mic_none, 'Record voice'),
               ])
                 ListTile(

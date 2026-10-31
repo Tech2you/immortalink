@@ -69,7 +69,11 @@ class FakeRpc extends Fake implements PostgrestFilterBuilder<dynamic> {
 class FakeSupabase implements SupabaseClient {
   Object? reservationError;
   int reservations = 0;
+  String? lastCheckout;
   int releases = 0;
+  Object? sponsorshipResponse;
+  int sponsorshipReads = 0;
+  int usageReads = 0;
   Map<String, dynamic> sponsorship = {'active': false, 'is_sponsor': false};
   Object? usage = {
     'plan': 'free',
@@ -83,7 +87,10 @@ class FakeSupabase implements SupabaseClient {
   @override
   dynamic noSuchMethod(Invocation invocation) {
     if (invocation.memberName == #rpc) {
-      if (invocation.positionalArguments.first == 'begin_family_sponsorship') {
+      if (invocation.positionalArguments.first == 'begin_family_sponsorship' ||
+          invocation.positionalArguments.first ==
+              'begin_family_storage_contribution') {
+        lastCheckout = invocation.positionalArguments.first as String;
         reservations++;
         return FakeRpc(reservationError ?? {'reservation_id': 'checkout-id'});
       }
@@ -94,9 +101,11 @@ class FakeSupabase implements SupabaseClient {
       }
       if (invocation.positionalArguments.first ==
           'get_family_entitlements_and_usage') {
+        usageReads++;
         return FakeRpc(usage);
       }
-      return FakeRpc(sponsorship);
+      sponsorshipReads++;
+      return FakeRpc(sponsorshipResponse ?? sponsorship);
     }
     return super.noSuchMethod(invocation);
   }
@@ -115,9 +124,12 @@ class FakeStore implements InAppPurchase {
   int countryLookups = 0;
   Future<String>? countryResponse;
   Future<void> Function()? onRestore;
+  Future<void> Function(PurchaseDetails)? onComplete;
+  Future<void> Function()? onBuy;
   @override
   Future<bool> buyNonConsumable({required PurchaseParam purchaseParam}) async {
     lastPurchase = purchaseParam;
+    await onBuy?.call();
     if (purchaseError != null) throw purchaseError!;
     return started;
   }
@@ -154,6 +166,7 @@ class FakeStore implements InAppPurchase {
 
   @override
   Future<void> completePurchase(PurchaseDetails purchase) async {
+    await onComplete?.call(purchase);
     completed++;
   }
 
@@ -372,7 +385,7 @@ void main() {
         service = AppleSubscriptionService(
           supabase: backend,
           iap: store,
-          unfinishedPurchases: () async => unfinished,
+          unfinishedPurchases: () async => List.of(unfinished),
           previousPurchase: () async => previous,
           syncPurchases: () async {
             syncCalls++;
@@ -476,6 +489,106 @@ void main() {
         },
       );
 
+      FunctionResponse previousContribution({String? resolved}) =>
+          FunctionResponse(
+            status: 200,
+            data: {
+              'ok': true,
+              'previous_contribution': {
+                'code': 'APPLE_OWNED_PREVIOUS_CONTRIBUTION',
+                'status': 'active',
+                'product_id': productId,
+                'paid_until': DateTime.now()
+                    .add(const Duration(days: 1))
+                    .toIso8601String(),
+                'resolved_reservation_id': resolved,
+              },
+            },
+          );
+      test(
+        'restore acknowledges owned previous-family purchase and offers a confirmed move',
+        () async {
+          unfinished = [savedPurchase()];
+          backend.sponsorship['can_move_contribution'] = true;
+          backend.functions.result = previousContribution();
+          await service.restore();
+          expect(store.completed, 1);
+          expect(service.error, isNull);
+          expect(service.canMoveContribution, true);
+          expect(service.canSponsor, false);
+          expect(service.hasActiveSponsor, false);
+          expect(service.message, contains('No new payment'));
+          expect(store.lastPurchase, isNull);
+          expect(backend.releases, 0);
+        },
+      );
+      test(
+        'history recovery of owned previous plan never starts another purchase',
+        () async {
+          previous = savedPurchase()..pendingCompletePurchase = false;
+          backend.functions.result = previousContribution();
+          await service.buy(productId);
+          expect(backend.reservations, 0);
+          expect(store.lastPurchase, isNull);
+          expect(service.message, contains('previous family'));
+        },
+      );
+      test(
+        'previous-family replay cannot dismiss an unrelated live checkout',
+        () async {
+          await service.buy(productId);
+          backend.functions.result = previousContribution();
+          store.updates.add([savedPurchase()]);
+          await pumpEventQueue();
+          expect(service.purchasePending, true);
+          expect(store.completed, 0);
+          expect(backend.releases, 0);
+        },
+      );
+      test(
+        'server-proven completion of this checkout permits acknowledgement without another payment',
+        () async {
+          await service.buy(productId);
+          backend.functions.result = previousContribution(
+            resolved: 'checkout-id',
+          );
+          backend.sponsorship['can_move_contribution'] = true;
+          store.updates.add([savedPurchase()]);
+          await pumpEventQueue();
+          expect(service.purchasePending, false);
+          expect(store.completed, 1);
+          expect(service.canMoveContribution, true);
+          expect(backend.releases, 0);
+        },
+      );
+      test(
+        'identical expired receipt is checked once; explicit restore and new proof reverify',
+        () async {
+          backend.functions.result = expiredHistory();
+          store.updates.add([savedPurchase(), savedPurchase()]);
+          await pumpEventQueue();
+          expect(backend.functions.calls, 1);
+          expect(store.completed, 1);
+          final changed = PurchaseDetails(
+            productID: productId,
+            purchaseID: 'unfinished-tx',
+            verificationData: PurchaseVerificationData(
+              localVerificationData: '',
+              serverVerificationData: 'new-signed-proof',
+              source: 'app_store',
+            ),
+            transactionDate: null,
+            status: PurchaseStatus.purchased,
+          )..pendingCompletePurchase = true;
+          store.updates.add([changed]);
+          await pumpEventQueue();
+          expect(backend.functions.calls, 2);
+          unfinished = [savedPurchase()];
+          await service.restore();
+          expect(backend.functions.calls, 3);
+        },
+      );
+
       test(
         'verified expired foreign history permits only a new checkout, not a restore grant',
         () async {
@@ -513,12 +626,26 @@ void main() {
       );
 
       test(
-        'verified expired unfinished history allows a new checkout without finishing or granting it',
+        'verified expired unfinished receipt is finished before a new checkout without granting access',
         () async {
           unfinished = [savedPurchase()];
+          previous = savedPurchase()..pendingCompletePurchase = false;
+          store.onComplete = (purchase) async {
+            unfinished.removeWhere((p) => p.purchaseID == purchase.purchaseID);
+          };
+          store.onBuy = () async {
+            if (unfinished.isNotEmpty) {
+              throw PlatformException(
+                code: 'storekit_duplicate_product_object',
+              );
+            }
+          };
           backend.functions.result = expiredHistory();
+          final usageReads = backend.usageReads;
           await service.buy(productId);
-          expect(store.completed, 0);
+          expect(store.completed, 1);
+          expect(backend.functions.calls, 1);
+          expect(backend.usageReads, usageReads);
           expect(store.lastPurchase, isNotNull);
           expect(backend.reservations, 1);
           expect(service.hasActiveSponsor, false);
@@ -533,13 +660,62 @@ void main() {
           unfinished = [savedPurchase(), savedPurchase()];
           backend.functions.result = expiredHistory();
           await service.restore();
-          expect(backend.functions.calls, 2);
+          expect(backend.functions.calls, 1);
           expect(service.message, contains('previous Apple plan has ended'));
           expect(service.canSponsor, true);
           expect(service.hasActiveSponsor, false);
+          expect(store.completed, 1);
+          expect(store.lastPurchase, isNull);
+          expect(backend.reservations, 0);
+        },
+      );
+
+      test(
+        'failure to finish expired queue item blocks a new charge',
+        () async {
+          unfinished = [savedPurchase()];
+          backend.functions.result = expiredHistory();
+          store.onComplete = (_) async =>
+              throw PlatformException(code: 'finish_failed');
+          await service.buy(productId);
           expect(store.completed, 0);
           expect(store.lastPurchase, isNull);
           expect(backend.reservations, 0);
+          expect(service.canSponsor, false);
+        },
+      );
+
+      test(
+        'expired result cannot complete after the Heiro account changes',
+        () async {
+          unfinished = [savedPurchase()];
+          final response = Completer<FunctionResponse>();
+          backend.functions.result = response.future;
+          final buying = service.buy(productId);
+          await pumpEventQueue();
+          backend.auth.currentUser = null;
+          response.complete(expiredHistory());
+          await buying;
+          expect(store.completed, 0);
+          expect(backend.reservations, 0);
+          expect(store.lastPurchase, isNull);
+        },
+      );
+
+      test(
+        'slow country lookup does not hold up localized price loading',
+        () async {
+          final country = Completer<String>();
+          store.countryResponse = country.future;
+          var loaded = false;
+          final refresh = service.refreshProducts().then((_) => loaded = true);
+          await pumpEventQueue();
+          expect(loaded, true);
+          expect(service.loading, false);
+          expect(service.productFor(productId), isNotNull);
+          country.complete('USA');
+          await refresh;
+          await pumpEventQueue();
         },
       );
 
@@ -555,7 +731,7 @@ void main() {
           );
           expect(service.message, contains('previous Apple plan has ended'));
           expect(service.canSponsor, true);
-          expect(store.completed, 0);
+          expect(store.completed, 1);
           expect(store.lastPurchase, isNull);
         },
       );
@@ -594,7 +770,16 @@ void main() {
       test(
         'an expired replay cannot mask another rejected unfinished charge',
         () async {
-          unfinished = [savedPurchase(), savedPurchase()];
+          unfinished = [
+            savedPurchase(),
+            PurchaseDetails(
+              productID: productId,
+              purchaseID: 'another-unfinished-tx',
+              verificationData: savedPurchase().verificationData,
+              transactionDate: null,
+              status: PurchaseStatus.purchased,
+            )..pendingCompletePurchase = true,
+          ];
           var call = 0;
           backend.functions.result = (Object? _) => ++call == 1
               ? expiredHistory()
@@ -606,7 +791,7 @@ void main() {
           expect(service.canSponsor, false);
           expect(store.lastPurchase, isNull);
           expect(backend.reservations, 0);
-          expect(store.completed, 0);
+          expect(store.completed, 1);
         },
       );
 
@@ -920,14 +1105,19 @@ void main() {
         expect(service.canSponsor, isTrue);
       });
 
-      test('failed usage refresh never fabricates a free plan', () async {
-        backend.usage = const PostgrestException(
-          message: 'network unavailable',
-        );
-        await service.refreshSponsorship();
-        expect(service.familyUsage, isNull);
-        expect(service.billingRefreshing, isFalse);
-      });
+      test(
+        'failed usage refresh preserves the last snapshot and flags it stale',
+        () async {
+          final previousUsage = service.familyUsage;
+          backend.usage = const PostgrestException(
+            message: 'network unavailable',
+          );
+          await service.refreshSponsorship();
+          expect(service.familyUsage, previousUsage);
+          expect(service.billingRefreshFailed, true);
+          expect(service.billingRefreshing, isFalse);
+        },
+      );
 
       test(
         'switching app accounts invalidates cached billing controls',

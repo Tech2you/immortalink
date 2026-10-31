@@ -60,4 +60,20 @@ test('multi-currency import is atomic, retry-safe and rejects overlapping report
   await assert.rejects(()=>run([{...first,id:id(422),source_hash:'c'.repeat(64)}]),/OVERLAPPING_APPLE_REPORT/);
 });});
 test('MFA, banned accounts, revoked sessions and revoked ownership deny access',async()=>{await db.query("insert into auth.mfa_factors values($1,'verified')",[id(1)]);await as(1,async()=>assert.rejects(dashboard,/BUSINESS_MFA_REQUIRED/));await as(1,async()=>assert.equal((await dashboard()).current.accounts,3),{aal:'aal2'});await db.exec('delete from auth.mfa_factors');await db.query("update auth.users set banned_until=now()+interval '1 day' where id=$1",[id(1)]);await as(1,async()=>assert.rejects(dashboard,/BUSINESS_ACCESS_DENIED/));await db.query('update auth.users set banned_until=null where id=$1',[id(1)]);await db.query('delete from auth.sessions where id=$1',[id(101)]);await as(1,async()=>assert.rejects(dashboard,/BUSINESS_ACCESS_DENIED/));await db.query('insert into auth.sessions(id,user_id) values($1,$2)',[id(101),id(1)]);await db.query('delete from heiro_business.owners');await as(1,async()=>assert.rejects(dashboard,/BUSINESS_ACCESS_DENIED/));});
+test('two production contributors in one bucket count as two payers and one funded family',async()=>{
+ await db.exec('begin');try {
+  const before=(await db.query('select heiro_business.collect_metrics() m')).rows[0].m;
+  await db.exec(`insert into auth.users(id,email) values('${id(4)}','four@example.test'),('${id(5)}','five@example.test');
+  insert into family_groups(id) values('${id(205)}');
+  insert into family_members values('${id(205)}','${id(4)}'),('${id(205)}','${id(5)}');
+  insert into family_entitlements(family_id,billing_owner_user_id,plan,status,apple_environment,current_period_end,apple_original_transaction_id) values
+  ('${id(205)}','${id(4)}','everroot_family','active','production',now()+interval '1 day','bucket-four'),
+  ('${id(205)}','${id(5)}','everroot_legacy','active','production',now()+interval '1 day','bucket-five');
+  insert into apple_subscription_events(family_id,apple_environment,apple_original_transaction_id,entitlement_status,raw_payload) values
+  ('${id(205)}','production','bucket-four','active','{"price":119990}'),
+  ('${id(205)}','production','bucket-five','active','{"price":199990}');`);
+  const after=(await db.query('select heiro_business.collect_metrics() m')).rows[0].m;
+  assert.equal(after.paying_contributors,before.paying_contributors+2);assert.equal(after.funded_families,before.funded_families+1);
+ }finally{await db.exec('rollback');}
+});
 test.after(async()=>{await db.close();});

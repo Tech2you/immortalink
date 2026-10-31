@@ -90,7 +90,7 @@ void main() {
     test('returns family storage upgrade copy for storage upload failures', () {
       expect(
         everRootUploadErrorMessage('ERR_EVERROOT_STORAGE_LIMIT'),
-        contains('sponsor'),
+        contains('Any member'),
       );
       expect(
         everRootUploadErrorMessage('ERR_EVERROOT_STORAGE_LIMIT'),

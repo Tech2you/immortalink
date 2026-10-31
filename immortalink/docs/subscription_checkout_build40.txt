@@ -1,0 +1,22 @@
+Heiro subscription checkout and loading correction — build 40
+2026-10-30
+
+User request: fix old/new subscription layout flicker, unnecessary checkout delay, inconsistent price-button arrangement and repeated purchase failure after acknowledging an ended Apple plan. Explain AI answers versus transcription minutes. Cable delivery only; no TestFlight upload or App Store draft change.
+
+Evidence: reviewed the four supplied recordings from 17:40–17:45 local time. Read-only validation logs show APPLE_EXPIRED_HISTORY with successful expired-history checks and checkout reservations. The installed StoreKit plugin refuses a new purchase while a matching product remains in Transaction.unfinished. Heiro acknowledged the expired history but had intentionally left that queued transaction unfinished. Signing into the normal App Store does not itself select a development-build Sandbox Apple Account.
+
+Changes: finish a queued expired receipt only after the authenticated server confirms the whole previous Apple subscription group has fully ended. This acknowledges an old receipt; it neither grants nor transfers storage or ownership. Active/mismatched/unverified receipts and an unrelated pending/uncertain new checkout remain protected. A completion failure blocks a new purchase. Repeated copies of the same queued receipt are deduplicated, and the same freshly verified history is not rechecked again during that one checkout. A later operation must check Apple again.
+
+Independent billing-status, usage and localized-price requests now start together. Country-code diagnostics do not delay price loading. Pre-checkout refresh reads sponsorship status without refetching usage after each old receipt. No Apple verification, reservation or entitlement protection was removed.
+
+Unknown billing state shows the existing tree artwork instead of the obsolete Free Family/purchase cards. Background failure retains known bucket layout with a stale-data notice and blocks checkout when billing status cannot be verified. Monthly and annual buttons are consistently full-width and vertically stacked. Help explains Apple account selection and the distinction between monthly AI answers and audio-to-text transcription minutes. Purchase status has a reserved space to reduce layout movement.
+
+Validation: 289 default app tests passed, 66 configuration-specific skips. All 89 purchase-enabled service/UI tests passed, including native-plugin-style unfinished-transaction rejection, deduplication, failure-to-finish, switched accounts, malformed responses, active-plan protection, cold loading, stale data and large-text button layout. The full suite was also run with purchase defines: 354 passed; its default-only configuration assertion expected no defines, so the default suite was rerun separately as above. Analyzer reports no errors/warnings in changed files; 18 existing informational style/deprecation notices remain elsewhere in vaults_screen.dart. git diff --check passed. Actual widgets rendered and inspected in build/billing-40-qa (test fixture prices, not live offers).
+
+Build flags: release, 1.0.0 (40), HEIRO_ACTIVITY_TEST_BUILD=true, existing subscription group 22339684 and existing four Apple product IDs. No price/product/backend changes, real purchases, account switches or uninstalls performed. Existing family photos, relationships, ownership, contribution accounting and permissions remain unchanged by this fix.
+
+Restore points: /private/tmp/heiro-before-billing-smooth-build39.patch and /private/tmp/heiro-before-billing-smooth-build39.app. Prior build-39 pooled backend remains deployed; any rollback must retain valid contributor accounting.
+
+Delivery: release compilation succeeded; Apple signature is valid and satisfies its designated requirement. All three bundled image assets match build 39. Updated the existing app in place on ROSS's iPhone (3), read back com.everroots.app / 1.0.0 / build 40, and successfully launched it. The user has been asked to check the steady layout, tap a price once and cancel Apple's confirmation without purchasing. Actual Apple-sheet timing, authentication and acceptance remain pending that device check; automated tests do not prove a completed Apple purchase.
+
+References: https://developer.apple.com/documentation/storekit/transaction/unfinished and https://developer.apple.com/documentation/storekit/testing-in-app-purchases-with-sandbox

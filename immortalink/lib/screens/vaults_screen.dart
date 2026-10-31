@@ -1,3 +1,4 @@
+import '../widgets/contribution_move_card.dart';
 import 'dart:async';
 import '../services/connection_status.dart';
 import '../utils/public_error.dart';
@@ -11,11 +12,13 @@ import 'recently_viewed_screen.dart';
 import 'content_safety_screen.dart';
 import '../widgets/vault_media.dart';
 import '../widgets/startup_screen.dart';
+import '../widgets/brand_loading.dart';
 import '../widgets/heiro_surface.dart';
 import '../widgets/story_feed_item.dart';
 import '../widgets/memory_creation_menu.dart';
 import 'create_memory_screen.dart';
 import 'heiro_settings_screen.dart';
+import 'usage_statistics_screen.dart';
 import '../widgets/content_placeholder.dart';
 import '../widgets/content_safety_actions.dart';
 
@@ -31,10 +34,12 @@ import '../services/first_account_setup.dart';
 import 'first_account_setup_screen.dart';
 import '../services/apple_subscription_config.dart';
 import '../services/apple_subscription_service.dart';
+import '../services/subscription_family.dart';
 import '../services/push_notification_service.dart';
 import '../widgets/ai_processing_consent.dart';
 import '../widgets/content_screening_permission.dart';
 import '../widgets/legal_links.dart';
+import '../widgets/family_storage_bucket_summary.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import 'vault_home_screen.dart';
 import 'relationship_tree_screen.dart';
@@ -50,6 +55,7 @@ enum _VaultSettingsAction {
   joinFamily,
   manageSubscription,
   aiPermission,
+  usageStatistics,
   screeningPermission,
   safety,
   privacy,
@@ -478,6 +484,12 @@ class _VaultsScreenState extends State<VaultsScreen> {
       case _VaultSettingsAction.aiPermission:
         await requestAiProcessingConsent(context, settings: true);
         return;
+      case _VaultSettingsAction.usageStatistics:
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const UsageStatisticsScreen()),
+        );
+        return;
       case _VaultSettingsAction.screeningPermission:
         await requestContentScreeningPermission(context, settings: true);
         return;
@@ -509,17 +521,25 @@ class _VaultsScreenState extends State<VaultsScreen> {
   Future<void> _showSubscriptionSettings() async {
     final familyId = _activeFamilyId?.trim();
 
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Family plan'),
-        content: FamilyPlanStatusContent(familyId: familyId ?? ''),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (ctx) => HeiroSurface(
+          child: Scaffold(
+            appBar: AppBar(title: const Text('Family storage')),
+            body: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: FamilyPlanStatusContent(
+                  familyId: familyId ?? '',
+                  loadFamilyId: () => resolveSubscriptionFamily(
+                    _supabase,
+                    preferredFamilyId: familyId,
+                  ),
+                ),
+              ),
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -2424,6 +2444,12 @@ class _VaultsScreenState extends State<VaultsScreen> {
                 Icons.privacy_tip_outlined,
                 _VaultSettingsAction.aiPermission,
               ),
+              (
+                'Privacy and safety',
+                'Usage statistics',
+                Icons.insights_outlined,
+                _VaultSettingsAction.usageStatistics,
+              ),
               if (contentScreeningControlsEnabled)
                 (
                   'Privacy and safety',
@@ -3108,11 +3134,13 @@ String _changePasswordErrorMessage(AuthException error) {
 class FamilyPlanStatusContent extends StatefulWidget {
   final String familyId;
   final AppleSubscriptionService? service;
+  final Future<String?> Function()? loadFamilyId;
 
   const FamilyPlanStatusContent({
     super.key,
     required this.familyId,
     this.service,
+    this.loadFamilyId,
   });
 
   @override
@@ -3126,6 +3154,10 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
   Timer? _refreshTimer;
   Timer? _expiryTimer;
   DateTime? _scheduledExpiry;
+  String _resolvedFamilyId = '';
+  bool _resolvingFamily = false;
+  bool _familyLookupFailed = false;
+  int _familyLookup = 0;
 
   @override
   void initState() {
@@ -3133,7 +3165,7 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
     WidgetsBinding.instance.addObserver(this);
     _service = widget.service ?? AppleSubscriptionService();
     _service.addListener(_scheduleExpiryRefresh);
-    unawaited(_service.initialize(familyId: widget.familyId));
+    unawaited(_loadFamily());
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
         _refresh();
@@ -3141,7 +3173,54 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
     });
   }
 
+  Future<void> _loadFamily() async {
+    final request = ++_familyLookup;
+    final loader = widget.loadFamilyId;
+    if (loader == null) {
+      _resolvedFamilyId = widget.familyId.trim();
+      _resolvingFamily = false;
+      _familyLookupFailed = false;
+      unawaited(_service.initialize(familyId: _resolvedFamilyId));
+      return;
+    }
+    setState(() {
+      _resolvingFamily = true;
+      _familyLookupFailed = false;
+    });
+    // One bounded retry for a brief connection failure. Never convert a failed
+    // read into "no family", and never initialize billing with an old result.
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final id = await loader().timeout(const Duration(seconds: 8));
+        if (!mounted || request != _familyLookup) return;
+        setState(() {
+          _resolvedFamilyId = id?.trim() ?? '';
+          _resolvingFamily = false;
+        });
+        unawaited(_service.initialize(familyId: _resolvedFamilyId));
+        return;
+      } catch (_) {
+        if (!mounted || request != _familyLookup) return;
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          if (!mounted || request != _familyLookup) return;
+        } else {
+          setState(() {
+            _resolvingFamily = false;
+            _familyLookupFailed = true;
+          });
+        }
+      }
+    }
+  }
+
   void _refresh() {
+    if (_resolvingFamily) return;
+    if (widget.loadFamilyId != null &&
+        (_familyLookupFailed || _resolvedFamilyId.isEmpty)) {
+      unawaited(_loadFamily());
+      return;
+    }
     if (!_service.purchasePending && !_service.billingRefreshing) {
       unawaited(_service.refreshSponsorship());
     }
@@ -3156,8 +3235,10 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
         _service.loading) {
       return;
     }
-    await _service.refreshSponsorship();
-    await _service.refreshProducts();
+    await Future.wait([
+      _service.refreshSponsorship(),
+      _service.refreshProducts(),
+    ]);
   }
 
   void _scheduleExpiryRefresh() {
@@ -3175,8 +3256,9 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
   @override
   void didUpdateWidget(covariant FamilyPlanStatusContent oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.familyId != oldWidget.familyId) {
-      unawaited(_service.initialize(familyId: widget.familyId));
+    if (widget.familyId != oldWidget.familyId ||
+        (widget.loadFamilyId == null) != (oldWidget.loadFamilyId == null)) {
+      unawaited(_loadFamily());
     }
   }
 
@@ -3190,6 +3272,7 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
 
   @override
   void dispose() {
+    ++_familyLookup;
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _expiryTimer?.cancel();
@@ -3205,8 +3288,32 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
   );
 
   Widget _buildContent(BuildContext context) {
+    if (_resolvingFamily || _familyLookupFailed) {
+      return SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_resolvingFamily) ...[
+              const SizedBox(height: 200, child: BrandLoading(size: 96)),
+              const Text('Loading your family...'),
+            ] else ...[
+              const Text(
+                'Could not load your family. Check your connection and try again.',
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _loadFamily,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+              ),
+              _AppleAccountManagementButton(service: _service),
+            ],
+          ],
+        ),
+      );
+    }
     final usage = _service.familyUsage;
-    final familyId = widget.familyId;
+    final familyId = _resolvedFamilyId;
     if (familyId.isEmpty) {
       return SingleChildScrollView(
         child: Column(
@@ -3218,30 +3325,53 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
               'family plan.',
             ),
             const SizedBox(height: 16),
+            if (widget.loadFamilyId != null)
+              TextButton.icon(
+                onPressed: _loadFamily,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Check again'),
+              ),
             _AppleAccountManagementButton(service: _service),
           ],
         ),
       );
     }
 
-    if (usage == null) {
+    if (usage == null ||
+        (!_service.billingStatusLoaded && !_service.bucketModel)) {
       return SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (_service.billingRefreshing)
+              const SizedBox(height: 200, child: BrandLoading(size: 96)),
             Text(
               _service.billingRefreshing
                   ? 'Checking your family plan...'
                   : 'Could not refresh the family plan. Try again before making changes.',
             ),
             const SizedBox(height: 16),
-            _PurchaseAwareTierList(
-              currentPlan: null,
-              familyId: familyId,
-              service: _service,
-              onRefresh: _refreshManually,
-            ),
+            if (!_service.billingRefreshing) ...[
+              if (_service.error != null) ...[
+                Text(
+                  _service.error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                const SizedBox(height: 12),
+              ],
+              OutlinedButton.icon(
+                onPressed: _refreshManually,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+              ),
+              if (AppleSubscriptionConfig.purchaseFlowEnabled)
+                TextButton(
+                  onPressed: _service.purchasePending ? null : _service.restore,
+                  child: const Text('Restore purchases'),
+                ),
+              _AppleAccountManagementButton(service: _service),
+            ],
           ],
         ),
       );
@@ -3266,8 +3396,7 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
         ? 'Existing memories remain available. Free up space or renew your '
               'family plan to add more media.'
         : isNearFull
-        ? 'Storage is almost full. Your family sponsor can upgrade this family '
-              'plan for more shared storage.'
+        ? 'Storage is almost full. Any family member can contribute more shared storage.'
         : 'Upgrade when your family needs more room for memories and media.';
 
     return SizedBox(
@@ -3277,21 +3406,33 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Current plan: ${_planTitle(plan)}'),
-            const SizedBox(height: 12),
-            Text(
-              everRootStorageUsageMessage(
-                usedBytes: usedBytes,
-                limitBytes: limitBytes,
+            if (_service.billingRefreshFailed) ...[
+              const Text('Could not refresh. Showing your last known usage.'),
+              const SizedBox(height: 12),
+            ],
+            if (_service.bucketModel)
+              FamilyStorageBucketSummary(
+                service: _service,
+                limits: limits,
+                usage: currentUsage,
+              )
+            else ...[
+              Text('Current plan: ${_planTitle(plan)}'),
+              const SizedBox(height: 12),
+              Text(
+                everRootStorageUsageMessage(
+                  usedBytes: usedBytes,
+                  limitBytes: limitBytes,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(value: progress),
-            const SizedBox(height: 12),
-            Text(status),
+              const SizedBox(height: 8),
+              LinearProgressIndicator(value: progress),
+              const SizedBox(height: 12),
+              Text(status),
+            ],
             const SizedBox(height: 18),
             Text(
-              'Choose a plan',
+              _service.bucketModel ? 'Your contribution' : 'Choose a plan',
               style: Theme.of(
                 context,
               ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
@@ -3337,6 +3478,7 @@ class _PurchaseAwareTierList extends StatelessWidget {
       builder: (context, _) {
         final error = _subscriptionService.error;
         final sharedPlanMismatch =
+            !_subscriptionService.bucketModel &&
             _subscriptionService.purchaseAccountMismatch &&
             _subscriptionService.hasActiveSponsor &&
             !_subscriptionService.canManageFamilyPlan &&
@@ -3351,7 +3493,20 @@ class _PurchaseAwareTierList extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text('Sponsored by ${_subscriptionService.sponsorName}'),
               ),
-            if (_subscriptionService.hasActiveSponsor) ...[
+            ContributionMoveCard(service: _subscriptionService),
+            if (_subscriptionService.bucketModel) ...[
+              const Text(
+                'Choose one plan for your Apple Account. Other family members can add their own contributions.',
+              ),
+              if (_subscriptionService.ownPaidUntil
+                  case final DateTime until) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Your contribution is paid through ${_coverageDate(context, until)}.',
+                ),
+              ],
+              const SizedBox(height: 12),
+            ] else if (_subscriptionService.hasActiveSponsor) ...[
               if (_subscriptionService.paidUntil case final DateTime paidUntil)
                 Text(
                   'Paid coverage until ${_coverageDate(context, paidUntil)}.',
@@ -3364,28 +3519,26 @@ class _PurchaseAwareTierList extends StatelessWidget {
               ),
               const SizedBox(height: 12),
             ],
-            if (_subscriptionService.message != null) ...[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (_subscriptionService.purchasePending) ...[
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: _subscriptionService.message == null
+                  ? const SizedBox.shrink()
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_subscriptionService.purchasePending) ...[
+                          const Icon(Icons.lock_outline, size: 18),
+                          const SizedBox(width: 10),
+                        ],
+                        Expanded(
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(_subscriptionService.message!),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                  ],
-                  Expanded(
-                    child: Semantics(
-                      liveRegion: true,
-                      child: Text(_subscriptionService.message!),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-            ],
+            ),
             if (error != null) ...[
               Semantics(
                 liveRegion: true,
@@ -3412,14 +3565,21 @@ class _PurchaseAwareTierList extends StatelessWidget {
               ],
               const SizedBox(height: 12),
             ],
-            ...AppleSubscriptionConfig.tiers.map(
-              (tier) => _PlanTierTile(
-                tier: tier,
-                isCurrent: tier.plan == currentPlan,
-                service: _subscriptionService,
-                hasFamily: familyId.trim().isNotEmpty && currentPlan != null,
-              ),
-            ),
+            ...AppleSubscriptionConfig.tiers
+                .where(
+                  (tier) => !_subscriptionService.bucketModel || !tier.isFree,
+                )
+                .map(
+                  (tier) => _PlanTierTile(
+                    tier: tier,
+                    isCurrent: _subscriptionService.bucketModel
+                        ? tier.plan == _subscriptionService.ownPlan
+                        : tier.plan == currentPlan,
+                    service: _subscriptionService,
+                    hasFamily:
+                        familyId.trim().isNotEmpty && currentPlan != null,
+                  ),
+                ),
             if (_subscriptionService.hasPricingDiagnostics) ...[
               const SizedBox(height: 10),
               if (kDebugMode)
@@ -3477,7 +3637,31 @@ class _PurchaseAwareTierList extends StatelessWidget {
                 ],
               ),
             ),
+            if (_subscriptionService.bucketModel) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Subscriptions renew automatically until cancelled in Apple Settings. Cancelling keeps your contribution until its paid period ends. Each payer manages only their own subscription.',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'When all contributions end, your family returns to 500 MB. Existing memories remain available; new uploads and invitations pause if storage is full.',
+              ),
+            ],
             _AppleAccountManagementButton(service: _subscriptionService),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Which Apple Account is used?'),
+              children: const [
+                Padding(
+                  padding: EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    bool.fromEnvironment('HEIRO_ACTIVITY_TEST_BUILD')
+                        ? 'For this development build, check iPhone Settings → Developer → Sandbox Apple Account. This test account can be different from your normal App Store account. Heiro cannot see your Apple email or sign you in. Apple may ask you to sign in again.'
+                        : 'Apple handles payment using your purchase account. Check iPhone Settings → your name → Media & Purchases. Your Heiro login can be different. Heiro cannot see your Apple email or sign you in.',
+                  ),
+                ),
+              ],
+            ),
             const LegalLinks(),
           ],
         );
@@ -3662,7 +3846,7 @@ class _PlanTierTile extends StatelessWidget {
               ),
               if (isCurrent)
                 Text(
-                  'Current',
+                  service.bucketModel ? 'Your plan' : 'Current',
                   style: theme.textTheme.labelMedium?.copyWith(
                     color: theme.colorScheme.primary,
                     fontWeight: FontWeight.w700,
@@ -3674,7 +3858,9 @@ class _PlanTierTile extends StatelessWidget {
           Text(tier.subtitle),
           const SizedBox(height: 8),
           Text(
-            tier.storageLabel,
+            isCurrent && service.bucketModel && service.ownStorageBytes != null
+                ? '${formatFamilyCapacity(service.ownStorageBytes!)} contributed'
+                : tier.storageLabel,
             style: theme.textTheme.bodyMedium?.copyWith(
               fontWeight: FontWeight.w700,
             ),
@@ -3690,6 +3876,17 @@ class _PlanTierTile extends StatelessWidget {
                 child: Text(tier.setupStatus),
               ),
             )
+          else if (service.bucketModel &&
+              service.canManageFamilyPlan &&
+              !isCurrent)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$monthlyLabel · $annualLabel'),
+                const SizedBox(height: 6),
+                const Text('Change plans using Manage your contribution.'),
+              ],
+            )
           else if (isCurrent)
             if (service.canManageFamilyPlan)
               OutlinedButton.icon(
@@ -3697,23 +3894,38 @@ class _PlanTierTile extends StatelessWidget {
                     ? null
                     : service.openFamilyPlanManagement,
                 icon: const Icon(Icons.manage_accounts_outlined),
-                label: const Text('Change or cancel plan'),
+                label: Text(
+                  service.bucketModel
+                      ? 'Manage your contribution'
+                      : 'Change or cancel plan',
+                ),
               )
             else
               const Text('Included through your family sponsor')
           else
-            Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 8,
-              runSpacing: 8,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                   onPressed: canBuyMonthly
                       ? () => service.buy(monthlyProduct.id)
                       : null,
                   child: Text(monthlyLabel),
                 ),
+                const SizedBox(height: 8),
                 FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
                   onPressed: canBuyAnnual
                       ? () => service.buy(annualProduct.id)
                       : null,

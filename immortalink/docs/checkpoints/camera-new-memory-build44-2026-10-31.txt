@@ -1,0 +1,30 @@
+Heiro camera option — build 44 — 31 October 2026
+
+Request
+Offer a camera wherever a new memory is started or photos are added, excluding already-created memories. Local phone update only. The user confirmed build 43's subscription first-open fix works before this task.
+
+Change
+Take photo appears in the shared new-memory action menu, the vault's new-memory actions and composer, and new legacy-memory editors. Add-media source menus offer camera when creating a memory or adding About/highlight/legacy gallery photos. Existing saved-memory upload controls and legacy edit-memory dialogs retain their gallery/video choices without camera. Avatar/family-photo replacement controls are unchanged.
+
+Camera capture uses the installed image_picker package and existing bounded media reader, validation and image preparation. Photos taken for new memories remain in the local draft preview until the normal save flow. The 20-item draft cap, remaining byte limit, removal, upload progress and retry behavior remain intact. Cancellation leaves the draft alone. Camera permission/unavailable/busy errors have readable messages, and camera choices are limited to supported mobile platforms. iOS has the camera permission purpose string. Pending capture results are rejected after disposal or an account switch.
+
+Scope protected
+No dependency upgrade, database migration, backend deployment, purchase, restore, contribution move, family relationship or storage-policy change. SHA-256 checks confirmed Apple subscription service, AppDelegate, subscription verification function, media batch service, upload-progress screen and VaultsScreen unchanged from the start of this task. Existing unrelated working-tree edits were retained. No TestFlight upload or App Store draft edit.
+
+Validation
+- 50 focused camera/media/voice/legacy checks passed, including new-camera cancellation/permission handling, remaining capacity and exclusions in saved-memory editors.
+- Full Flutter suite with existing release purchase configuration: 391 passed.
+- Final targeted suite after async-context cleanup: 21 passed, including the three default purchase-configuration checks.
+- Focused analysis: no errors; five existing unused-helper warnings and 45 existing style/deprecation notices in the vault screens. No newly introduced diagnostics remain.
+- git diff --check and Info.plist validation passed.
+- Release 1.0.0 (44), com.everroots.app built successfully. Deep strict code-signature verification passed with access to the Mac signing trust store. Existing product identifiers and HEIRO_ACTIVITY_TEST_BUILD=true retained.
+
+Delivery
+Installed build 44 in place on the connected iPhone without uninstalling Heiro. App launch succeeded. Independent installed-app inventory confirms version 1.0.0, bundle version 44. Real camera capture/permission interaction still requires user confirmation on the phone; automated checks use a fake camera.
+
+Recovery and evidence
+Source snapshot: /private/tmp/heiro-before-build44/.
+Previous signed app: /private/tmp/heiro-build43-before-camera.app.
+Logs: /private/tmp/heiro44-camera-tests.log, /private/tmp/heiro44-all-tests.log, /private/tmp/heiro44-final-focused-tests.log, /private/tmp/heiro44-analyze.log, /private/tmp/heiro44-build.log.
+Device evidence: /private/tmp/heiro44-install.json, /private/tmp/heiro44-installed-app.json, /private/tmp/heiro44-launch.json.
+Next phone check: start a new memory, choose Take photo, grant camera permission, review the captured photo and optionally remove/discard it. No purchase or permanent memory save is needed for this check.

@@ -118,9 +118,10 @@ void main() {
         await tester.tap(find.text('More media'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
-        await tester.tap(find.text('Photos'));
+        await tester.tap(find.widgetWithText(ListTile, 'Take photo'));
         await tester.pumpAndSettle();
-        expect(picker.singleOptions, isNotNull);
+        expect(picker.source, ImageSource.camera);
+        expect(picker.captures, 1);
         expect(find.text('20 / 20 selected'), findsOneWidget);
         await tester.ensureVisible(find.text('More media'));
         await tester.tap(find.text('More media'));
@@ -132,11 +133,69 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('Photos'), findsNothing);
+        await tester.ensureVisible(
+          find.widgetWithText(OutlinedButton, 'Take photo'),
+        );
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Take photo'));
+        await tester.pumpAndSettle();
+        expect(picker.captures, 1);
         await tester.ensureVisible(find.byTooltip('Remove media 1'));
         await tester.tap(find.byTooltip('Remove media 1'));
         await tester.pumpAndSettle();
         expect(find.text('19 / 20 selected'), findsOneWidget);
+        await tester.ensureVisible(
+          find.widgetWithText(OutlinedButton, 'Take photo'),
+        );
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Take photo'));
+        await tester.pumpAndSettle();
+        expect(picker.captures, 2);
+        expect(find.text('20 / 20 selected'), findsOneWidget);
         expect(writes, 0);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      } finally {
+        ImagePickerPlatform.instance = previous;
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets(
+    'camera entry previews locally; cancelling another shot preserves the draft',
+    (tester) async {
+      final previous = ImagePickerPlatform.instance;
+      final picker = FakePhotoPicker();
+      picker.files.add(XFile.fromData(bytes, path: 'camera.png'));
+      ImagePickerPlatform.instance = picker;
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        final before = writes;
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: CreateMemoryScreen(vaultId: 'vault', initialMode: 'camera'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(picker.captures, 1);
+        expect(find.text('1 / 20 selected'), findsOneWidget);
+        picker.files.clear();
+        await tester.ensureVisible(
+          find.widgetWithText(OutlinedButton, 'Take photo'),
+        );
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Take photo'));
+        await tester.pumpAndSettle();
+        expect(find.text('1 / 20 selected'), findsOneWidget);
+        expect(writes, before);
+        picker.captureError = PlatformException(code: 'camera_access_denied');
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Take photo'));
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('Allow camera access for Heiro'),
+          findsOneWidget,
+        );
+        expect(find.text('1 / 20 selected'), findsOneWidget);
+        expect(writes, before);
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);

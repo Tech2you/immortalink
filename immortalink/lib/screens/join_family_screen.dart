@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/onboarding_invite_state.dart';
+import '../services/activity_tracking_service.dart';
 import '../services/push_notification_service.dart';
 import '../utils/family_membership_limit.dart';
 import 'relationship_tree_screen.dart';
@@ -152,6 +153,9 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
       }
 
       // The invite RPC atomically sets membership, role and relationship slot.
+      ActivityTrackingService.current?.record(
+        AppActivity.inviteAccepted, subject: familyId, expectedUserId: user.id,
+      );
       await clearPendingFamilyInviteCode(expectedCode: code);
       unawaited(PushNotificationService.notifyFamilyJoined(familyId));
 

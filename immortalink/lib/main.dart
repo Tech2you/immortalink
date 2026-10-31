@@ -17,6 +17,7 @@ import 'screens/vaults_screen.dart';
 import 'utils/family_invite_share.dart';
 import 'widgets/keyboard_dismiss_scope.dart';
 import 'widgets/startup_screen.dart';
+import 'widgets/activity_tracking_scope.dart';
 
 const _staySignedInPreferenceKey = 'auth_stay_signed_in';
 final _passwordRecoveryPending = ValueNotifier<bool>(false);
@@ -269,7 +270,11 @@ class _AuthGateState extends State<AuthGate> {
               );
             }
 
-            return VaultsScreen(key: ValueKey(session.user.id));
+            return ActivityTrackingScope(
+              key: ValueKey(session.user.id),
+              userId: session.user.id,
+              child: const VaultsScreen(),
+            );
           },
         );
       },

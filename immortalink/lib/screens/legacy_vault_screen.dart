@@ -896,7 +896,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await pickVaultMedia(context);
+      final picked = await pickVaultMedia(context, allowCamera: true);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
@@ -908,6 +908,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
         fileName: file.name,
         contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
+      if (!mounted || _supabase.auth.currentUser?.id != userId) return;
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path =
           '$userId/${widget.familyId}/legacy/${widget.legacyMemberId}/gallery/$ts.${image.extension}';
@@ -1368,8 +1369,9 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
             voices: List.unmodifiable(pendingVoices),
           );
 
-          Future<void> pickPendingPhotos() async {
+          Future<void> pickPendingPhotos({bool camera = false}) async {
             if (pickingPhotos) return;
+            final userId = _supabase.auth.currentUser?.id;
             setDialogState(() => pickingPhotos = true);
             try {
               final available =
@@ -1380,17 +1382,21 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 );
                 return;
               }
-              final picked = await pickVaultMedia(
-                context,
-                allowMultiple: true,
-                maxFiles: available,
-                remainingBytes:
-                    MediaUploadPolicy.pendingMediaMaxBytes -
-                    pendingPhotos.fold<int>(
-                      0,
-                      (sum, p) => sum + p.bytes.length,
-                    ),
-              );
+              final remainingBytes =
+                  MediaUploadPolicy.pendingMediaMaxBytes -
+                  pendingPhotos.fold<int>(0, (sum, p) => sum + p.bytes.length);
+              FilePickerResult? picked;
+              if (camera && memoryId == null) {
+                picked = await takeVaultPhoto(remainingBytes: remainingBytes);
+              } else {
+                picked = await pickVaultMedia(
+                  context,
+                  allowMultiple: true,
+                  allowCamera: memoryId == null,
+                  maxFiles: available,
+                  remainingBytes: remainingBytes,
+                );
+              }
               if (picked == null) return;
 
               final selected = <_LegacyPendingPhoto>[];
@@ -1418,7 +1424,10 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 }
               }
 
-              if (!dialogContext.mounted) return;
+              if (!dialogContext.mounted ||
+                  userId != _supabase.auth.currentUser?.id) {
+                return;
+              }
               setDialogState(() => pendingPhotos.addAll(selected));
               if (rejectedMessage != null) {
                 _toast(rejectedMessage);
@@ -1601,6 +1610,14 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                                 : 'More media',
                           ),
                         ),
+                        if (memoryId == null && supportsVaultCamera)
+                          OutlinedButton.icon(
+                            onPressed: pickingPhotos
+                                ? null
+                                : () => pickPendingPhotos(camera: true),
+                            icon: const Icon(Icons.photo_camera_outlined),
+                            label: const Text('Take photo'),
+                          ),
                         OutlinedButton.icon(
                           onPressed: _recorder.isSupported
                               ? recordPendingVoice

@@ -2,7 +2,7 @@
 
 Effective date: 13 October 2026
 
-Last updated: 26 October 2026
+Last updated: 30 October 2026
 
 Heiro is a private family memory app that helps people build family trees, save photos and voice memories, invite relatives, and use AI-assisted tools to explore family stories. This Privacy Policy explains what information we collect, why we use it, who may receive it, and the choices you have.
 
@@ -21,6 +21,7 @@ We collect information that you provide, information created through your use of
 - Family memory content you choose to add, including written memories, answers, captions, dates, photos, audio recordings, voice notes, transcripts, vault details, and related metadata.
 - AI interaction data, such as prompts, selected memory context, generated responses, transcripts, embeddings, usage counters, and technical logs needed to provide and monitor AI features.
 - Media and file information, such as file names, file type, file size, upload path, storage bucket, timestamps, and access permissions.
+- Optional usage statistics: your account ID, the UTC days you use Heiro, and the first dates we observe a successful memory save or accepted invitation. These statistics exclude memory text, photos, recordings, transcripts and invite codes. We do not record your screen or use these statistics for advertising.
 - Device and technical information, such as app version, platform, session state, error logs, security events, usage limits, and diagnostic information.
 - Subscription, entitlement, and beta access information, such as whether a family has free, beta, or paid access. Apple processes App Store subscription payments. We do not receive your full payment card details.
 - Safety information, including reports you submit, their reasons and details, member blocks, review decisions and records needed to prevent abuse.
@@ -40,6 +41,7 @@ We use information to:
 - Enforce free, beta, and paid usage limits, including storage, photo, voice note, memory, invite, and AI usage limits.
 - Process subscriptions and restore access to paid features when App Store billing is enabled.
 - Protect the app, prevent abuse, investigate errors, detect misuse, improve reliability, and maintain service security.
+- Understand active use and successful first actions, improve the app, and plan service capacity using limited usage statistics.
 - Comply with legal obligations, enforce our terms, and respond to lawful requests.
 
 ## Family Sharing And Invites
@@ -99,6 +101,8 @@ We use technical and organizational measures intended to protect information, in
 
 ## Retention And Deletion
 
+Daily usage-statistics records are kept for up to 90 days. First-observed action dates remain while your account exists. Account deletion removes these account-linked records; aggregate totals that do not identify you may remain.
+
 We keep information for as long as needed to provide Heiro, maintain security, comply with legal obligations, resolve disputes, prevent abuse, and maintain backups.
 
 You can delete certain content inside the app where deletion tools are provided. You can also request account deletion from inside the app. When an account or content is deleted, we will delete or de-identify the relevant information where reasonably possible, subject to backup retention, legal requirements, fraud prevention, dispute resolution, and technical constraints.
@@ -108,6 +112,8 @@ Account deletion removes your personal vault and its memories and media. Contrib
 Backups and logs may persist for a limited period before deletion. Some information may remain visible to other family members if they created, copied, downloaded, or independently control that content.
 
 ## Your Privacy Choices And Rights
+
+You can stop optional usage-statistics collection for your account on a device in Settings > Usage statistics. This does not restrict app features. It stops future collection on that device; you can contact us to request deletion of existing records.
 
 Depending on where you live, you may have rights to access, correct, delete, export, object to, restrict, or withdraw consent for certain personal information. You can contact us at linebreakers@outlook.com to make a privacy request.
 

@@ -9,9 +9,8 @@ const String _defaultEverRootFamilyUpgradeMessage =
     'have a total headcount limit; available storage and invite safeguards still apply.';
 
 const String _storageLimitUpgradeMessage =
-    'This family has reached its storage allowance. Check the family plan '
-    'with your sponsor, or free up space by deleting older media. '
-    'Any member can sponsor a family without an active plan.';
+    'This family has reached its storage allowance. Any member can add a '
+    'storage contribution, or you can free up space. Existing memories remain available.';
 
 bool isEverRootFamilyUpgradeError(Object error) {
   final text = error.toString();

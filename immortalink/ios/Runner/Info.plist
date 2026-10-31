@@ -39,6 +39,8 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Heiro uses your microphone when you choose to record a voice memory.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Heiro uses your camera when you choose to take a photo for a memory, highlight or profile.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Heiro uses your photo library when you choose photos for memories and highlights.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

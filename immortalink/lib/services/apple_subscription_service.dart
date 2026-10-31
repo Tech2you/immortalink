@@ -12,7 +12,29 @@ import 'apple_subscription_config.dart';
 
 enum _PurchaseRecovery { none, recovered, expiredHistory, failed }
 
-enum _PurchaseValidation { applied, expiredHistory, failed }
+enum _PurchaseValidation { applied, expiredHistory, previousFamily, failed }
+
+class ContributionMovePreview {
+  final String confirmationId;
+  final DateTime paidUntil;
+  final int storageBytes, aiRemaining, transcriptionSecondsRemaining;
+  final bool previousFamilyExists;
+  ContributionMovePreview(Map data)
+    : confirmationId = data['confirmation_id'] as String,
+      paidUntil = DateTime.parse(data['paid_until'] as String),
+      storageBytes = (data['storage_bytes'] as num).toInt(),
+      aiRemaining = (data['ai_remaining'] as num).toInt(),
+      transcriptionSecondsRemaining =
+          (data['transcription_seconds_remaining'] as num).toInt(),
+      previousFamilyExists = data['previous_family_exists'] as bool {
+    if (confirmationId.isEmpty ||
+        storageBytes <= 0 ||
+        aiRemaining < 0 ||
+        transcriptionSecondsRemaining < 0) {
+      throw const FormatException('Invalid move details');
+    }
+  }
+}
 
 class AppleSubscriptionService extends ChangeNotifier {
   AppleSubscriptionService({
@@ -39,6 +61,15 @@ class AppleSubscriptionService extends ChangeNotifier {
   bool _needsRecovery = false;
   bool _operationBusy = false;
   final Set<String> _completedTransactions = {};
+  final Set<String> _finishedExpiredTransactions = {};
+  final Set<String> _finishedPreviousTransactions = {};
+  // Short-lived exact-proof deduplication only. Explicit Buy/Restore clears it;
+  // different receipts, accounts, families and live checkouts always reverify.
+  final Map<String, ({String proof, DateTime at, _PurchaseValidation result})>
+  _recentHistory = {};
+  // Only deduplicate history within one explicit buy/restore operation. A later
+  // attempt must recheck Apple rather than reusing stale expiry permission.
+  final Set<String> _checkedExpiredHistory = {};
   final Map<String, Future<_PurchaseValidation>> _verifications = {};
   final Map<String, ({String diagnostic, bool sandbox})> _bindingRejections =
       {};
@@ -123,17 +154,24 @@ class AppleSubscriptionService extends ChangeNotifier {
     );
     var recovered = false;
     var expiredHistory = false;
+    final seen = <String>{};
     for (final purchase in purchases) {
       if (!AppleSubscriptionConfig.activeProductIds.contains(
         purchase.productID,
       )) {
         continue;
       }
+      if (purchase.purchaseID != null &&
+          !seen.add('${purchase.productID}:${purchase.purchaseID}')) {
+        continue;
+      }
       final result = await _validateAndComplete(purchase);
       if (result == _PurchaseValidation.failed) {
         return _PurchaseRecovery.failed;
       }
-      recovered |= result == _PurchaseValidation.applied;
+      recovered |=
+          result == _PurchaseValidation.applied ||
+          result == _PurchaseValidation.previousFamily;
       expiredHistory |= result == _PurchaseValidation.expiredHistory;
     }
     return recovered
@@ -182,6 +220,53 @@ class AppleSubscriptionService extends ChangeNotifier {
   String? _validationDiagnostic;
   bool _sponsorshipLoaded = false;
   bool _familySponsored = false;
+  bool _bucketModel = false;
+  bool _billingRefreshFailed = false;
+  String? _ownPlan;
+  DateTime? _ownPaidUntil;
+  List<Map<String, dynamic>> _contributors = [];
+  int _contributorCount = 0;
+  num? _includedAccessBytes;
+  DateTime? _includedAccessUntil;
+  num? get includedAccessBytes => bucketModel ? _includedAccessBytes : null;
+  DateTime? get includedAccessUntil =>
+      bucketModel ? _includedAccessUntil : null;
+
+  bool get bucketModel =>
+      _bucketModel &&
+      _billingUserId != null &&
+      _billingUserId == _supabase.auth.currentUser?.id;
+  bool get billingStatusLoaded =>
+      _sponsorshipLoaded &&
+      _billingUserId != null &&
+      _billingUserId == _supabase.auth.currentUser?.id;
+  bool get billingRefreshFailed => _billingRefreshFailed;
+  String? get ownPlan => bucketModel ? _ownPlan : null;
+  num? get ownStorageBytes {
+    for (final person in contributors) {
+      if (person['is_you'] == true && person['storage_bytes'] is num) {
+        return person['storage_bytes'] as num;
+      }
+    }
+    return null;
+  }
+
+  DateTime? get ownPaidUntil => bucketModel ? _ownPaidUntil : null;
+  List<Map<String, dynamic>> get contributors =>
+      bucketModel ? List.unmodifiable(_contributors) : const [];
+  int get contributorCount => bucketModel ? _contributorCount : 0;
+  bool _moveAvailable = false;
+  String? _moveError;
+  String? _moveUser, _moveFamily;
+  ContributionMovePreview? _movePreview;
+  bool get canMoveContribution =>
+      AppleSubscriptionConfig.purchaseFlowEnabled &&
+      _moveAvailable &&
+      _sponsorshipLoaded &&
+      _billingUserId != null &&
+      _billingUserId == _supabase.auth.currentUser?.id;
+  String? get moveError =>
+      _billingUserId == _supabase.auth.currentUser?.id ? _moveError : null;
   bool _isSponsor = false;
   String? _sponsorName;
   DateTime? _paidUntil;
@@ -191,10 +276,12 @@ class AppleSubscriptionService extends ChangeNotifier {
   String? _billingUserId;
 
   bool get canSponsor =>
+      !canMoveContribution &&
       !_needsRecovery &&
       _sponsorshipLoaded &&
+      _billingUserId != null &&
       _billingUserId == _supabase.auth.currentUser?.id &&
-      (!_familySponsored || _isSponsor);
+      (_bucketModel || !_familySponsored || _isSponsor);
   String? get sponsorName => hasActiveSponsor ? _sponsorName : null;
   bool get hasActiveSponsor =>
       _sponsorshipLoaded &&
@@ -209,7 +296,27 @@ class AppleSubscriptionService extends ChangeNotifier {
       _billingUserId == _supabase.auth.currentUser?.id ? _familyUsage : null;
   bool get billingRefreshing => _billingRefreshing;
 
-  Future<void> refreshSponsorship() async {
+  Future<Map<String, dynamic>?> _readFamilyUsage(String familyId) async {
+    try {
+      final data = await _supabase
+          .rpc(
+            'get_family_entitlements_and_usage',
+            params: {'p_family_id': familyId},
+          )
+          .timeout(const Duration(seconds: 12));
+      if (data is! Map ||
+          data['plan'] is! String ||
+          data['limits'] is! Map ||
+          data['usage'] is! Map) {
+        return null;
+      }
+      return Map<String, dynamic>.from(data);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> refreshSponsorship({bool includeUsage = true}) async {
     final familyId = _familyId;
     if (familyId == null || familyId.isEmpty) return;
     final userId = _supabase.auth.currentUser?.id;
@@ -217,9 +324,27 @@ class AppleSubscriptionService extends ChangeNotifier {
       _sponsorshipLoaded = false;
       _familyUsage = null;
       _familySponsored = false;
+      _bucketModel = false;
+      _moveAvailable = false;
+      _movePreview = null;
+      _moveError = null;
+      _ownPlan = null;
+      _ownPaidUntil = null;
+      _contributors = [];
+      _contributorCount = 0;
+      _includedAccessBytes = null;
+      _includedAccessUntil = null;
       _isSponsor = false;
       _paidUntil = null;
       _billingUserId = userId;
+      _billingRefreshFailed = false;
+    }
+    if (userId == null) {
+      ++_billingRefresh;
+      _sponsorshipLoaded = false;
+      _billingRefreshing = false;
+      notifyListeners();
+      return;
     }
     final request = ++_billingRefresh;
     bool current() =>
@@ -228,7 +353,10 @@ class AppleSubscriptionService extends ChangeNotifier {
         familyId == _familyId &&
         userId == _supabase.auth.currentUser?.id;
     _billingRefreshing = true;
+    var refreshFailed = includeUsage ? false : _billingRefreshFailed;
     notifyListeners();
+    // These reads are independent; usage must not delay the ownership check.
+    final usageRequest = includeUsage ? _readFamilyUsage(familyId) : null;
     try {
       final data = await _supabase
           .rpc('get_family_sponsorship', params: {'p_family_id': familyId})
@@ -239,6 +367,21 @@ class AppleSubscriptionService extends ChangeNotifier {
           data['is_sponsor'] is! bool) {
         throw const FormatException('Invalid sponsorship response');
       }
+      _includedAccessBytes = data['included_access_bytes'] as num?;
+      _includedAccessUntil = DateTime.tryParse(
+        data['included_access_until']?.toString() ?? '',
+      );
+      _bucketModel = data['bucket_model'] == true;
+      _moveAvailable = data['can_move_contribution'] == true;
+      _ownPlan = data['own_plan']?.toString();
+      _ownPaidUntil = DateTime.tryParse(
+        data['own_paid_until']?.toString() ?? '',
+      );
+      _contributors = ((data['contributors'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      _contributorCount = (data['contributor_count'] as num?)?.toInt() ?? 0;
       _familySponsored = data['active'] == true;
       _isSponsor = data['is_sponsor'] == true;
       _sponsorName = data['sponsor_name']?.toString();
@@ -247,27 +390,21 @@ class AppleSubscriptionService extends ChangeNotifier {
     } catch (_) {
       if (!current()) return;
       _sponsorshipLoaded = false;
+      refreshFailed = true;
     }
     try {
-      final usage = await _supabase
-          .rpc(
-            'get_family_entitlements_and_usage',
-            params: {'p_family_id': familyId},
-          )
-          .timeout(const Duration(seconds: 12));
+      if (usageRequest == null) return;
+      final usage = await usageRequest;
       if (!current()) return;
-      if (usage is! Map ||
-          usage['plan'] is! String ||
-          usage['limits'] is! Map ||
-          usage['usage'] is! Map) {
-        throw const FormatException('Invalid family usage response');
+      if (usage != null) {
+        _familyUsage = usage;
+      } else {
+        // Keep the last known layout and usage, with a visible stale-data notice.
+        refreshFailed = true;
       }
-      _familyUsage = Map<String, dynamic>.from(usage);
-    } catch (_) {
-      if (!current()) return;
-      _familyUsage = null;
     } finally {
       if (current()) {
+        _billingRefreshFailed = refreshFailed;
         _billingRefreshing = false;
         notifyListeners();
       }
@@ -305,20 +442,34 @@ class AppleSubscriptionService extends ChangeNotifier {
       _familyUsage = null;
       _paidUntil = null;
       _familySponsored = false;
+      _bucketModel = false;
+      _moveAvailable = false;
+      _movePreview = null;
+      _moveError = null;
+      _ownPlan = null;
+      _ownPaidUntil = null;
+      _contributors = [];
+      _contributorCount = 0;
+      _includedAccessBytes = null;
+      _includedAccessUntil = null;
       _isSponsor = false;
     }
     _familyId = familyId.trim();
-    await refreshSponsorship();
+    final billing = refreshSponsorship();
     if (!AppleSubscriptionConfig.purchaseFlowEnabled ||
         AppleSubscriptionConfig.activeProductIds.isEmpty) {
+      await billing;
       _message = 'Purchases are not enabled for this build yet.';
       notifyListeners();
       return;
     }
 
-    if (_initialized) return;
+    if (_initialized) {
+      await billing;
+      return;
+    }
     _initialized = true;
-    await refreshProducts();
+    await Future.wait([billing, refreshProducts()]);
   }
 
   Future<void> refreshProducts() async {
@@ -344,13 +495,9 @@ class AppleSubscriptionService extends ChangeNotifier {
         return;
       }
 
-      try {
-        _storefrontCountryCode = await _iap.countryCode().timeout(
-          const Duration(seconds: 12),
-        );
-      } catch (_) {
-        _storefrontCountryCode = null;
-      }
+      // Localized prices come from ProductDetails. A slow country-code lookup
+      // is diagnostic only and must not hold up price buttons or checkout.
+      unawaited(_refreshCountryCode());
 
       _purchaseSubscription ??= _iap.purchaseStream.listen(
         (purchases) {
@@ -399,6 +546,18 @@ class AppleSubscriptionService extends ChangeNotifier {
     }
   }
 
+  int _countryRequest = 0;
+  Future<void> _refreshCountryCode() async {
+    final request = ++_countryRequest;
+    String? country;
+    try {
+      country = await _iap.countryCode().timeout(const Duration(seconds: 12));
+    } catch (_) {}
+    if (_disposed || request != _countryRequest) return;
+    _storefrontCountryCode = country;
+    notifyListeners();
+  }
+
   Future<void> buy(String productId) async {
     if (purchasePending || _loading || _needsRecovery || _disposed) return;
     final product = _productsById[productId];
@@ -413,16 +572,23 @@ class AppleSubscriptionService extends ChangeNotifier {
 
     _purchasePending = true;
     _operationBusy = true;
+    _recentHistory.clear();
     _message = null;
     _error = null;
     _validationDiagnostic = null;
     _sandboxAccountMismatch = false;
     _bindingRejections.clear();
+    _checkedExpiredHistory.clear();
     notifyListeners();
 
     var checkoutInvoked = false;
     try {
-      await refreshSponsorship();
+      await refreshSponsorship(includeUsage: false);
+      if (bucketModel && canManageFamilyPlan) {
+        _message =
+            'Use Manage your contribution to change your existing Apple subscription.';
+        return;
+      }
       if (!canSponsor) {
         _message = null;
         _error = hasActiveSponsor
@@ -449,9 +615,14 @@ class AppleSubscriptionService extends ChangeNotifier {
         return;
       }
       if (previous != null &&
-          await _validateAndComplete(previous, historyOnly: true) ==
-              _PurchaseValidation.failed) {
-        return;
+          !_checkedExpiredHistory.contains(
+            '$userId:$familyId:${previous.purchaseID}',
+          )) {
+        final result = await _validateAndComplete(previous, historyOnly: true);
+        if (result == _PurchaseValidation.failed ||
+            result == _PurchaseValidation.previousFamily) {
+          return;
+        }
       }
       if (_disposed ||
           _supabase.auth.currentUser?.id != userId ||
@@ -462,7 +633,12 @@ class AppleSubscriptionService extends ChangeNotifier {
       _purchasePending = true;
       _message = null;
       final reservation = await _supabase
-          .rpc('begin_family_sponsorship', params: {'p_family_id': familyId})
+          .rpc(
+            bucketModel
+                ? 'begin_family_storage_contribution'
+                : 'begin_family_sponsorship',
+            params: {'p_family_id': familyId},
+          )
           .timeout(const Duration(seconds: 12));
       if (reservation is Map && reservation['reservation_id'] is String) {
         _reservationId = reservation['reservation_id'] as String;
@@ -485,9 +661,12 @@ class AppleSubscriptionService extends ChangeNotifier {
         applicationUserName: userId,
       );
       _checkoutProductId = productId;
+      _message = 'Opening Apple checkout...';
+      notifyListeners();
       checkoutInvoked = true;
       final started = await _iap.buyNonConsumable(purchaseParam: purchaseParam);
       if (!started) {
+        _checkoutProductId = null;
         await _releaseReservation();
         _purchasePending = false;
         _error = 'The App Store did not start the purchase.';
@@ -502,6 +681,7 @@ class AppleSubscriptionService extends ChangeNotifier {
       // An unknown bridge failure may follow an Apple charge. Keep its hold
       // until recovery or expiry; only known unstarted attempts are released.
       if (!checkoutInvoked || duplicate) {
+        _checkoutProductId = null;
         await _releaseReservation();
       } else {
         _needsRecovery = true;
@@ -514,8 +694,10 @@ class AppleSubscriptionService extends ChangeNotifier {
           : 'APPLE_CHECKOUT_NOT_STARTED';
       _error = duplicate
           ? 'An earlier Apple purchase still needs confirmation. Restore purchases before buying another plan.'
+          : code == 'APP_UPDATE_REQUIRED'
+          ? 'Please update Heiro before starting a new subscription.'
           : code == 'FAMILY_ALREADY_SPONSORED'
-          ? 'This family already has a sponsor. Its shared plan is available to all members.'
+          ? 'You already have a contribution. Manage your current Apple subscription to change it.'
           : code == 'SPONSOR_PURCHASE_IN_PROGRESS'
           ? 'An earlier family checkout is awaiting confirmation. Return to the account that started it and restore purchases. Otherwise the checkout hold expires within 15 minutes.'
           : code == 'SPONSOR_ALREADY_SUPPORTS_FAMILY'
@@ -530,6 +712,7 @@ class AppleSubscriptionService extends ChangeNotifier {
       if (_disposed) return;
       notifyListeners();
     } finally {
+      _checkedExpiredHistory.clear();
       _operationBusy = false;
       if (!checkoutInvoked) _purchasePending = false;
       if (!_disposed) notifyListeners();
@@ -546,6 +729,7 @@ class AppleSubscriptionService extends ChangeNotifier {
 
     _purchasePending = true;
     _operationBusy = true;
+    _recentHistory.clear();
     _message = null;
     _error = null;
     _validationDiagnostic = null;
@@ -553,6 +737,7 @@ class AppleSubscriptionService extends ChangeNotifier {
     // An explicit retry must recheck Apple after an account change or refund.
     _bindingRejections.clear();
     _completedTransactions.clear();
+    _checkedExpiredHistory.clear();
     notifyListeners();
     final attempt = ++_restoreAttempt;
     final userId = _supabase.auth.currentUser?.id;
@@ -609,6 +794,7 @@ class AppleSubscriptionService extends ChangeNotifier {
       if (_disposed) return;
       notifyListeners();
     } finally {
+      _checkedExpiredHistory.clear();
       _restoreUpdatesReceived = null;
       _operationBusy = false;
       _purchasePending = false;
@@ -617,6 +803,135 @@ class AppleSubscriptionService extends ChangeNotifier {
         await refreshSponsorship();
         await refreshProducts();
       }
+    }
+  }
+
+  Future<ContributionMovePreview?> previewContributionMove() async {
+    if (!canMoveContribution || _operationBusy || _purchasePending) return null;
+    _movePreview = null;
+    final user = _supabase.auth.currentUser?.id, family = _familyId;
+    final data = await _requestContributionMove('preview_move');
+    if (data == null ||
+        user != _supabase.auth.currentUser?.id ||
+        family != _familyId) {
+      return null;
+    }
+    try {
+      final preview = ContributionMovePreview(data);
+      _movePreview = preview;
+      _moveUser = _supabase.auth.currentUser?.id;
+      _moveFamily = _familyId;
+      return preview;
+    } catch (_) {
+      _moveError = 'Could not read the move details. Please try again.';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> confirmContributionMove(ContributionMovePreview preview) async {
+    if (!identical(preview, _movePreview) ||
+        _moveUser != _supabase.auth.currentUser?.id ||
+        _moveFamily != _familyId ||
+        _operationBusy ||
+        _purchasePending) {
+      return false;
+    }
+    final data = await _requestContributionMove(
+      'confirm_move',
+      confirmationId: preview.confirmationId,
+    );
+    if (data == null ||
+        data['moved'] != true ||
+        _moveUser != _supabase.auth.currentUser?.id ||
+        _moveFamily != _familyId) {
+      return false;
+    }
+    _movePreview = null;
+    _needsRecovery = false;
+    _sandboxAccountMismatch = false;
+    _bindingRejections.clear();
+    _completedTransactions.clear();
+    _error = null;
+    _validationDiagnostic = null;
+    _moveError = null;
+    _moveAvailable = false;
+    _message =
+        'Your contribution now supports this family. No new payment was made.';
+    notifyListeners();
+    await refreshSponsorship();
+    return true;
+  }
+
+  Future<Map?> _requestContributionMove(
+    String purpose, {
+    String? confirmationId,
+  }) async {
+    final user = _supabase.auth.currentUser?.id, family = _familyId;
+    if (user == null || family == null) return null;
+    bool current() =>
+        !_disposed &&
+        user == _supabase.auth.currentUser?.id &&
+        family == _familyId;
+    _operationBusy = true;
+    _recentHistory.clear();
+    _purchasePending = true;
+    _moveError = null;
+    notifyListeners();
+    try {
+      await _updateQueue;
+      if (!current()) return null;
+      final response = await _supabase.functions
+          .invoke(
+            'validate_apple_subscription',
+            body: {
+              'purpose': purpose,
+              'family_id': family,
+              if (confirmationId != null) 'confirmation_id': confirmationId,
+            },
+          )
+          .timeout(const Duration(seconds: 40));
+      await _updateQueue;
+      if (!current()) return null;
+      if (response.status < 200 || response.status >= 300) {
+        throw FunctionException(
+          status: response.status,
+          details: response.data,
+        );
+      }
+      final body = response.data;
+      if (body is! Map ||
+          body['ok'] != true ||
+          body['move'] is! Map ||
+          (purpose == 'confirm_move' && body['move']['moved'] != true)) {
+        throw const FormatException('Invalid move response');
+      }
+      return body['move'] as Map;
+    } catch (e) {
+      if (!current()) return null;
+      final details = e is FunctionException ? e.details : null;
+      final code = details is Map ? details['code'] : null;
+      _moveError = switch (code) {
+        'APPLE_MOVE_RATE_LIMIT' =>
+          'Please wait a minute before checking the move again.',
+        'APPLE_MOVE_STALE' =>
+          'The plan or its usage changed. Check the move details again before confirming.',
+        'APPLE_SUBSCRIPTION_INACTIVE' =>
+          'Apple has not confirmed an active paid contribution. Check its status or try Restore purchases.',
+        'APPLE_MOVE_UNAVAILABLE' || 'APPLE_PURCHASER_MISMATCH' =>
+          'This contribution could not be moved securely. Use the original Heiro account that paid, or contact support.',
+        'FAMILY_MEMBERSHIP_REQUIRED' =>
+          'Join this family before moving your contribution.',
+        'SPONSOR_PURCHASE_IN_PROGRESS' =>
+          'Finish or restore your earlier purchase before moving a contribution.',
+        _ =>
+          'Could not confirm the move. Check your connection and try again. You will not be charged again.',
+      };
+      return null;
+    } finally {
+      _operationBusy = false;
+      _purchasePending = false;
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -713,14 +1028,41 @@ class AppleSubscriptionService extends ChangeNotifier {
     PurchaseDetails purchase, {
     bool historyOnly = false,
   }) async {
-    final key =
-        '${_supabase.auth.currentUser?.id}:$_familyId:${purchase.purchaseID}:$historyOnly';
+    final proof =
+        '${purchase.productID}:${purchase.verificationData.source}:${purchase.verificationData.localVerificationData}:${purchase.verificationData.serverVerificationData}';
+    final cacheKey =
+        '${_supabase.auth.currentUser?.id}:$_familyId:${purchase.purchaseID}';
+    final cached = _recentHistory[cacheKey];
+    if (purchase.purchaseID != null &&
+        _checkoutProductId == null &&
+        !_needsRecovery &&
+        cached != null &&
+        cached.proof == proof &&
+        DateTime.now().difference(cached.at) < const Duration(seconds: 30)) {
+      _purchasePending = false;
+      notifyListeners();
+      return cached.result;
+    }
+    final key = '$cacheKey:$historyOnly:$proof';
     final existing = _verifications[key];
     if (existing != null) return existing;
     final validation = _performValidation(purchase, historyOnly: historyOnly);
     _verifications[key] = validation;
     try {
-      return await validation;
+      final result = await validation;
+      if (!_disposed &&
+          purchase.purchaseID != null &&
+          _checkoutProductId == null &&
+          (result == _PurchaseValidation.expiredHistory ||
+              result == _PurchaseValidation.previousFamily)) {
+        if (_recentHistory.length >= 32) _recentHistory.clear();
+        _recentHistory[cacheKey] = (
+          proof: proof,
+          at: DateTime.now(),
+          result: result,
+        );
+      }
+      return result;
     } finally {
       _verifications.remove(key);
     }
@@ -757,7 +1099,9 @@ class AppleSubscriptionService extends ChangeNotifier {
     final previousDiagnostic = _validationDiagnostic;
     try {
       _purchasePending = true;
-      _message = historyOnly
+      _message = _operationBusy && _checkoutProductId == null
+          ? 'Checking previous Apple purchases...'
+          : historyOnly
           ? 'Checking your previous Apple plan...'
           : 'Verifying your purchase...';
       _error = null;
@@ -768,6 +1112,7 @@ class AppleSubscriptionService extends ChangeNotifier {
             'validate_apple_subscription',
             body: {
               'family_id': familyId,
+              'supports_previous_contribution': true,
               'product_id': purchase.productID,
               'purchase_id': purchase.purchaseID,
               'verification_source': purchase.verificationData.source,
@@ -794,6 +1139,57 @@ class AppleSubscriptionService extends ChangeNotifier {
         _purchasePending = false;
         return _PurchaseValidation.failed;
       }
+      if (data is Map &&
+          data['ok'] == true &&
+          data['previous_contribution'] is Map) {
+        final previous = data['previous_contribution'] as Map;
+        final until = DateTime.tryParse(
+          previous['paid_until']?.toString() ?? '',
+        );
+        if (previous['code'] != 'APPLE_OWNED_PREVIOUS_CONTRIBUTION' ||
+            previous['status'] != 'active' ||
+            previous['product_id'] != purchase.productID ||
+            until == null) {
+          throw const FormatException('Invalid previous contribution response');
+        }
+        final resolved = previous['resolved_reservation_id'];
+        // A replay must never settle an unrelated checkout still in progress.
+        if (_checkoutProductId != null &&
+            !_operationBusy &&
+            (resolved == null || resolved != _reservationId)) {
+          _purchasePending = wasPending;
+          _message = previousMessage;
+          _error = previousError;
+          _validationDiagnostic = previousDiagnostic;
+          notifyListeners();
+          return _PurchaseValidation.previousFamily;
+        }
+        if (purchase.pendingCompletePurchase &&
+            !_finishedPreviousTransactions.contains(transactionKey)) {
+          await _iap.completePurchase(purchase);
+          if (_disposed ||
+              _supabase.auth.currentUser?.id != userId ||
+              _familyId != familyId) {
+            return _PurchaseValidation.failed;
+          }
+          _finishedPreviousTransactions.add(transactionKey);
+        }
+        if (resolved != null && resolved == _reservationId) {
+          _reservationId = null;
+          _checkoutProductId = null;
+        }
+        _needsRecovery = false;
+        _sandboxAccountMismatch = false;
+        _purchasePending = false;
+        _error = null;
+        _moveError = null;
+        _validationDiagnostic = null;
+        _message =
+            'Your purchase is restored to your previous family. Use Move my contribution to bring its remaining benefits here. No new payment is needed.';
+        notifyListeners();
+        await refreshSponsorship();
+        return _PurchaseValidation.previousFamily;
+      }
       if (data is Map && data['ok'] == true && data['history'] is Map) {
         final history = data['history'] as Map;
         if (history['code'] != 'APPLE_EXPIRED_HISTORY' ||
@@ -801,7 +1197,6 @@ class AppleSubscriptionService extends ChangeNotifier {
             history['product_id'] != purchase.productID) {
           throw const FormatException('Invalid history response');
         }
-        // Do not finish, cache, release checkout or grant an old owner's receipt.
         _bindingRejections.remove(transactionKey);
         // A replay is not confirmation of a different checkout still in flight.
         if (_checkoutProductId != null && !_operationBusy) {
@@ -812,6 +1207,23 @@ class AppleSubscriptionService extends ChangeNotifier {
           notifyListeners();
           return _PurchaseValidation.expiredHistory;
         }
+        // The server checked Apple's current group status: fully expired, no
+        // renewal, grace period or retry. Acknowledge this old queued receipt
+        // so StoreKit can open a NEW purchase. This grants/transfers no access
+        // and must not release a different checkout reservation.
+        if (purchase.pendingCompletePurchase &&
+            !_finishedExpiredTransactions.contains(transactionKey)) {
+          await _iap.completePurchase(purchase);
+          if (_disposed ||
+              _supabase.auth.currentUser?.id != userId ||
+              _familyId != familyId) {
+            return _PurchaseValidation.failed;
+          }
+          _finishedExpiredTransactions.add(transactionKey);
+        }
+        if (_operationBusy && purchase.purchaseID != null) {
+          _checkedExpiredHistory.add(transactionKey);
+        }
         _needsRecovery = false;
         _sandboxAccountMismatch = false;
         _purchasePending = false;
@@ -820,7 +1232,7 @@ class AppleSubscriptionService extends ChangeNotifier {
         _error = null;
         _validationDiagnostic = null;
         notifyListeners();
-        await refreshSponsorship();
+        if (!_operationBusy) await refreshSponsorship();
         return _PurchaseValidation.expiredHistory;
       }
       if (data is! Map || data['ok'] != true || data['entitlement'] is! Map) {
@@ -897,6 +1309,8 @@ class AppleSubscriptionService extends ChangeNotifier {
     _sandboxAccountMismatch = sandbox && _isAccountMismatch(diagnostic);
     _error = diagnostic.startsWith('APPLE_API_AUTHENTICATION_FAILED')
         ? 'Purchase verification is temporarily unavailable on our server. Your purchase has not been confirmed. Do not buy again; please try later or contact support.'
+        : diagnostic.startsWith('APPLE_PLAN_IN_PREVIOUS_FAMILY')
+        ? 'Your contribution still supports your previous family. You can move it here without paying again, or cancel renewal and wait until its paid period ends.'
         : _isAccountMismatch(diagnostic)
         ? 'This Apple purchase belongs to a different app account or family. '
               'Sign in to the original purchaser\'s app account to restore it. Switching app logins does not switch your Apple purchase account.'
@@ -904,7 +1318,7 @@ class AppleSubscriptionService extends ChangeNotifier {
         ? 'This Apple purchase could not be linked securely. Contact support before purchasing again.'
         : diagnostic.startsWith('FAMILY_ALREADY_SPONSORED') ||
               diagnostic.startsWith('APPLE_SPONSOR_REPLACED')
-        ? 'This family has another sponsor. Do not purchase again. Manage your subscription with Apple or contact support.'
+        ? 'You already have a subscription linked to your account. Do not purchase again. Manage it with Apple or contact support.'
         : diagnostic.startsWith('APPLE_SUBSCRIPTION_INACTIVE')
         ? 'This previous subscription has expired or been refunded. Check its status in Apple subscription settings.'
         : diagnostic.startsWith('APPLE_PREVIOUS_PLAN_NOT_ENDED')
@@ -927,6 +1341,7 @@ class AppleSubscriptionService extends ChangeNotifier {
     }
     final details = error.details;
     const purchaserCodes = {
+      'APPLE_PLAN_IN_PREVIOUS_FAMILY',
       'APPLE_PURCHASER_MISMATCH',
       'APPLE_PURCHASER_UNVERIFIED',
       'APPLE_PURCHASE_ALREADY_BOUND',

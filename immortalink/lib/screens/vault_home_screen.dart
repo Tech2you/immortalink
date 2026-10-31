@@ -391,6 +391,10 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
   Future<void> _handleUploadError(Object error, String fallback) async {
     if (!mounted) return;
+    if (error is MediaUploadException) {
+      _toast(error.message);
+      return;
+    }
     if (isEverRootFamilyUpgradeError(error)) {
       await showEverRootFamilyUpgradePrompt(
         context,
@@ -1067,7 +1071,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await pickVaultMedia(context);
+      final picked = await pickVaultMedia(context, allowCamera: true);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
@@ -1079,6 +1083,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         fileName: file.name,
         contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
+      if (!mounted || _client.auth.currentUser?.id != userId) return;
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_featuredPrefix(userId)}/$ts.${image.extension}';
 
@@ -1575,7 +1580,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       final userId = _client.auth.currentUser?.id;
       if (userId == null) throw Exception('Not signed in');
 
-      final picked = await pickVaultMedia(context);
+      final picked = await pickVaultMedia(context, allowCamera: true);
       if (picked == null || picked.files.isEmpty) return;
 
       final file = picked.files.first;
@@ -1587,6 +1592,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         fileName: file.name,
         contentType: _contentTypeFromExt(_extFromName(file.name)),
       );
+      if (!mounted || _client.auth.currentUser?.id != userId) return;
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${_aboutPrefix(userId)}/$ts.${image.extension}';
 
@@ -3318,6 +3324,12 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         children: [
           _composerAction(Icons.edit_note, 'Write a memory', 'text'),
           _composerAction(Icons.photo_library_outlined, 'Add media', 'photo'),
+          if (supportsVaultCamera)
+            _composerAction(
+              Icons.photo_camera_outlined,
+              'Take photo',
+              'camera',
+            ),
           _composerAction(Icons.mic_none, 'Record voice', 'voice'),
         ],
       ),

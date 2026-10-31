@@ -246,7 +246,7 @@ void main() {
 
   testWidgets('restore and refresh appear after the last plan', (tester) async {
     await show(tester);
-    final lastPlan = find.text('50 GB shared storage');
+    final lastPlan = find.text('+25 GB for your family');
     final restore = find.text('Restore purchases');
     final refresh = find.byTooltip('Refresh plan and prices');
     expect(refresh, findsOneWidget);

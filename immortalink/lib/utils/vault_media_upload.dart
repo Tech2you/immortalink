@@ -3,14 +3,63 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'image_upload_optimizer.dart';
 import 'media_upload_policy.dart';
 
+bool get supportsVaultCamera =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android);
+
+enum _VaultMediaSource { photos, videos, camera }
+
+Future<FilePickerResult?> takeVaultPhoto({
+  int remainingBytes = MediaUploadPolicy.pendingMediaMaxBytes,
+}) async {
+  if (!supportsVaultCamera) {
+    throw const MediaUploadException(
+      'The camera is not available here. Choose a photo instead.',
+    );
+  }
+  try {
+    final image = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      requestFullMetadata: false,
+    );
+    if (image == null) return null;
+    return await readVaultMediaFiles(
+      [
+        PlatformFile(
+          name: image.name,
+          size: await image.length(),
+          readStream: image.openRead(),
+        ),
+      ],
+      maxFiles: 1,
+      remainingBytes: remainingBytes,
+    );
+  } on PlatformException catch (error) {
+    final message = switch (error.code) {
+      'camera_access_denied' =>
+        'Allow camera access for Heiro in your phone Settings, or choose a photo instead.',
+      'camera_access_restricted' =>
+        'Camera access is restricted on this device. Choose a photo instead.',
+      'no_available_camera' || 'invalid_source' =>
+        'The camera is not available here. Choose a photo instead.',
+      'already_active' => 'The camera or photo picker is already open.',
+      _ => 'Could not take a photo. Try again or choose a photo instead.',
+    };
+    throw MediaUploadException(message);
+  }
+}
+
 Future<FilePickerResult?> pickVaultMedia(
   BuildContext context, {
   bool allowMultiple = false,
+  bool allowCamera = false,
   int maxFiles = MediaUploadPolicy.photoBatchMaxCount,
   int remainingBytes = MediaUploadPolicy.pendingMediaMaxBytes,
 }) async {
@@ -19,27 +68,44 @@ Future<FilePickerResult?> pickVaultMedia(
       'You can select up to 20 photos per batch.',
     );
   }
-  final type = await showModalBottomSheet<FileType>(
+  final source = await showModalBottomSheet<_VaultMediaSource>(
     context: context,
     builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.photo_library_outlined),
-            title: const Text('Photos'),
-            onTap: () => Navigator.pop(sheetContext, FileType.image),
-          ),
-          ListTile(
-            leading: const Icon(Icons.video_library_outlined),
-            title: const Text('Videos'),
-            onTap: () => Navigator.pop(sheetContext, FileType.video),
-          ),
-        ],
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Photos'),
+              onTap: () =>
+                  Navigator.pop(sheetContext, _VaultMediaSource.photos),
+            ),
+            if (allowCamera && supportsVaultCamera)
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Take photo'),
+                onTap: () =>
+                    Navigator.pop(sheetContext, _VaultMediaSource.camera),
+              ),
+            ListTile(
+              leading: const Icon(Icons.video_library_outlined),
+              title: const Text('Videos'),
+              onTap: () =>
+                  Navigator.pop(sheetContext, _VaultMediaSource.videos),
+            ),
+          ],
+        ),
       ),
     ),
   );
-  if (type == null) return null;
+  if (source == null || !context.mounted) return null;
+  if (source == _VaultMediaSource.camera) {
+    return takeVaultPhoto(remainingBytes: remainingBytes);
+  }
+  final type = source == _VaultMediaSource.photos
+      ? FileType.image
+      : FileType.video;
   final limit = allowMultiple && type == FileType.image ? maxFiles : 1;
   if (!kIsWeb &&
       defaultTargetPlatform == TargetPlatform.iOS &&

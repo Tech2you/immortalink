@@ -1,0 +1,35 @@
+Heiro Family storage first-open fix — build 43 — 31 October 2026
+
+Request
+Fix the incorrect "Join or create a family" page and repeated reopening/refreshing while preserving the now-working Apple restore and contribution-move flows. Local phone delivery only; no TestFlight upload or App Store draft change.
+
+Cause
+VaultsScreen._showSubscriptionSettings captured _activeFamilyId once. If the home screen was still loading its profile/membership/media, the new route received an empty ID and never recovered when that home-screen selection later arrived. Empty/unresolved state was rendered as confirmed missing membership.
+
+Change
+The subscription entry point now performs a small authenticated, read-only membership lookup independently of home/profile/media loading. A selected family is retained only if it is still a membership; otherwise the primary/first membership is used. Sign-out/account change and malformed responses are rejected, not treated as an empty family.
+
+FamilyPlanStatusContent shows the existing brand loading artwork while resolving membership, then initializes the existing billing service with the resolved family. One bounded automatic retry follows a brief failure. Persistent failure shows a retryable connection error; only a successful empty lookup shows the join/create message. Confirmed no-family state offers Check again. Resume/periodic refresh can retry unresolved membership. Disposed widgets and superseded lookups cannot initialize billing with old results.
+
+Scope protected
+No billing rules, purchase verification, StoreKit handlers, contribution moves, prices, storage allocations, family membership writes, media, relationship code, or live database changes. No purchases, restores or moves were initiated on the user's behalf. Existing unrelated working-tree changes were preserved.
+
+Validation
+- 13 new regression checks passed: pending first open; automatic retry; persistent errors; timeout; no-family recovery; stale/out-of-order lookups; leaving the page; account change; scoped authenticated read; existing move button visible after first membership load.
+- Full Flutter suite with the existing release purchase identifiers: 377 passed.
+- Default purchase configuration suite without identifiers: 3 passed.
+- Focused analyzer: no errors/warnings; 18 pre-existing style/deprecation informational messages outside this change.
+- git diff --check passed.
+- SHA-256 comparison to pre-change snapshot: apple_subscription_service.dart, ios/Runner/AppDelegate.swift, and validate_apple_subscription/index.ts unchanged.
+- Release build 1.0.0 (43), com.everroots.app built; strict deep signature verification passed. Existing purchase IDs and HEIRO_ACTIVITY_TEST_BUILD=true retained.
+
+Delivery status
+Initial installation attempt failed before completion with CoreDevice 4000 / connection reset. User subsequently confirmed reconnection with "ready". Build 43 was then installed in place without uninstalling Heiro. Independent device app inventory confirmed Heiro com.everroots.app version 1.0.0, bundle version 43, and the app launched successfully.
+Installation, independent readback and launch evidence: /private/tmp/heiro43-install.json, /private/tmp/heiro43-installed-app.json, /private/tmp/heiro43-launch.json.
+User confirmation of first-open Family storage behavior remains pending.
+
+Recovery and evidence
+Previous signed build retained at /private/tmp/heiro-build42-before-family-loading.app.
+Pre-change source snapshot and payment hashes: /private/tmp/heiro-before-build43/.
+Logs: /private/tmp/heiro43-loading-tests.log, /private/tmp/heiro43-all-tests.log, /private/tmp/heiro43-default-config-tests.log, /private/tmp/heiro43-analysis.log, /private/tmp/heiro43-build.log.
+Next: user opens Settings > Subscription without manual refresh and confirms the actual family storage page appears. No purchase or move is needed for this check.

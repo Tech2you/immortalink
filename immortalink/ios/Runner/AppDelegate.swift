@@ -24,8 +24,10 @@ import StoreKit
           }
           Task { @MainActor in
             var latest: (transaction: StoreKit.Transaction, signed: String)?
-            for await verification in StoreKit.Transaction.all {
-              guard case .verified(let transaction) = verification,
+            // Four catalog products, not every historical sandbox renewal.
+            for productId in Set(productIds) {
+              guard let verification = await StoreKit.Transaction.latest(for: productId),
+                    case .verified(let transaction) = verification,
                     productIds.contains(transaction.productID) else { continue }
               if latest == nil || transaction.purchaseDate > latest!.transaction.purchaseDate {
                 latest = (transaction, verification.jwsRepresentation)

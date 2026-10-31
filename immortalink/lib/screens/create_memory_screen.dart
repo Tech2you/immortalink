@@ -9,9 +9,11 @@ import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/indexing_service.dart';
+import '../services/activity_tracking_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/memory_media_batch.dart';
 import '../widgets/memory_media_upload_screen.dart';
@@ -83,6 +85,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (widget.initialMode == 'photo') _pickPhotos();
+      if (widget.initialMode == 'camera') _pickPhotos(camera: true);
       if (widget.initialMode == 'voice') _recordVoice();
     });
   }
@@ -126,7 +129,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
   String _imageMime(String extension) =>
       MediaUploadPolicy.contentTypeForExtension(extension);
 
-  Future<void> _pickPhotos() async {
+  Future<void> _pickPhotos({bool camera = false}) async {
     if (_pickingPhotos || _saving) return;
     final available = MediaUploadPolicy.photoBatchMaxCount - _photos.length;
     if (available <= 0) {
@@ -135,14 +138,22 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
     }
     setState(() => _pickingPhotos = true);
     try {
-      final result = await pickVaultMedia(
-        context,
-        allowMultiple: true,
-        maxFiles: available,
-        remainingBytes:
-            MediaUploadPolicy.pendingMediaMaxBytes -
-            _photos.fold<int>(0, (sum, p) => sum + p.bytes.length),
-      );
+      final userId = _client.auth.currentUser?.id;
+      final remainingBytes =
+          MediaUploadPolicy.pendingMediaMaxBytes -
+          _photos.fold<int>(0, (sum, p) => sum + p.bytes.length);
+      FilePickerResult? result;
+      if (camera) {
+        result = await takeVaultPhoto(remainingBytes: remainingBytes);
+      } else {
+        result = await pickVaultMedia(
+          context,
+          allowMultiple: true,
+          allowCamera: true,
+          maxFiles: available,
+          remainingBytes: remainingBytes,
+        );
+      }
       if (result == null) return;
 
       final selected = <_PendingPhoto>[];
@@ -170,7 +181,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
         }
       }
 
-      if (!mounted) return;
+      if (!mounted || userId != _client.auth.currentUser?.id) return;
       setState(() {
         _photos.addAll(selected);
       });
@@ -456,6 +467,12 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
       await _uploadPhotos(userId, memoryId);
       await _uploadVoice(userId, memoryId);
 
+      ActivityTrackingService.current?.record(
+        AppActivity.memorySaved,
+        subject: memoryId,
+        expectedUserId: userId,
+      );
+
       unawaited(
         IndexingService.indexMemory(
           vaultId: widget.vaultId,
@@ -719,6 +736,14 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
                     spacing: 10,
                     runSpacing: 10,
                     children: [
+                      if (supportsVaultCamera)
+                        OutlinedButton.icon(
+                          onPressed: _saving || _pickingPhotos
+                              ? null
+                              : () => _pickPhotos(camera: true),
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          label: const Text('Take photo'),
+                        ),
                       OutlinedButton.icon(
                         onPressed: _saving || _pickingPhotos
                             ? null

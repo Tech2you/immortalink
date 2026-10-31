@@ -9,6 +9,9 @@ import 'package:immortalink/utils/vault_media_upload.dart';
 class FakePhotoPicker extends ImagePickerPlatform {
   MultiImagePickerOptions? options;
   ImagePickerOptions? singleOptions;
+  ImageSource? source;
+  int captures = 0;
+  Object? captureError;
   final files = <XFile>[];
   @override
   Future<List<XFile>> getMultiImageWithOptions({
@@ -24,6 +27,11 @@ class FakePhotoPicker extends ImagePickerPlatform {
     ImagePickerOptions options = const ImagePickerOptions(),
   }) async {
     singleOptions = options;
+    this.source = source;
+    if (source == ImageSource.camera) {
+      captures++;
+      if (captureError != null) throw captureError!;
+    }
     return files.isEmpty ? null : files.first;
   }
 }

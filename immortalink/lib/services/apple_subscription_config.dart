@@ -44,16 +44,16 @@ class AppleSubscriptionConfig {
       title: 'Free Family',
       subtitle: 'Start the family tree and invite close relatives.',
       storageLabel: '500 MB shared storage',
-      included: 'Included for every family.',
+      included: '500 MB when your family has no paid contributions.',
     ),
     AppleSubscriptionTier(
       plan: 'everroot_family',
       title: 'Heiro Family',
-      subtitle: 'For families saving more photos, stories, and voice notes.',
-      storageLabel: '10 GB shared storage',
+      subtitle: 'Add room for your family’s everyday memories.',
+      storageLabel: '+5 GB for your family',
       included:
-          'Photos, voice notes, memories, AI replies, and transcription all '
-          'share this plan.',
+          'Adds 500 AI answers and 120 transcription minutes each month, '
+          'shared by your family.',
       monthlyProductId: everRootsFamilyMonthlyProductId,
       annualProductId: everRootsFamilyAnnualProductId,
       draftMonthlyProductId: draftFamilyMonthlyProductId,
@@ -62,9 +62,10 @@ class AppleSubscriptionConfig {
     AppleSubscriptionTier(
       plan: 'everroot_legacy',
       title: 'Heiro Legacy',
-      subtitle: 'For larger archives and heavier AI/transcription use.',
-      storageLabel: '50 GB shared storage',
-      included: 'More room for long-term family archives as your family grows.',
+      subtitle: 'Help preserve a growing family archive.',
+      storageLabel: '+25 GB for your family',
+      included:
+          'Adds 1,500 AI answers and 400 transcription minutes each month, shared by your family.',
       monthlyProductId: everRootsLegacyMonthlyProductId,
       annualProductId: everRootsLegacyAnnualProductId,
       draftMonthlyProductId: draftLegacyMonthlyProductId,

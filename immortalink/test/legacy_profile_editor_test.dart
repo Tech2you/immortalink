@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,12 +12,15 @@ import 'package:http/testing.dart';
 import 'package:immortalink/screens/legacy_vault_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'multi_photo_picker_test.dart' show FakePhotoPicker;
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   late Map<String, dynamic> row;
   Map<String, dynamic>? saved;
   var loads = 0;
+  List<Map<String, dynamic>> memories = [];
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -33,6 +37,14 @@ void main() {
       url: 'http://localhost:54321',
       anonKey: 'test-key',
       httpClient: MockClient((request) async {
+        if (request.url.path.endsWith('/legacy_memories')) {
+          return http.Response(
+            jsonEncode(memories),
+            200,
+            request: request,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         if (request.url.path.endsWith('/legacy_family_members')) {
           if (request.method == 'GET') loads++;
           if (request.method == 'PATCH') {
@@ -65,6 +77,7 @@ void main() {
       'display_name': 'Child not added yet',
     };
     saved = null;
+    memories = [];
   });
 
   tearDownAll(() async => Supabase.instance.dispose());
@@ -105,6 +118,85 @@ void main() {
     expect(loads, greaterThan(before));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'new legacy memory offers camera and cancellation keeps the editor',
+    (tester) async {
+      final previous = ImagePickerPlatform.instance;
+      final picker = FakePhotoPicker();
+      ImagePickerPlatform.instance = picker;
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        await open(tester);
+        await tester.ensureVisible(find.text('Write memory'));
+        await tester.tap(find.text('Write memory'));
+        await tester.pumpAndSettle();
+        expect(find.text('New memory'), findsOneWidget);
+        await tester.ensureVisible(
+          find.widgetWithText(OutlinedButton, 'Take photo'),
+        );
+        await tester.tap(find.widgetWithText(OutlinedButton, 'Take photo'));
+        await tester.pumpAndSettle();
+        expect(picker.captures, 1);
+        expect(find.text('New memory'), findsOneWidget);
+        expect(saved, isNull);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      } finally {
+        ImagePickerPlatform.instance = previous;
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets(
+    'saved legacy memory editor and its media picker exclude camera',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        memories = [
+          {
+            'id': 'saved-memory',
+            'body': 'Existing story',
+            'prompt_text': 'A day at the beach',
+            'life_stage': 'mid',
+          },
+        ];
+        await open(tester);
+        await tester.ensureVisible(find.byTooltip('Memory options'));
+        await tester.tap(find.byTooltip('Memory options'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Edit memory'));
+        await tester.pumpAndSettle();
+        final editor = find.byType(Dialog);
+        expect(
+          find.descendant(of: editor, matching: find.text('Take photo')),
+          findsNothing,
+        );
+        final addMedia = find.descendant(
+          of: editor,
+          matching: find.text('Add media'),
+        );
+        expect(addMedia, findsOneWidget);
+        await tester.ensureVisible(addMedia);
+        await tester.tap(addMedia);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.text('Photos'), findsOneWidget);
+        expect(find.text('Videos'), findsOneWidget);
+        expect(find.text('Take photo'), findsNothing);
+        expect(saved, isNull);
+        tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+        await tester.pumpAndSettle();
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
 
   testWidgets('Edit profile reveals the name field and saves both names', (
     tester,
