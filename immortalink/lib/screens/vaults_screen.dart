@@ -40,6 +40,7 @@ import '../widgets/ai_processing_consent.dart';
 import '../widgets/content_screening_permission.dart';
 import '../widgets/legal_links.dart';
 import '../widgets/family_storage_bucket_summary.dart';
+import '../widgets/legacy_profile_usage.dart';
 import '../utils/everroot_upgrade_prompt.dart';
 import 'vault_home_screen.dart';
 import 'relationship_tree_screen.dart';
@@ -3150,6 +3151,7 @@ class FamilyPlanStatusContent extends StatefulWidget {
 
 class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
     with WidgetsBindingObserver {
+  final _plansKey = GlobalKey();
   late final AppleSubscriptionService _service;
   Timer? _refreshTimer;
   Timer? _expiryTimer;
@@ -3158,6 +3160,16 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
   bool _resolvingFamily = false;
   bool _familyLookupFailed = false;
   int _familyLookup = 0;
+
+  void _showUpgradeOptions() {
+    final target = _plansKey.currentContext;
+    if (target == null) return;
+    Scrollable.ensureVisible(
+      target,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+  }
 
   @override
   void initState() {
@@ -3415,6 +3427,7 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
                 service: _service,
                 limits: limits,
                 usage: currentUsage,
+                onViewPlans: _showUpgradeOptions,
               )
             else ...[
               Text('Current plan: ${_planTitle(plan)}'),
@@ -3429,10 +3442,17 @@ class _FamilyPlanStatusContentState extends State<FamilyPlanStatusContent>
               LinearProgressIndicator(value: progress),
               const SizedBox(height: 12),
               Text(status),
+              const Divider(height: 32),
+              LegacyProfileUsage(
+                limits: limits,
+                usage: currentUsage,
+                onViewPlans: _showUpgradeOptions,
+              ),
             ],
             const SizedBox(height: 18),
             Text(
               _service.bucketModel ? 'Your contribution' : 'Choose a plan',
+              key: _plansKey,
               style: Theme.of(
                 context,
               ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),

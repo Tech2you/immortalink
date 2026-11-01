@@ -23,6 +23,34 @@ void main() {
   );
 
   group('EverRoot quota messages', () {
+    for (final cap in [50, 100, 200, 500, 600, 1000]) {
+      test('legacy cap $cap shows only a genuine next step', () {
+        final error =
+            '{"code":"P0001","details":"ERR_EVERROOT_LEGACY_LIMIT",'
+            '"message":"This family has reached its limit of $cap legacy profiles. Remove an unused profile or change the family plan."}';
+        final message = everRootQuotaMessageFromError(error);
+        expect(message, contains('$cap legacy profiles'));
+        expect(message, contains('Existing profiles remain available'));
+        expect(message, isNot(contains('ERR_')));
+        expect(everRootUpgradeMessageFromError(error), message);
+        expect(message, contains('Legacy'));
+        expect(message, contains('100'));
+        expect(message, contains('500'));
+        expect(message, contains('Settings > Subscription'));
+        expect(message, isNot(contains('highest current allowance')));
+      });
+    }
+    test(
+      'unknown legacy cap does not guess a plan or expose error details',
+      () {
+        final message = everRootQuotaMessageFromError(
+          'ERR_EVERROOT_LEGACY_LIMIT: internal https://private.example',
+        );
+        expect(message, contains('Settings > Subscription'));
+        expect(message, isNot(contains('Heiro Family')));
+        expect(message, isNot(contains('private.example')));
+      },
+    );
     test('hourly invite rate is a wait message, never a paid upgrade', () {
       const error = 'ERR_EVERROOT_INVITE_RATE_LIMIT';
       expect(isEverRootQuotaError(error), isTrue);

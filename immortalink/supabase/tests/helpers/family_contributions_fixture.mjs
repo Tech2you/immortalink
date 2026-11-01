@@ -4,7 +4,8 @@ export const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 export const a=id(1), b=id(2), c=id(3), f=id(101), g=id(102);
 const read=n=>readFile(new URL(`../../migrations/${n}.sql`,import.meta.url),'utf8');
 export const bucketMigration=(await read('20261030150145_pooled_family_storage_contributions'))+'\n'+(await read('20261030152751_preserve_beta_access_with_contributions'));
-export async function fixture({db=new PGlite(),bucket=true}={}) {
+export const profilePoolMigration=await read('20261101083205_pooled_legacy_profile_allowances');
+export async function fixture({db=new PGlite(),bucket=true,profilePool=true}={}) {
  await db.exec(`create role anon;create role authenticated;create role service_role;
  create schema auth;create table auth.users(id uuid primary key);
  create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('test.uid',true),'')::uuid$$;
@@ -29,6 +30,9 @@ export async function fixture({db=new PGlite(),bucket=true}={}) {
  insert into vaults(owner_id,name) values('${a}','Alex'),('${b}','Blair'),('${c}','Casey');`);
  for(const n of ['20260928212954_family_sponsorship','20260928223253_sponsorship_checkout_lifecycle','20260929111512_returning_family_sponsor','20261001221344_apple_environment_isolation','20261011205859_acknowledge_retired_apple_history','20261028120027_verified_apple_repurchase_after_expiry']) await db.exec(await read(n));
  if(bucket)await db.exec(bucketMigration);
+ // Match the deployed internal helper ACL (normally installed by hardening).
+ if(bucket)await db.exec('revoke all on function public.everroot_limits(uuid) from public,anon,authenticated; grant execute on function public.everroot_limits(uuid) to service_role;');
+ if(bucket && profilePool)await db.exec(profilePoolMigration);
  return db;
 }
 export const asUser=(db,user)=>db.query("select set_config('test.uid',$1,false)",[user]);

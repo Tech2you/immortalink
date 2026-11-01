@@ -1343,7 +1343,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
       if (isEverRootFamilyUpgradeError(e)) {
         await showEverRootFamilyUpgradePrompt(
           context,
-          message: e is PostgrestException ? e.message : null,
+          message: everRootUpgradeMessageFromError(e),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1703,7 +1703,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                     if (isEverRootFamilyUpgradeError(e)) {
                       await showEverRootFamilyUpgradePrompt(
                         context,
-                        message: e is PostgrestException ? e.message : null,
+                        message: everRootUpgradeMessageFromError(e),
                       );
                       return;
                     }
@@ -1836,9 +1836,7 @@ class _RelationshipTreeScreenState extends State<RelationshipTreeScreen> {
                           if (isEverRootFamilyUpgradeError(e)) {
                             await showEverRootFamilyUpgradePrompt(
                               context,
-                              message: e is PostgrestException
-                                  ? e.message
-                                  : null,
+                              message: everRootUpgradeMessageFromError(e),
                             );
                             return;
                           }

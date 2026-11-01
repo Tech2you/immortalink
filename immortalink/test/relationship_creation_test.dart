@@ -12,6 +12,7 @@ import 'recent_cache_test.dart' show MemoryDisk;
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final writes = <Map<String, dynamic>>[];
+  String? creationError;
   late RecentCache cache;
   http.Response response(http.Request r, Object? data) => http.Response(
     jsonEncode(data),
@@ -45,6 +46,18 @@ void main() {
         }
         if (path.endsWith('/rpc/create_family_relative')) {
           writes.add(jsonDecode(r.body) as Map<String, dynamic>);
+          if (creationError != null) {
+            return http.Response(
+              jsonEncode({
+                'code': 'P0001',
+                'details': 'ERR_EVERROOT_LEGACY_LIMIT',
+                'message': creationError,
+              }),
+              400,
+              request: r,
+              headers: {'content-type': 'application/json'},
+            );
+          }
           return response(r, {
             'type': 'invite',
             'id': 'new',
@@ -81,6 +94,7 @@ void main() {
     );
   });
   tearDownAll(() => Supabase.instance.dispose());
+  setUp(() => creationError = null);
   Future<void> show(WidgetTester tester, {bool invite = false}) async {
     writes.clear();
     cache = RecentCache(disk: MemoryDisk());
@@ -144,6 +158,24 @@ void main() {
     expect(find.text('TESTCODE'), findsOneWidget);
     await close(tester);
   });
+  testWidgets(
+    'a required legacy placeholder hitting the cap gives plan guidance',
+    (tester) async {
+      creationError =
+          'This family has reached its limit of 50 legacy profiles.';
+      await show(tester, invite: true);
+      await tester.tap(find.text('Invite child'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Parent not added yet'));
+      await tester.tap(find.text('Save parent'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Choose Heiro Family'), findsOneWidget);
+      expect(find.textContaining('Settings > Subscription'), findsOneWidget);
+      expect(writes, hasLength(1));
+      expect(find.text('TESTCODE'), findsNothing);
+      await close(tester);
+    },
+  );
   testWidgets(
     'legacy sibling-only saves as sibling with no intermediate child write',
     (tester) async {

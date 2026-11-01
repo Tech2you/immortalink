@@ -44,7 +44,8 @@ class AppleSubscriptionConfig {
       title: 'Free Family',
       subtitle: 'Start the family tree and invite close relatives.',
       storageLabel: '500 MB shared storage',
-      included: '500 MB when your family has no paid contributions.',
+      included:
+          '500 MB and 50 legacy-profile slots when your family has no paid contributions.',
     ),
     AppleSubscriptionTier(
       plan: 'everroot_family',
@@ -52,7 +53,7 @@ class AppleSubscriptionConfig {
       subtitle: 'Add room for your family’s everyday memories.',
       storageLabel: '+5 GB for your family',
       included:
-          'Adds 500 AI answers and 120 transcription minutes each month, '
+          'Provides 100 legacy-profile slots while active. Adds 500 AI answers and 120 transcription minutes each month, '
           'shared by your family.',
       monthlyProductId: everRootsFamilyMonthlyProductId,
       annualProductId: everRootsFamilyAnnualProductId,
@@ -65,7 +66,7 @@ class AppleSubscriptionConfig {
       subtitle: 'Help preserve a growing family archive.',
       storageLabel: '+25 GB for your family',
       included:
-          'Adds 1,500 AI answers and 400 transcription minutes each month, shared by your family.',
+          'Provides 500 legacy-profile slots while active. Adds 1,500 AI answers and 400 transcription minutes each month, shared by your family.',
       monthlyProductId: everRootsLegacyMonthlyProductId,
       annualProductId: everRootsLegacyAnnualProductId,
       draftMonthlyProductId: draftLegacyMonthlyProductId,

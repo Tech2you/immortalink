@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/apple_subscription_service.dart';
 import '../utils/everroot_upgrade_prompt.dart';
+import 'legacy_profile_usage.dart';
 
 String formatFamilyCapacity(num bytes) {
   const gb = 1024 * 1024 * 1024;
@@ -14,10 +15,12 @@ class FamilyStorageBucketSummary extends StatelessWidget {
     required this.service,
     required this.limits,
     required this.usage,
+    this.onViewPlans,
   });
   final AppleSubscriptionService service;
   final Map<String, dynamic> limits;
   final Map<String, dynamic> usage;
+  final VoidCallback? onViewPlans;
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +71,12 @@ class FamilyStorageBucketSummary extends StatelessWidget {
                 full
                     ? 'Your storage is full. Existing memories stay available. Add a contribution or free up space to upload or invite more people.'
                     : 'Every active contribution adds space for everyone in this family.',
+              ),
+              const Divider(height: 32),
+              LegacyProfileUsage(
+                limits: limits,
+                usage: usage,
+                onViewPlans: onViewPlans,
               ),
             ],
           ),

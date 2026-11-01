@@ -1,0 +1,39 @@
+Heiro legacy-profile allowance counter — 31 October 2026
+
+Requested scope
+- Keep family-wide legacy-profile caps at Free 8, Family 100, Legacy 250.
+- Show usage beside shared storage and explain upgrade options when full.
+- Real member totals remain separate; multiple contributions do not multiply the profile cap.
+
+Implemented
+- LegacyProfileUsage widget in the existing Family storage summary, including the older fallback layout.
+- Count, progress bar and a short explanation of what counts. Unknown usage is not displayed as zero.
+- At 8/100, the plan action scrolls to existing offers; it does not buy anything.
+- At 250, state the maximum and explain that additional contributions do not raise it.
+- Legacy-creation errors, including unnamed connecting relatives created during invites, explain the relevant plan limit.
+- The existing usage RPC excluded retained/replaced legacy rows while the admission trigger counts them. Migration 20261031205918_legacy_profile_usage_counter aligns only the reporting predicate. No admission, billing or ownership changes.
+
+Verification
+- 33 focused widget/message/relationship tests passed.
+- Full configured Flutter suite: 404 passed; default configuration tests: 3 passed (2 overlap).
+- Database usage and existing growth tests: 17 passed, including authentication, family boundaries, retained profiles and unchanged limits.
+- Counter database tests rerun after aligning the local migration filename to the remote version: 5 passed.
+- Focused analyzer: no errors; 57 existing warnings/information notices in large screens, none in the counter/helper edits. git diff --check passed.
+- Live read-only check: reported count and cap matched all 4 existing families with members. Transaction rolled back; no family records were changed.
+- Independently read back usage function: exactly the intended predicate change. Capacity function, function grants, security mode and search path unchanged.
+- Security advisors unchanged from the pre-deployment baseline. Existing notices: 38 RLS-without-policy info, 38 intentional authenticated security-definer warnings, public vector extension warning, leaked-password protection warning. No security configuration changed in this task.
+- Protected source hashes unchanged: Apple subscription service, iOS app delegate, Apple validator, family relationship service and media upload helper.
+
+Delivery
+- Signed release build 1.0.0 (45), bundle com.everroots.app; codesign deep/strict verification passed.
+- First install attempt failed when the phone connection dropped. User reconnected and replied ready.
+- Second install succeeded in place. Independent phone app readback confirmed 1.0.0 / build 45. Application launch succeeded.
+- No TestFlight upload, App Store draft edit, purchase, family rename or membership change performed.
+- User can inspect Settings > Subscription for the new counter. No live test of hitting a real family's cap was performed; boundary behavior is covered by isolated tests.
+
+Recovery/evidence
+- Prior signed phone build saved at /private/tmp/heiro-build44-before-legacy-counter.app.
+- Source snapshots and protected hashes: /private/tmp/heiro-before-build45/.
+- Logs: /private/tmp/heiro45-focused.log, heiro45-all-tests.log, heiro45-db-tests.log, heiro45-counter-final.log, heiro45-default-config-tests.log, heiro45-analyze.log, heiro45-build.log.
+- Device evidence: /private/tmp/heiro45-install.json, heiro45-installed-app.json, heiro45-launch.json.
+- Remote migration version: 20261031205918. Local file has matching version.

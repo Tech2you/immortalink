@@ -12,10 +12,10 @@ test('free family has 500 MB once, two members each add 5 GB with no free top-up
  assert.equal((await db.query('select count(*)::int n from apple_sponsor_bindings where not retired')).rows[0].n,2);
  assert.equal((await db.query('select count(*)::int n from family_entitlements')).rows[0].n,2);
 }));
-test('Family + Legacy pool 30 GB and additive monthly allowances; admission caps unchanged',()=>run(async db=>{
+test('Family + Legacy pool 30 GB, 600 profile slots and monthly allowances; invitation caps unchanged',()=>run(async db=>{
  await begin(db,a);await apply(db,tx());await begin(db,b);await apply(db,tx(b,'legacy',{productId:'everroots.legacy.annual'}),b);
  const l=await limits(db);assert.equal(l.storage_bytes,30*GB);assert.equal(l.ai_responses_monthly,2000);assert.equal(l.transcription_seconds_monthly,31200);
- assert.equal(l.legacy_people,250);assert.equal(l.real_members,null);assert.equal(l.invites_hourly_per_member,20);assert.equal(l.invites_hourly_per_family,50);
+ assert.equal(l.legacy_people,600);assert.equal(l.real_members,null);assert.equal(l.invites_hourly_per_member,20);assert.equal(l.invites_hourly_per_family,50);
 }));
 test('renewals, replays and restore do not add a second allocation',()=>run(async db=>{
  await begin(db);const t=tx();await apply(db,t);await apply(db,t);await apply(db,{...t,transactionId:'renewal',transactionReason:'RENEWAL',purchaseDate:t.purchaseDate+1,signedDate:t.signedDate+1},null,null,'server_notification');

@@ -1,0 +1,49 @@
+Heiro build 46 — pooled legacy-profile allowances — 2026-11-01
+
+Requested policy
+- Free family: 50 legacy profiles.
+- Active Family Apple contribution: 100 slots; active Legacy: 500 slots.
+- Paid contribution slots sum. The free 50 is a fallback, not an extra grant.
+- Renewal/replay maintains capacity; upgrade replaces that contribution.
+- Expiry/refund/move reduces capacity without deleting existing profiles.
+- Existing full-storage admission block, invitation caps, ownership and billing
+  verification remain in place. Temporary non-Apple grants retain floor semantics.
+
+Changes
+- Migration 20261101083205_pooled_legacy_profile_allowances changes only
+  heiro_billing.tier_limits and public.everroot_limits.
+- Family storage counter shows server-reported used/total slots and explains
+  pooled contributions. Full families can open contribution options at any cap.
+- Offer descriptions and profile-limit messages use 100/500 grants.
+- Built on the existing uncommitted build45 work; no prior changes discarded.
+
+Verification
+- 64 database tests passed: contribution lifecycle, confirmed moves, admission,
+  authenticated usage reporting, full-storage blocking, 50-slot and 1000-slot
+  boundaries, retained profiles, permission preservation and other allowances.
+- Full Flutter regression run: 408 passed; four new counter tests initially
+  matched both the heading and explanation. Corrected only their selector.
+  Counter/configuration rerun: all 15 passed. No unresolved app test failures.
+- Static analysis of changed Dart files: no issues. git diff --check passed.
+- Live readback: zero profile-cap mismatches and zero changes to other allowance
+  values across all four families. 19 profiles, 6 memberships and 3 entitlement
+  rows remained unchanged. Existing guard/RPC definitions and grants unchanged.
+- Security advisor comparison: no new findings; existing advisories remain.
+- Billing bridge/service/validation, media upload, relationship service and tree
+  screen matched the pre-change hashes. Profile family index already exists;
+  tree loading already pages beyond 1000 records. No tree redesign performed.
+
+Delivery
+- Release build 1.0.0 (46), codesign verified, activity marked as a test build.
+- First cable install lost its connection. After user reconnected, installation
+  succeeded; independent device app listing reports com.everroots.app build 46.
+- No uninstall, real purchase, profile deletion, TestFlight upload or App Store
+  submission/draft update was performed.
+- Visual acceptance on the user's phone remains for the user to confirm.
+
+Recovery/evidence
+- Pre-change source copies and hashes: /private/tmp/heiro-before-build46
+- Previous signed app: /private/tmp/heiro-build45-before-profile-pool.app
+- Tests: /private/tmp/heiro46-db-complete.log,
+  /private/tmp/heiro46-flutter.log, /private/tmp/heiro46-widget-final.log
+- Device readback: /private/tmp/heiro46-installed-confirmed.json

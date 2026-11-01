@@ -58,11 +58,13 @@ void main() {
     db.usage = {
       'plan': 'everroot_legacy',
       'limits': {
+        'legacy_people': 600,
         'storage_bytes': 30 * gb,
         'ai_responses_monthly': 2000,
         'transcription_seconds_monthly': 31200,
       },
       'usage': {
+        'legacy_people': 6,
         'storage_bytes': 10000000,
         'ai_responses_monthly': 17,
         'transcription_seconds_monthly': 120,
@@ -128,6 +130,7 @@ void main() {
       usage.complete(savedUsage);
       await tester.pumpAndSettle();
       expect(find.text('30 GB'), findsOneWidget);
+      expect(find.text('6 of 600 used'), findsOneWidget);
       expect(find.text('Free Family'), findsNothing);
       await capture(tester, 'storage');
       await tester.pumpWidget(const SizedBox());
@@ -143,6 +146,7 @@ void main() {
     await service.refreshSponsorship();
     await tester.pump();
     expect(find.text('30 GB'), findsOneWidget);
+    expect(find.text('6 of 600 used'), findsOneWidget);
     expect(find.text('Free Family'), findsNothing);
     expect(find.textContaining('last known usage'), findsOneWidget);
     expect(service.canSponsor, false);
@@ -181,6 +185,25 @@ void main() {
     expect(formatFamilyCapacity(5 * gb), '5 GB');
     expect(formatFamilyCapacity(30 * gb), '30 GB');
   });
+  testWidgets(
+    'profile-cap action scrolls to plans without starting a purchase',
+    (tester) async {
+      final data = db.usage as Map;
+      (data['limits'] as Map)['legacy_people'] = 50;
+      (data['usage'] as Map)['legacy_people'] = 50;
+      await show(tester);
+      await tester.ensureVisible(find.text('View contribution options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('View contribution options'));
+      await tester.pumpAndSettle();
+      final heading = tester.getRect(find.text('Your contribution'));
+      expect(heading.top, greaterThanOrEqualTo(0));
+      expect(heading.bottom, lessThan(844));
+      expect(db.reservations, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'nonpaying member can contribute despite another active family plan',
     (tester) async {

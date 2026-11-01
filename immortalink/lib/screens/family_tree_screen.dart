@@ -2465,7 +2465,7 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
       if (isEverRootFamilyUpgradeError(e)) {
         await showEverRootFamilyUpgradePrompt(
           context,
-          message: e is PostgrestException ? e.message : null,
+          message: everRootUpgradeMessageFromError(e),
         );
         return;
       }
@@ -2743,9 +2743,12 @@ class _FamilyTreeScreenState extends State<FamilyTreeScreen> {
                           ),
                         );
                       } on PostgrestException catch (e) {
+                        if (!ctx.mounted) return;
                         setInner(() {
                           saving = false;
-                          errorText = e.message;
+                          errorText = isLegacyProfileLimitError(e)
+                              ? everRootQuotaMessageFromError(e)
+                              : e.message;
                         });
                       } catch (e) {
                         var message = e.toString();

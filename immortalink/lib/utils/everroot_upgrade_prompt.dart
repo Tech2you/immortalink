@@ -12,6 +12,21 @@ const String _storageLimitUpgradeMessage =
     'This family has reached its storage allowance. Any member can add a '
     'storage contribution, or you can free up space. Existing memories remain available.';
 
+String legacyProfileLimitMessage(int? limit) {
+  final introduction = limit == null
+      ? 'Your family has reached its legacy-profile allowance.'
+      : 'Your family has reached its limit of $limit legacy profiles.';
+  final nextStep = limit == null
+      ? 'Check your family allowance in Settings > Subscription.'
+      : limit == 50
+      ? 'Choose Heiro Family for 100 profile slots, or Heiro Legacy for 500.'
+      : 'Another family member can contribute, or an existing Family contributor can upgrade to Legacy. Family provides 100 profile slots and Legacy provides 500; active contributions add together.';
+  return '$introduction $nextStep Existing profiles remain available.';
+}
+
+bool isLegacyProfileLimitError(Object error) =>
+    error.toString().contains('ERR_EVERROOT_LEGACY_LIMIT');
+
 bool isEverRootFamilyUpgradeError(Object error) {
   final text = error.toString();
   return text.contains('ERR_EVERROOT_READ_ONLY') ||
@@ -31,6 +46,15 @@ bool isEverRootQuotaError(Object error) {
 String everRootQuotaMessageFromError(Object error) {
   final text = error.toString();
   final message = _friendlyQuotaMessage(text);
+
+  if (isLegacyProfileLimitError(error)) {
+    final match = RegExp(r'limit of (\d+) legacy profiles').firstMatch(text);
+    final limit = int.tryParse(match?.group(1) ?? '');
+    final explanation = legacyProfileLimitMessage(limit);
+    return limit != null
+        ? '$explanation Open Settings > Subscription to view plans.'
+        : explanation;
+  }
 
   if (text.contains('ERR_EVERROOT_USAGE_BURST')) {
     return 'Please wait a minute before requesting more AI or transcription.';
@@ -111,6 +135,9 @@ Future<void> showEverRootFamilyUpgradePrompt(
 }
 
 String everRootUpgradeMessageFromError(Object error) {
+  if (isLegacyProfileLimitError(error)) {
+    return everRootQuotaMessageFromError(error);
+  }
   return cleanEverRootUpgradeMessage(error.toString()) ??
       _defaultEverRootFamilyUpgradeMessage;
 }
