@@ -2,7 +2,7 @@
 
 Effective date: 13 October 2026
 
-Last updated: 30 October 2026
+Last updated: 5 November 2026
 
 Heiro is a private family memory app that helps people build family trees, save photos and voice memories, invite relatives, and use AI-assisted tools to explore family stories. This Privacy Policy explains what information we collect, why we use it, who may receive it, and the choices you have.
 
@@ -60,6 +60,10 @@ For voice transcription, we also retain a fingerprint of the audio, its measured
 
 ## Safety Reports And Review
 
+Where automatic sharing checks are enabled, Heiro asks for separate safety-check permission before sending new or edited memory text and photos you request to share to OpenAI. Photos are resized and embedded metadata is removed from the checking copy. Original files remain in Heiro. Private drafts and untouched archives are not automatically scanned. Declining keeps affected text and photos saved but unavailable for new family sharing. You can withdraw safety-check permission in Settings; this stops future checks but cannot recall content already processed.
+
+These checks do not analyze recordings or videos. Those retain the reporting and blocking process; any text and photos attached to the same memory are checked separately. A flag can hold sharing for authorized human review and does not automatically delete the memory. Reviewers may inspect the held text and photos. Checks can make mistakes and cannot guarantee that every harmful item is detected. We retain permission choices, policy versions, processing status and review decisions to operate these safeguards and prevent abuse.
+
 Authorized support reviewers may inspect reported content and relevant records to investigate abuse. Reports and review records are not shared with other family members. A report does not automatically delete a memory. We may restrict content or an account following review; this cannot recall copies already downloaded by someone else.
 
 To request a review of a restriction or removal of personal information, contact linebreakers@outlook.com. Please provide a report reference if available, rather than emailing private family media. Report-alert emails sent to our support inbox contain only a report reference and review instructions, not the report narrative, photos or recordings.
@@ -100,6 +104,8 @@ Heiro may ask for access to your photo library or microphone only when you choos
 We use technical and organizational measures intended to protect information, including authentication, access controls, private storage, database security policies, usage limits, and operational monitoring. No system is perfectly secure. Use a strong password, keep your device secure, and only invite people you trust.
 
 ## Retention And Deletion
+
+Backup retention describes how recovery copies, where maintained, are handled; it does not guarantee that every uploaded file is backed up or recoverable. Keep independent copies of irreplaceable photos, recordings and written memories. See our [Service Terms](https://heiro.app/terms.html) for storage, recovery and consumer-rights information.
 
 Daily usage-statistics records are kept for up to 90 days. First-observed action dates remain while your account exists. Account deletion removes these account-linked records; aggregate totals that do not identify you may remain.
 

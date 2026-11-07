@@ -25,7 +25,7 @@ test('photo preparation is default-off and rejects extra fields, URLs and invali
   for (const enabled of [undefined, false, 'true', 1]) {
     assert.equal((await processScreeningPhoto({ ...f.options, enabled })).code, 'SCREENING_DISABLED');
   }
-  for (const bad of [null, { ...work, url: 'https://example.com' }, { ...work, image_index: 4 },
+  for (const bad of [null, { ...work, url: 'https://example.com' }, { ...work, image_index: 20 },
     { ...work, image_index: -1 }, { ...work, image_index: '0' }, { ...work, job: { ...work.job, url: 'private' } },
     { ...work, job: { ...work.job, revision: '' } }]) {
     assert(!validPhotoWork(bad));
@@ -66,7 +66,7 @@ test('withdrawal or changed source after decode emits no bytes and does not retr
 
 test('corrupt, oversized or wrong-format normalization cannot finish; source bytes are cleared', async () => {
   for (const output of [{ bytes: new Uint8Array(10), mime: 'image/jpeg' },
-    { bytes: new Uint8Array(2097153), mime: 'image/jpeg' }, { bytes: jpeg(), mime: 'image/png' }]) {
+    { bytes: new Uint8Array(524289), mime: 'image/jpeg' }, { bytes: jpeg(), mime: 'image/png' }]) {
     const f = fixture();
     const result = await processScreeningPhoto({ ...f.options, normalize: async () => output });
     assert.equal(result.code, 'PHOTO_INVALID');

@@ -194,13 +194,14 @@ class _PermissionDialogState extends State<_PermissionDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Allow Heiro to send new text and photos you choose to share '
+                'Allow Heiro to send new or edited text and photos you choose to share '
                 'with family to OpenAI for safety checks? They may contain '
                 'personal information about you or relatives. Flagged additions '
                 'may be held for restricted human review.\n\n'
-                'Private drafts and existing archives are not scanned. This '
-                'permission does not cover voice recordings or videos, or '
-                'enable AI chat or transcription.\n\n'
+                'Private drafts and untouched archives are not scanned. This '
+                'permission does not cover voice recordings or videos. Those '
+                'use reporting and blocking. Text and photos attached to them '
+                'still need checks. This does not enable AI chat or transcription.\n\n'
                 'You can decline or turn off future checks here. Declining '
                 'does not allow unchecked sharing. Withdrawal cannot recall '
                 'data already sent.',

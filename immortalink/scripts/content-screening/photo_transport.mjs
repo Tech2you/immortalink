@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { processScreeningPhoto, validPhotoWork, validPreparedPhoto, PHOTO_RESPONSE_BYTES } from './photo_job.mjs';
 
 const endpoint = 'https://vbzyvaylfdhwowdbodmk.supabase.co/functions/v1/prepare_screening_photo';
@@ -33,8 +34,9 @@ async function readBytes(message, max, signal) {
   }
 }
 
-// Factory only, not deployed. Production must also keep gateway JWT validation.
-// A separate random worker secret authorizes internal requests, never app JWTs.
+// Production also keeps gateway JWT validation. The domain-separated worker
+// secret authorizes internal requests, never ordinary app JWTs.
+/** @param {{enabled?: boolean, workerTokenSha256?: string, backend?: ReturnType<import('./backend.mjs').createScreeningBackend>, normalize?: Function}} options */
 export function createPhotoPreparationHandler({ enabled = false, workerTokenSha256, backend, normalize } = {}) {
   const pin = typeof workerTokenSha256 === 'string' && /^[a-f0-9]{64}$/.test(workerTokenSha256)
     ? Buffer.from(workerTokenSha256, 'hex') : null;
@@ -65,7 +67,8 @@ export function createPhotoPreparationHandler({ enabled = false, workerTokenSha2
 }
 
 // One fixed internal HTTP request per image. No retries or arbitrary URLs.
-export function createRemotePhotoPreparer({ gatewayKey, workerToken, fetcher = fetch, timeoutMs = 20000 } = {}) {
+/** @param {{gatewayKey: string, workerToken: string, fetcher?: typeof fetch, timeoutMs?: number}} options */
+export function createRemotePhotoPreparer({ gatewayKey, workerToken, fetcher = fetch, timeoutMs = 20000 }) {
   if (typeof gatewayKey !== 'string' || !gatewayKey.trim() || typeof workerToken !== 'string' ||
       !/^[A-Za-z0-9_-]{32,256}$/.test(workerToken) || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 20000) throw failure();
   return async (job, index) => {

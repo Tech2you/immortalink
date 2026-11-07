@@ -1,7 +1,7 @@
 import {SUPABASE_URL,SUPABASE_KEY} from './config.js';
 import {financialSummary,parseAppleReport,digest} from './model.js';
 const $=id=>document.getElementById(id);
-let session=null,data=null,busy=false,expiryTimer,notificationTimer,importDraft=null,pendingRemoval=null,entryId=null,challenge=null,loadSequence=0;
+let session=null,data=null,busy=false,expiryTimer,notificationTimer,importDraft=null,pendingRemoval=null,entryId=null,challenge=null,enrollment=null,loadSequence=0;
 const money=value=>value==null?'Not recorded':new Intl.NumberFormat('en-ZA',{style:'currency',currency:'ZAR',maximumFractionDigits:2}).format(value);
 const number=value=>Number(value).toLocaleString('en-ZA');
 const monthDate=()=>$('month').value+'-01';
@@ -17,12 +17,13 @@ function publicError(error) {
 async function request(path,body,{token=session?.access_token,method='POST'}={}) {
  const response=await fetch(SUPABASE_URL+path,{method,credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer',headers:{apikey:SUPABASE_KEY,'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(18000)});
  const text=await response.text();let result;try{result=text?JSON.parse(text):null;}catch{throw Error('INVALID_RESPONSE');}
- if(!response.ok) {const error=Object.assign(Error(result?.message||result?.msg||'REQUEST_FAILED'),{code:result?.code,status:response.status});if(path.includes('/token?'))error.safeMessage='Sign-in failed. Check your Heiro email and password.';if(response.status===401&&session&&!path.includes('/verify')){clearSession();error.safeMessage='Your dashboard session has ended. Please sign in again.';}throw error;}
+ if(!response.ok) {const error=Object.assign(Error(result?.message||result?.msg||'REQUEST_FAILED'),{code:result?.code,status:response.status});if(path.includes('/token?'))error.safeMessage='Sign-in failed. Check your Heiro email and password.';if(path.endsWith('/verify'))error.safeMessage='The code was not accepted. Use the latest code from your authenticator and try again.';if(response.status===401&&session&&!path.includes('/verify')){clearSession();error.safeMessage='Your dashboard session has ended. Please sign in again.';}throw error;}
  return result;
 }
 const rpc=(name,args)=>request('/rest/v1/rpc/'+name,args);
 function setSession(result) {session=result;clearTimeout(expiryTimer);const expires=result.expires_at?result.expires_at*1000:Date.now()+result.expires_in*1000;expiryTimer=setTimeout(()=>{clearSession();note('Your dashboard session has ended. Please sign in again.');},Math.max(0,expires-Date.now()-10000));}
-function clearSession() {session=null;data=null;loadSequence++;clearTimeout(expiryTimer);$('workspace').hidden=true;$('login').hidden=false;$('dashboard-content').hidden=true;for(const d of document.querySelectorAll('dialog[open]'))d.close();for(const id of ['metrics','entries','history','money-metrics','import-preview','exclusions','activity-status','activity-tests'])$(id).replaceChildren();$('password').value='';$('report-form').reset();$('entry-form').reset();$('apple-file').value='';importDraft=null;entryId=null;challenge=null;$('email').focus();}
+function clearEnrollment(){enrollment=null;$('mfa-enroll-secret').value='';$('mfa-enroll-qr').removeAttribute('src');$('mfa-enroll-form').reset();$('mfa-enroll-details').hidden=true;$('mfa-enroll-start').hidden=false;}
+function clearSession() {clearEnrollment();session=null;data=null;loadSequence++;clearTimeout(expiryTimer);$('workspace').hidden=true;$('login').hidden=false;$('dashboard-content').hidden=true;for(const d of document.querySelectorAll('dialog[open]'))d.close();for(const id of ['metrics','entries','history','money-metrics','import-preview','exclusions','activity-status','activity-tests','ai-budget-title','ai-budget-detail','backup-title','backup-detail'])$(id).replaceChildren();$('password').value='';$('report-form').reset();$('entry-form').reset();$('apple-file').value='';importDraft=null;entryId=null;challenge=null;$('email').focus();}
 async function signOut(){const token=session?.access_token;clearSession();if(token)try{await request('/auth/v1/logout?scope=local',{}, {token});}catch{/* Local business view remains cleared even offline. */}}
 async function withBusy(work) {if(busy)return;busy=true;$('month').disabled=true;const controls=[...document.querySelectorAll('button:not(:disabled)')];controls.forEach(b=>b.disabled=true);try{await work();}catch(e){note(publicError(e),true);}finally{busy=false;$('month').disabled=false;controls.forEach(b=>b.disabled=false);$('import-save').disabled=!importDraft;}}
 async function enterDashboard() {
@@ -31,11 +32,35 @@ async function enterDashboard() {
 $('login-form').addEventListener('submit',e=>{e.preventDefault();withBusy(async()=>{
  const email=$('email').value.trim(),password=$('password').value;$('password').value='';
  const result=await request('/auth/v1/token?grant_type=password',{email,password},{token:null});setSession(result);
+ try {
+ const access=await rpc('business_access_status',{});
+ if(!access.has_factor){$('mfa-enroll-dialog').showModal();return;}
  const factor=result.user?.factors?.find(f=>f.status==='verified'&&f.factor_type==='totp');
- if(factor){const res=await request(`/auth/v1/factors/${encodeURIComponent(factor.id)}/challenge`,{});challenge={factor:factor.id,id:res.id};$('mfa-form').reset();$('mfa-dialog').showModal();return;}
- try{await enterDashboard();}catch(error){await signOut();throw error;}
+ if(!factor)throw Object.assign(Error(),{safeMessage:'Use your enrolled authenticator to open the business dashboard. Contact support if it is unavailable.'});
+ challenge={factor:factor.id};$('mfa-form').reset();$('mfa-dialog').showModal();
+ }catch(error){await signOut();throw error;}
  });});
-$('mfa-form').addEventListener('submit',e=>{e.preventDefault();withBusy(async()=>{if(!challenge)return;const result=await request(`/auth/v1/factors/${encodeURIComponent(challenge.factor)}/verify`,{challenge_id:challenge.id,code:new FormData(e.target).get('code')});setSession({...session,...result});$('mfa-dialog').close();challenge=null;await enterDashboard();});});
+async function verifyFactor(factor,code){const c=await request(`/auth/v1/factors/${encodeURIComponent(factor)}/challenge`,{});const result=await request(`/auth/v1/factors/${encodeURIComponent(factor)}/verify`,{challenge_id:c.id,code});setSession({...session,...result});}
+$('mfa-form').addEventListener('submit',e=>{e.preventDefault();withBusy(async()=>{if(!challenge)return;await verifyFactor(challenge.factor,new FormData(e.target).get('code'));$('mfa-dialog').close();challenge=null;await enterDashboard();});});
+$('mfa-enroll-start').addEventListener('click',()=>withBusy(async()=>{
+ if(enrollment)return;
+ const account=await request('/auth/v1/user',undefined,{method:'GET'});
+ for(const f of account?.factors||[])if(f.status==='unverified'&&f.friendly_name==='Heiro business')await request(`/auth/v1/factors/${encodeURIComponent(f.id)}`,undefined,{method:'DELETE'});
+ const result=await request('/auth/v1/factors',{factor_type:'totp',friendly_name:'Heiro business'});
+ enrollment=result.id;
+ if(!enrollment||!result.totp?.secret||!result.totp?.qr_code)throw Error('INVALID_ENROLLMENT');
+ $('mfa-enroll-secret').value=result.totp.secret;
+ $('mfa-enroll-qr').src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(result.totp.qr_code);
+ $('mfa-enroll-details').hidden=false;$('mfa-enroll-start').hidden=true;
+}));
+$('mfa-enroll-form').addEventListener('submit',e=>{e.preventDefault();withBusy(async()=>{
+ if(!enrollment)return;const code=new FormData(e.target).get('code');
+ if(!/^[0-9]{6}$/.test(code||''))throw Object.assign(Error(),{safeMessage:'Enter the six-digit code from your authenticator.'});
+ await verifyFactor(enrollment,code);clearEnrollment();$('mfa-enroll-dialog').close();await enterDashboard();
+});});
+async function cancelEnrollment(){const factor=enrollment;clearEnrollment();$('mfa-enroll-dialog').close();try{if(factor)await request(`/auth/v1/factors/${encodeURIComponent(factor)}`,undefined,{method:'DELETE'});}finally{await signOut();}}
+$('mfa-enroll-cancel').addEventListener('click',()=>withBusy(cancelEnrollment));
+$('mfa-enroll-dialog').addEventListener('cancel',e=>{e.preventDefault();withBusy(cancelEnrollment);});
 $('mfa-cancel').addEventListener('click',()=>signOut());$('mfa-dialog').addEventListener('cancel',()=>signOut());$('logout').addEventListener('click',()=>withBusy(signOut));
 function navigate(page) {if(!['overview','finances','data'].includes(page))return;document.querySelectorAll('.page').forEach(p=>p.hidden=p.id!==page);document.querySelectorAll('nav [data-page]').forEach(b=>{b.classList.toggle('selected',b.dataset.page===page);if(b.dataset.page===page)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});$('page-label').textContent={overview:'BUSINESS OVERVIEW',finances:'MONEY & COSTS',data:'DATA & ACCESS'}[page];window.scrollTo({top:0,behavior:'instant'});}
 for(const button of document.querySelectorAll('[data-page]'))button.addEventListener('click',()=>navigate(button.dataset.page));
@@ -43,12 +68,19 @@ $('month').value=new Date().toISOString().slice(0,7);$('month').max=new Date(Dat
 $('month').addEventListener('change',()=>withBusy(loadDashboard));$('refresh').addEventListener('click',()=>withBusy(loadDashboard));
 async function loadDashboard() {
  const seq=++loadSequence;$('loading').hidden=false;$('dashboard-content').hidden=true;
- try {const result=await rpc('business_dashboard',{p_month:monthDate()});if(seq!==loadSequence)return;data=result;render();$('dashboard-content').hidden=false;}
+ try {const [result,budget,backup]=await Promise.all([rpc('business_dashboard',{p_month:monthDate()}),rpc('business_ai_budget_status',{}).catch(()=>null),rpc('business_media_backup_status',{}).catch(()=>null)]);if(seq!==loadSequence)return;data={...result,budget,backup};render();$('dashboard-content').hidden=false;}
  catch(error){if(error.message==='BUSINESS_ACCESS_DENIED'||error.message==='BUSINESS_MFA_REQUIRED')await signOut();throw error;}
  finally{if(seq===loadSequence)$('loading').hidden=true;}
 }
 function metric(container,label,value,detail,isMoney=false){const card=el('article',null,'metric');card.append(el('div',label,'metric-label'),el('div',value,'metric-value'+(isMoney?' money':'')),el('div',detail,'metric-note'));container.append(card);}
 function render(){
+ const backup=data.backup;
+ $('backup-title').textContent=!backup?'Backup status unavailable':!backup.enabled?'Backup paused':backup.last_error?'Backup needs attention':backup.stale?'Backup overdue':backup.pending?'New media waiting for backup':'Backup is current';
+ $('backup-detail').textContent=backup?`${(Number(backup.retained_bytes)/1e9).toFixed(2)} GB retained of ${(Number(backup.limit_bytes)/1e9).toFixed(0)} GB copying limit. ${number(backup.pending)} files waiting. Last complete inventory: ${backup.last_manifest_at?new Date(backup.last_manifest_at).toLocaleString('en-ZA'):'not yet confirmed'}.`:'Refresh to check recovery coverage. An unavailable status does not confirm a successful backup.';
+ const budget=data.budget;
+ $('ai-budget-title').textContent=budget?`US$${Number(budget.reserved_usd).toFixed(3)} of US$${Number(budget.limit_usd).toFixed(2)} today`:'Budget status unavailable';
+ $('ai-budget-detail').textContent=budget?(budget.enabled?(budget.reserved_usd>=budget.limit_usd?'Daily limit reached. Paid AI is paused. ':budget.reserved_usd>=budget.limit_usd*.8?'Approaching the daily limit. ':'Safety limit is active. '):'Paid AI is paused for review. ')+`${number(budget.denied_requests)} requests paused today. Resets ${new Date(budget.resets_at).toLocaleString('en-ZA')}.`:'Refresh to check the safety limit. Do not assume spending is zero.';
+
  const m=data.current,s=financialSummary(data.entries,data.report);$('observed').textContent='Current totals checked '+new Date(m.observed_at).toLocaleString('en-ZA')+'. Money and retention use the selected reporting month.';
  $('quality-notes').textContent=`Test purchases are excluded automatically. ${m.excluded_accounts} test account(s) and ${m.excluded_families} test family/families are excluded manually. Registration counts may still include your unmarked testing accounts.`+(m.unclassified_plans?` ${m.unclassified_plans} active production plan(s) have no confirmed price; they are not counted as paying contributors.`:'');
  const grid=$('metrics');grid.replaceChildren();metric(grid,'Registered accounts',number(m.accounts),'Current accounts · test exclusions applied');metric(grid,'Families',number(m.families),'With at least one included member');metric(grid,'Paying contributors',number(m.paying_contributors),`${number(m.funded_families)} funded families · verified paid plans`);metric(grid,'Monthly recurring revenue',money(s.mrr),'Monthly plan value · entered from reports',true);metric(grid,'Monthly active users',m.monthly_active_users==null?'Not collecting':number(m.monthly_active_users),'Observed accounts · last 30 UTC days');metric(grid,'Contributor churn',s.churn==null?'Not recorded':s.churn.toFixed(1)+'%','Selected month · starting payers lost');metric(grid,'New accounts',number(m.new_accounts_30d),'Registered in the last 30 days');metric(grid,'Active production plans',number(m.active_production_plans),`${m.free_offer_plans} zero-price offer(s) · expired and testing excluded`);

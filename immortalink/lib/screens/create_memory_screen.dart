@@ -479,7 +479,9 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
           memoryId: memoryId,
         ).catchError((_) => 0),
       );
-      if (_shareToFamilyFeed && !contentScreeningControlsEnabled) {
+      // The server selects direct delivery or the checked-publication outbox.
+      // Keep notifications working while the matching app is staged disabled.
+      if (_shareToFamilyFeed) {
         unawaited(PushNotificationService.notifyFamilyMemoryAdded(memoryId));
       }
 
@@ -492,6 +494,7 @@ class _CreateMemoryScreenState extends State<CreateMemoryScreen> {
           client: _client,
           expectedUserId: userId,
           requestAfterSave: true,
+          onlyIfNeedsRequest: true,
         );
       }
       if (!mounted) return;

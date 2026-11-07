@@ -13,7 +13,7 @@ for dependency in node supabase; do
     exit 1
   fi
 done
-if node scripts/content_review_server.mjs --reviewer 'Ross Strauss' --open; then
+if node scripts/content_review_server.mjs --reviewer 'Ross Strauss' --screening-review --open; then
   print 'Review session ended. Double-click this launcher for a new session.'
 else
   print 'The review page could not start. Reports remain in the review queue.'

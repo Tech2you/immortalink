@@ -5,7 +5,7 @@ import { stillPhotoContainer } from './photo_container.mjs';
 // Candidate only: no deploy entrypoint, credentials, filesystem or network.
 // Library cache limits are not a replacement for host/isolate memory/CPU limits.
 export const WASM_PHOTO_LIMITS = Object.freeze({ inputBytes: 12 * 1024 * 1024,
-  pixels: 24_000_000, edge: 1024, outputBytes: 2 * 1024 * 1024,
+  pixels: 24_000_000, edge: 1024, outputBytes: 512 * 1024,
   cacheBytes: 48 * 1024 * 1024, allocationBytes: 32 * 1024 * 1024, deadlineMs: 800 });
 const formats = { 'image/jpeg': MagickFormat.Jpeg, 'image/png': MagickFormat.Png, 'image/webp': MagickFormat.WebP };
 const bad = () => new Error('PHOTO_PREPARATION_FAILED');
@@ -52,7 +52,7 @@ export async function createWasmPhotoPreparer(wasmBytes) {
       }
       checkTime();
       image.backgroundColor = MagickColors.White; image.alpha(AlphaAction.Remove);
-      image.colorSpace = ColorSpace.sRGB; image.strip(); image.quality = 82;
+      image.colorSpace = ColorSpace.sRGB; image.strip(); image.quality = 75;
       const output = image.write(MagickFormat.Jpeg, data => {
         checkTime();
         if (!data.length || data.length > WASM_PHOTO_LIMITS.outputBytes) throw bad();

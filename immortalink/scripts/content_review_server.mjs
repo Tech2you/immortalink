@@ -64,7 +64,9 @@ export function makeBackend(key, fetchImpl = fetch) {
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15000),
     });
-    const bytes = await readBounded(response.body, maximum);
+    // PostgREST returns 204 with no stream for successful void RPCs, including
+    // the acknowledgement required before an image can be approved.
+    const bytes = response.body ? await readBounded(response.body, maximum) : Buffer.alloc(0);
     if (!response.ok) {
       // Map known codes only; never relay upstream text, credentials or private data.
       let code; try { code = JSON.parse(bytes.toString()).message; } catch { /* fixed fallback */ }

@@ -70,6 +70,9 @@ class _StoryFeedItemState extends State<StoryFeedItem> {
                 ColoredBox(
                   color: heiroIce,
                   child: PageView(
+                    // Prepare the adjacent page while this photo is visible.
+                    // The viewport stays bounded instead of loading the album.
+                    allowImplicitScrolling: true,
                     onPageChanged: (value) => setState(() => _photo = value),
                     children: widget.photos,
                   ),

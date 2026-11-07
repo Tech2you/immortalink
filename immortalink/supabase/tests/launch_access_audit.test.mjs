@@ -50,7 +50,8 @@ test('audit is read-only, preserves intended access and reports missing contract
     for (const [name,findings] of Object.entries(result)) {
       if (name !== 'expected_client_functions_unavailable') assert.deepEqual(findings,[],name);
     }
-    assert.equal(result.expected_client_functions_unavailable.length,50);
+    assert.equal(result.expected_client_functions_unavailable.length,55);
+    assert(result.expected_client_functions_unavailable.includes('public.business_media_backup_status()'));
     assert(!result.expected_client_functions_unavailable.includes('public.list_safety_members()'));
     assert.equal((await db.query("select has_function_privilege('authenticated','public.list_safety_members()','EXECUTE') allowed")).rows[0].allowed,true);
   } finally { await db.close(); }

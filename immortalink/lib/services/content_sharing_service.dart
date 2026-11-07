@@ -7,6 +7,7 @@ enum ContentSharingState {
   archive,
   notRequested,
   ready,
+  readyNoCheck,
   permissionRequired,
   queued,
   checking,
@@ -31,6 +32,7 @@ class ContentSharingStatus {
       'archive': ContentSharingState.archive,
       'not_requested': ContentSharingState.notRequested,
       'ready': ContentSharingState.ready,
+      'ready_no_check': ContentSharingState.readyNoCheck,
       'permission_required': ContentSharingState.permissionRequired,
       'queued': ContentSharingState.queued,
       'checking': ContentSharingState.checking,
@@ -48,6 +50,7 @@ class ContentSharingStatus {
     if (state == null ||
         (data['can_request'] == true &&
             state != ContentSharingState.ready &&
+            state != ContentSharingState.readyNoCheck &&
             state != ContentSharingState.permissionRequired)) {
       throw const FormatException('Invalid sharing status');
     }
@@ -60,6 +63,8 @@ class ContentSharingStatus {
       'Existing archive. This memory has not been sent for safety checks.',
     ContentSharingState.notRequested => 'Saved. Sharing is turned off.',
     ContentSharingState.ready => 'Saved. Not yet shared with family.',
+    ContentSharingState.readyNoCheck =>
+      'Saved. Ready to share. Recordings and videos use reporting and blocking; they are not automatically checked.',
     ContentSharingState.permissionRequired =>
       'Saved, but not shared. Safety-check permission is needed from every contributor.',
     ContentSharingState.queued =>
@@ -71,7 +76,7 @@ class ContentSharingStatus {
     ContentSharingState.paused =>
       'Saved, but not shared. Safety checks are temporarily paused.',
     ContentSharingState.unsupported =>
-      'Saved, but not shared. Voice recordings and this media format cannot be checked yet.',
+      'Saved, but not shared. This media format cannot be checked yet.',
     ContentSharingState.inputLimit =>
       'Saved, but not shared. The text or media exceeds the checking limits, or the memory is empty.',
     ContentSharingState.limited =>

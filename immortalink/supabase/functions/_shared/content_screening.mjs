@@ -4,7 +4,8 @@
 export const SCREENING_LIMITS = Object.freeze({
   textCharacters: 20000,
   imageBytes: 10 * 1024 * 1024,
-  images: 4,
+  images: 20,
+  imagesPerRequest: 1,
   totalImageBytes: 10 * 1024 * 1024,
   requestBytes: 15 * 1024 * 1024,
   responseBytes: 32 * 1024,
@@ -46,7 +47,7 @@ function buildInput(content) {
   const { text = '', image } = content;
   if (Object.hasOwn(content, 'image') && Object.hasOwn(content, 'images')) return { error: 'INPUT_UNSUPPORTED' };
   const images = Object.hasOwn(content, 'images') ? content.images : image === undefined ? [] : [image];
-  if (!Array.isArray(images) || images.length > SCREENING_LIMITS.images) return { error: 'IMAGE_COUNT_INVALID' };
+  if (!Array.isArray(images) || images.length > SCREENING_LIMITS.imagesPerRequest) return { error: 'IMAGE_COUNT_INVALID' };
   if (typeof text !== 'string') return { error: 'TEXT_INVALID' };
   if (text.length > SCREENING_LIMITS.textCharacters) return { error: 'TEXT_TOO_LARGE' };
   const input = [];

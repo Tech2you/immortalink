@@ -1,6 +1,31 @@
 # Content safety launch runbook
 
-Status: 24 October 2026. Report/block/review foundation and Heiro Resend alerts deployed.
+## Current checkpoint — 5 November 2026
+
+The database, photo/processing/delivery workers and recovery schedule are now
+installed. Build 50 is installed and the owner confirms all testers have it.
+Two generated 20-photo live batches, a large image and the flagged-item review
+flow passed. The provider accepts one image per request, so the server reserves
+20 requests for a 20-photo memory. Separate permission and processing limits
+remain mandatory; recordings/videos retain report/block.
+
+**Activated 5 November at 22:35 South African time.** All 42 generated files and
+the remaining synthetic accounts/families/memories were removed, with independent
+zero-fixture readback. Checking/publication/worker/delivery are enabled and the
+new-capture cutoff is `2026-11-05T20:35:53.115596Z`. No archive backfill was run.
+The recovery job invokes only bounded dispatchers and makes no external request
+without due work. The owner confirmed the post-activation permission prompt and
+normal sharing. Independent metadata-only readback at 20:40:28 UTC confirmed a
+clear job and current published generation. Notification delivery remains a
+separate bounded queue; provider acceptance is not device-receipt proof.
+
+See [the current installation, test evidence and remaining launch work](checkpoints/content-screening-launch-2026-11-05.md)
+before changing any switches. Its source manifest maps the twelve local files
+to the single installed migration; do not redeploy those files as new migrations.
+
+## Historical checkpoint — 24 October 2026
+
+Report/block/review foundation and Heiro Resend alerts deployed.
 A text/photo screening adapter, separate permission controls, bounded queue and
 queue-to-provider worker are tested locally. A later default-off app candidate
 connects completed saves/edits to consent, sharing status and retry. It is not

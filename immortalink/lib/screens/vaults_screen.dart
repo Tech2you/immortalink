@@ -6,6 +6,8 @@ import '../utils/family_membership_limit.dart';
 import '../widgets/vault_load_failure.dart';
 import '../services/batched_signed_urls.dart';
 import '../services/family_directory.dart';
+import '../services/family_feed_page.dart';
+import '../widgets/paged_family_feed.dart';
 import 'dart:convert';
 import '../services/recent_cache.dart';
 import 'recently_viewed_screen.dart';
@@ -222,6 +224,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
       _vaultAvatarUrl = null;
       _familyFeed = [];
       ++_feedRequest;
+      _loadingFeed = false;
+      _loadingMoreFeed = false;
+      _feedRefreshQueued = false;
+      _feedHasMore = false;
+      _feedMoreError = null;
+      _feedCursor = null;
+      _feedAsOf = null;
       _avatarUrlCache.clear();
       _feedPhotosByMemoryId.clear();
       _feedVoiceByMemoryId.clear();
@@ -260,6 +269,13 @@ class _VaultsScreenState extends State<VaultsScreen> {
   List<_FeedItem> _familyFeed = [];
   String? _feedFamilyId;
   int _feedRequest = 0;
+  bool _loadingMoreFeed = false;
+  bool _feedHasMore = false;
+  bool _feedRefreshQueued = false;
+  bool _feedReloadMemberships = false;
+  String? _feedMoreError;
+  FamilyFeedCursor? _feedCursor;
+  DateTime? _feedAsOf;
 
   final Map<String, String?> _avatarUrlCache = {};
   final Map<String, List<_MemPhoto>> _feedPhotosByMemoryId = {};
@@ -268,7 +284,6 @@ class _VaultsScreenState extends State<VaultsScreen> {
   Timer? _familyFeedRefreshDebounce;
   String? _familyFeedRealtimeFamilyId;
   final ScrollController _scrollController = ScrollController();
-  final GlobalKey _familyFeedKey = GlobalKey();
 
   String? _playingKey;
   bool _isPlaying = false;
@@ -414,17 +429,9 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final context = _familyFeedKey.currentContext;
-      if (context != null) {
-        Scrollable.ensureVisible(
-          context,
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOutCubic,
-          alignment: 0.08,
-        );
-      } else if (_scrollController.hasClients) {
+      if (_scrollController.hasClients) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
+          0,
           duration: const Duration(milliseconds: 350),
           curve: Curves.easeOutCubic,
         );
@@ -1066,6 +1073,8 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   void _removeFamilyFeedRealtime() {
+    _familyFeedRefreshDebounce?.cancel();
+    _feedReloadMemberships = false;
     _familyFeedRealtimeFamilyId = null;
     final channel = _familyFeedChannel;
     _familyFeedChannel = null;
@@ -1075,14 +1084,22 @@ class _VaultsScreenState extends State<VaultsScreen> {
   }
 
   void _scheduleFamilyFeedRefresh({bool reloadMemberships = false}) {
+    _feedReloadMemberships |= reloadMemberships;
+    final familyId = _activeFamilyId;
     _familyFeedRefreshDebounce?.cancel();
     _familyFeedRefreshDebounce = Timer(const Duration(milliseconds: 700), () {
-      if (!mounted || _supabase.auth.currentUser == null) return;
-      if (reloadMemberships) {
-        unawaited(_loadVault());
+      if (!mounted ||
+          _supabase.auth.currentUser == null ||
+          familyId != _activeFamilyId) {
         return;
       }
-      unawaited(_loadFamilyFeed());
+      final memberships = _feedReloadMemberships;
+      _feedReloadMemberships = false;
+      if (memberships) {
+        unawaited(_loadVault());
+      } else {
+        unawaited(_loadFamilyFeed());
+      }
     });
   }
 
@@ -1092,7 +1109,19 @@ class _VaultsScreenState extends State<VaultsScreen> {
     unawaited(PushNotificationService.registerForCurrentUser());
   }
 
-  Future<void> _loadFamilyFeed() async {
+  Future<void> _loadFamilyFeed({bool loadMore = false}) async {
+    if (loadMore &&
+        (_loadingFeed ||
+            _loadingMoreFeed ||
+            !_feedHasMore ||
+            _familyFeed.length >= familyFeedMaximum)) {
+      return;
+    }
+    if (!loadMore && _loadingFeed && _feedFamilyId == _activeFamilyId) {
+      _feedRefreshQueued = true;
+      return;
+    }
+    final userId = _supabase.auth.currentUser?.id;
     final familyId = _activeFamilyId?.trim();
     final request = ++_feedRequest;
     final cacheEpoch = RecentCache.instance.generation;
@@ -1100,13 +1129,16 @@ class _VaultsScreenState extends State<VaultsScreen> {
         mounted &&
         request == _feedRequest &&
         cacheEpoch == RecentCache.instance.generation &&
-        familyId == _activeFamilyId?.trim();
+        familyId == _activeFamilyId?.trim() &&
+        userId == _supabase.auth.currentUser?.id;
     final nextPhotos = <String, List<_MemPhoto>>{};
     final nextVoices = <String, List<_VoiceNote>>{};
 
-    if (familyId == null || familyId.isEmpty) {
+    if (userId == null || familyId == null || familyId.isEmpty) {
       if (!mounted) return;
       setState(() {
+        _loadingMoreFeed = false;
+        _feedHasMore = false;
         _familyFeed = [];
         _feedError = null;
         _loadingFeed = false;
@@ -1116,9 +1148,14 @@ class _VaultsScreenState extends State<VaultsScreen> {
 
     if (!mounted) return;
     setState(() {
-      _loadingFeed = true;
+      _loadingFeed = !loadMore;
+      _loadingMoreFeed = loadMore;
       _feedError = null;
+      _feedMoreError = null;
       if (_feedFamilyId != familyId) {
+        _feedHasMore = false;
+        _feedCursor = null;
+        _feedAsOf = null;
         _familyFeed = [];
         _avatarUrlCache.clear();
         _feedPhotosByMemoryId.clear();
@@ -1128,15 +1165,12 @@ class _VaultsScreenState extends State<VaultsScreen> {
     });
 
     try {
-      final currentUserId = _supabase.auth.currentUser?.id;
-      final hiddenRowsFuture = currentUserId == null
-          ? Future<List<Map<String, dynamic>>>.value(<Map<String, dynamic>>[])
-          : _supabase
-                .from('family_feed_hidden_vaults')
-                .select('hidden_vault_id')
-                .eq('user_id', currentUserId)
-                .timeout(const Duration(seconds: 12))
-                .then((rows) => List<Map<String, dynamic>>.from(rows));
+      final hiddenRowsFuture = _supabase
+          .from('family_feed_hidden_vaults')
+          .select('hidden_vault_id')
+          .eq('user_id', userId)
+          .timeout(const Duration(seconds: 12))
+          .then((rows) => List<Map<String, dynamic>>.from(rows));
       final memberRowsFuture = loadFamilyMembers(_supabase, familyId);
 
       final accessRows = await Future.wait([
@@ -1150,6 +1184,21 @@ class _VaultsScreenState extends State<VaultsScreen> {
           .toSet();
 
       final memberRows = accessRows[1];
+      // Access is rechecked for every continuation, including a family leave
+      // while this screen was open. Never keep pages for a former membership.
+      if (!memberRows.any((row) => row['user_id'] == userId)) {
+        if (current()) {
+          setState(() {
+            _familyFeed = [];
+            _feedHasMore = false;
+            _feedCursor = null;
+            _feedPhotosByMemoryId.clear();
+            _feedVoiceByMemoryId.clear();
+            _avatarUrlCache.clear();
+          });
+        }
+        return;
+      }
       final memberUserIds = memberRows
           .map((row) => (row['user_id'] ?? '').toString().trim())
           .where((id) => id.isNotEmpty)
@@ -1158,12 +1207,20 @@ class _VaultsScreenState extends State<VaultsScreen> {
       final currentVaultId = (_vault?['id'] ?? '').toString();
       final now = DateTime.now();
       final cutoff = now.subtract(const Duration(days: 30));
+      final asOf = loadMore ? (_feedAsOf ?? now) : now;
+      final wanted = loadMore
+          ? (familyFeedMaximum - _familyFeed.length).clamp(
+              1,
+              familyFeedPageSize,
+            )
+          : _familyFeed.length.clamp(familyFeedPageSize, familyFeedMaximum);
 
       final vaultList = List<Map<String, dynamic>>.from(vaultRows);
       if (vaultList.isEmpty) {
         if (!current()) return;
         setState(() {
           _familyFeed = [];
+          _feedHasMore = false;
           _loadingFeed = false;
         });
         return;
@@ -1187,47 +1244,31 @@ class _VaultsScreenState extends State<VaultsScreen> {
         if (!current()) return;
         setState(() {
           _familyFeed = [];
+          _feedHasMore = false;
           _loadingFeed = false;
         });
         return;
       }
 
+      final page = await loadFamilyFeedPage(
+        _supabase,
+        vaultIds: vaultIds,
+        cutoff: cutoff,
+        asOf: asOf,
+        before: loadMore ? _feedCursor : null,
+        limit: wanted,
+      );
+      if (!current()) return;
+      final memories = page.rows;
+      final pageVaultIds = memories.map((m) => m['vault_id']).toSet();
       final nextAvatarUrlCache = <String, String?>{};
       final avatarUrlsFuture = batchedSignedUrls(
         _supabase,
         'avatars',
-        visibleVaults.map((v) => (v['avatar_path'] ?? '').toString()),
+        visibleVaults
+            .where((v) => pageVaultIds.contains(v['id']))
+            .map((v) => (v['avatar_path'] ?? '').toString()),
       );
-
-      final memoryRows = <Map<String, dynamic>>[];
-      for (final batch in familyIdBatches(vaultIds)) {
-        memoryRows.addAll(
-          await _supabase
-              .from('memories')
-              .select(
-                'id, vault_id, life_stage, prompt_text, prompt_key, body, created_at, share_to_family_feed',
-              )
-              .inFilter('vault_id', batch)
-              .eq('share_to_family_feed', true)
-              .neq('prompt_key', 'about_me')
-              .order('created_at', ascending: false)
-              .limit(12)
-              .timeout(const Duration(seconds: 12)),
-        );
-      }
-      memoryRows.sort(
-        (a, b) => (b['created_at'] ?? '').toString().compareTo(
-          (a['created_at'] ?? '').toString(),
-        ),
-      );
-
-      final allMemories = memoryRows.take(12);
-      final memories = allMemories.where((m) {
-        final createdRaw = (m['created_at'] ?? '').toString().trim();
-        final created = DateTime.tryParse(createdRaw)?.toLocal();
-        if (created == null) return false;
-        return !created.isBefore(cutoff);
-      }).toList();
       final memoryIds = memories
           .map((m) => (m['id'] ?? '').toString())
           .where((id) => id.isNotEmpty)
@@ -1343,39 +1384,59 @@ class _VaultsScreenState extends State<VaultsScreen> {
       }
 
       if (!current()) return;
+      final nextItems = <String, _FeedItem>{
+        if (loadMore)
+          for (final item in _familyFeed)
+            if (vaultMap.containsKey(item.vaultId) &&
+                !DateTime.parse(item.createdAt).isBefore(cutoff))
+              item.memoryId: item,
+        for (final item in items) item.memoryId: item,
+      }.values.take(familyFeedMaximum).toList();
       setState(() {
         _feedPhotosByMemoryId
           ..clear()
-          ..addAll(nextPhotos);
+          ..addEntries(nextItems.map((i) => MapEntry(i.memoryId, i.photos)));
         _feedVoiceByMemoryId
           ..clear()
-          ..addAll(nextVoices);
+          ..addEntries(
+            nextItems.map((i) => MapEntry(i.memoryId, i.voiceNotes)),
+          );
         _avatarUrlCache
           ..clear()
-          ..addAll(nextAvatarUrlCache);
-        _familyFeed = items;
-        _loadingFeed = false;
-      });
-    } on PostgrestException catch (e) {
-      if (!current()) return;
-      setState(() {
-        _familyFeed = [];
-        _feedPhotosByMemoryId.clear();
-        _feedVoiceByMemoryId.clear();
-        _avatarUrlCache.clear();
-        _feedError = publicErrorMessage(e);
-        _loadingFeed = false;
+          ..addEntries(nextItems.map((i) => MapEntry(i.vaultId, i.avatarUrl)));
+        _familyFeed = nextItems;
+        _feedAsOf = asOf;
+        _feedHasMore = page.hasMore && nextItems.length < familyFeedMaximum;
+        _feedCursor = _feedHasMore ? page.next : null;
       });
     } catch (e) {
       if (!current()) return;
+      final denied =
+          e is PostgrestException &&
+          ['42501', 'PGRST301', 'PGRST302', 'PGRST303'].contains(e.code);
       setState(() {
-        _familyFeed = [];
-        _feedPhotosByMemoryId.clear();
-        _feedVoiceByMemoryId.clear();
-        _avatarUrlCache.clear();
-        _feedError = publicErrorMessage(e);
-        _loadingFeed = false;
+        if (loadMore && !denied) {
+          _feedMoreError = 'Could not load more memories. Please try again.';
+        } else {
+          _familyFeed = [];
+          _feedHasMore = false;
+          _feedPhotosByMemoryId.clear();
+          _feedVoiceByMemoryId.clear();
+          _avatarUrlCache.clear();
+          _feedError = publicErrorMessage(e);
+        }
       });
+    } finally {
+      if (current()) {
+        setState(() {
+          _loadingFeed = false;
+          _loadingMoreFeed = false;
+        });
+        if (_feedRefreshQueued) {
+          _feedRefreshQueued = false;
+          unawaited(_loadFamilyFeed());
+        }
+      }
     }
   }
 
@@ -2243,106 +2304,98 @@ class _VaultsScreenState extends State<VaultsScreen> {
         ),
       );
     }
-    return Column(
-      children: _familyFeed
-          .map(
-            (item) => StoryFeedItem(
-              key: ValueKey(item.memoryId),
-              title: item.promptText,
-              body: item.body,
-              onOpen: () => _openFeedMemory(item),
-              author: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: heiroIce,
-                    child: item.hasAvatar
-                        ? ClipOval(
-                            child: VaultMedia.network(
-                              item.avatarUrl!,
-                              width: 40,
-                              height: 40,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, _, _) =>
-                                  const Icon(Icons.person_outline),
-                            ),
-                          )
-                        : const Icon(Icons.person_outline),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.displayName,
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        Text(
-                          '${_timeAgo(item.createdAt)} · Family',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Colors.black54,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Open memory',
-                    onPressed: () => _openFeedMemory(item),
-                    icon: const Icon(Icons.open_in_full, size: 18),
-                  ),
-                  MemoryReportMenu(memoryId: item.memoryId),
-                ],
-              ),
-              photos: [
-                for (var i = 0; i < item.photos.length; i++)
-                  InkWell(
-                    onTap: () => _openPhotoGallery(item.photos, i),
-                    child: VaultMedia.network(
-                      item.photos[i].url,
-                      fit: BoxFit.contain,
-                      gaplessPlayback: true,
-                    ),
-                  ),
-              ],
-              recordings: [
-                for (final voice in item.voiceNotes)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    decoration: BoxDecoration(
-                      color: heiroIce,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                      leading: IconButton.filled(
-                        tooltip: _playingKey == voice.id && _isPlaying
-                            ? 'Pause recording'
-                            : 'Play recording',
-                        onPressed: () => _togglePlay(voice, playKey: voice.id),
-                        icon: Icon(
-                          _playingKey == voice.id && _isPlaying
-                              ? Icons.pause
-                              : Icons.play_arrow,
-                        ),
-                      ),
-                      title: Text(voice.title),
-                      trailing: voice.durationSeconds == null
-                          ? const Icon(Icons.mic_none, size: 18)
-                          : Text(
-                              '${voice.durationSeconds! ~/ 60}:${(voice.durationSeconds! % 60).toString().padLeft(2, '0')}',
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                    ),
-                  ),
-              ],
-            ),
-          )
-          .toList(),
-    );
+    return const SizedBox.shrink();
   }
+
+  Widget _buildFeedItem(_FeedItem item) => StoryFeedItem(
+    key: ValueKey(item.memoryId),
+    title: item.promptText,
+    body: item.body,
+    onOpen: () => _openFeedMemory(item),
+    author: Row(
+      children: [
+        CircleAvatar(
+          radius: 20,
+          backgroundColor: heiroIce,
+          child: item.hasAvatar
+              ? ClipOval(
+                  child: VaultMedia.network(
+                    item.avatarUrl!,
+                    width: 40,
+                    height: 40,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const Icon(Icons.person_outline),
+                  ),
+                )
+              : const Icon(Icons.person_outline),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.displayName,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              Text(
+                '${_timeAgo(item.createdAt)} · Family',
+                style: const TextStyle(fontSize: 13, color: Colors.black54),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: 'Open memory',
+          onPressed: () => _openFeedMemory(item),
+          icon: const Icon(Icons.open_in_full, size: 18),
+        ),
+        MemoryReportMenu(memoryId: item.memoryId),
+      ],
+    ),
+    photos: [
+      for (var i = 0; i < item.photos.length; i++)
+        InkWell(
+          onTap: () => _openPhotoGallery(item.photos, i),
+          child: VaultMedia.network(
+            item.photos[i].url,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+          ),
+        ),
+    ],
+    recordings: [
+      for (final voice in item.voiceNotes)
+        Container(
+          margin: const EdgeInsets.only(bottom: 6),
+          decoration: BoxDecoration(
+            color: heiroIce,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            leading: IconButton.filled(
+              tooltip: _playingKey == voice.id && _isPlaying
+                  ? 'Pause recording'
+                  : 'Play recording',
+              onPressed: () => _togglePlay(voice, playKey: voice.id),
+              icon: Icon(
+                _playingKey == voice.id && _isPlaying
+                    ? Icons.pause
+                    : Icons.play_arrow,
+              ),
+            ),
+            title: Text(voice.title),
+            trailing: voice.durationSeconds == null
+                ? const Icon(Icons.mic_none, size: 18)
+                : Text(
+                    '${voice.durationSeconds! ~/ 60}:${(voice.durationSeconds! % 60).toString().padLeft(2, '0')}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+          ),
+        ),
+    ],
+  );
 
   Future<void> _startMemory() async {
     if (_vault == null) return;
@@ -2758,23 +2811,26 @@ class _VaultsScreenState extends State<VaultsScreen> {
                       Expanded(
                         child: RefreshIndicator(
                           onRefresh: () => _loadVault(showLoading: false),
-                          child: ListView(
+                          child: PagedFamilyFeed(
                             controller: _scrollController,
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            children: [
-                              if (_familyMemberships.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: _familyTreesCard(),
-                                ),
-                              KeyedSubtree(
-                                key: _familyFeedKey,
-                                child: _buildFeedSection(
-                                  _familyMemberships.isNotEmpty,
-                                ),
-                              ),
-                              const SizedBox(height: 32),
-                            ],
+                            itemCount: _familyFeed.length,
+                            itemKey: (index) =>
+                                ValueKey(_familyFeed[index].memoryId),
+                            itemBuilder: (_, index) =>
+                                _buildFeedItem(_familyFeed[index]),
+                            empty: _buildFeedSection(
+                              _familyMemberships.isNotEmpty,
+                            ),
+                            hasMore: _feedHasMore,
+                            loading: _loadingFeed || _loadingMoreFeed,
+                            error: _feedMoreError,
+                            onLoadMore: () => _loadFamilyFeed(loadMore: true),
+                            header: _familyMemberships.isEmpty
+                                ? Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: _familyTreesCard(),
+                                  )
+                                : null,
                           ),
                         ),
                       ),

@@ -4,7 +4,8 @@ const fail = () => new Error('BUNDLED_DECODER_UNAVAILABLE');
 
 // The deployment supplies a fixed local asset reader, not an input-controlled
 // path or network fallback. One failed initialization stays failed per isolate.
-export function createBundledNormalizerLoader({ bytes, sha256, readBinary, createPreparer, onStage = () => {} } = {}) {
+/** @param {{bytes: number, sha256: string, readBinary: (max: number) => Promise<Uint8Array>, createPreparer: (bytes: Uint8Array) => Promise<Function>, onStage?: (stage: string) => void}} options */
+export function createBundledNormalizerLoader({ bytes, sha256, readBinary, createPreparer, onStage = () => {} }) {
   if (!Number.isSafeInteger(bytes) || bytes < 8 || bytes > 20 * 1024 * 1024 ||
       typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256) ||
       typeof readBinary !== 'function' || typeof createPreparer !== 'function' || typeof onStage !== 'function') throw fail();

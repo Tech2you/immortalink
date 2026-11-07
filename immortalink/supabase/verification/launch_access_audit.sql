@@ -1,6 +1,6 @@
 -- Read-only catalog audit. Run with an authorized database administrator.
 -- This detects access-surface drift, not correctness of every function/policy.
--- Expected signatures reflect the 24 October 2026 client contract, not blanket
+-- Expected signatures reflect the 5 November 2026 client contract, not blanket
 -- security clearance. Investigate findings; never automatically grant/revoke.
 -- This includes LOCAL pending screening permission, sharing and publication migrations. Until
 -- deployed, four missing RPCs and four missing policy helpers in live are expected, not permission to
@@ -9,6 +9,10 @@ with
 client_roles(role_name) as (values ('anon'::text), ('authenticated'::text)),
 expected_app(signature) as (values
   ('public.begin_family_sponsorship(uuid)'),
+  ('public.begin_family_storage_contribution(uuid)'),
+  ('public.business_access_status()'),
+  ('public.business_ai_budget_status()'),
+  ('public.business_media_backup_status()'),
   ('public.can_access_legacy_family(uuid)'),
   ('public.can_access_legacy_media_from_path(text)'),
   ('public.can_access_legacy_member(uuid)'),
@@ -17,6 +21,7 @@ expected_app(signature) as (values
   ('public.can_read_shared_media_object(text,text)'),
   ('public.can_read_vault_media(uuid)'),
   ('public.create_family_group_and_link_vault(text)'),
+  ('public.create_family_relative(uuid,uuid,jsonb)'),
   ('public.create_legacy_predecessor(uuid,text,text,text,integer,integer,text)'),
   ('public.create_legacy_relative(uuid,text,uuid,text,text,text,integer,integer,text)'),
   ('public.delete_legacy_predecessor(uuid)'),
@@ -69,7 +74,7 @@ expected_client_function as (
 definers as (
   select p.oid, p.proconfig, p.oid::regprocedure::text as signature
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-  where p.prosecdef and n.nspname in ('public','content_safety')
+  where p.prosecdef and n.nspname in ('public','content_safety','media_backup')
     and not exists (select 1 from pg_depend d where d.classid='pg_proc'::regclass
       and d.objid=p.oid and d.deptype='e')
 ),
@@ -77,7 +82,7 @@ relations as (
   select c.oid,c.relkind,c.relrowsecurity,c.reloptions,n.nspname,
     format('%I.%I',n.nspname,c.relname) as identity
   from pg_class c join pg_namespace n on n.oid=c.relnamespace
-  where n.nspname in ('public','content_safety','storage')
+  where n.nspname in ('public','content_safety','storage','heiro_security','heiro_business','media_backup')
     and c.relkind in ('r','p','v','m')
     and not exists (select 1 from pg_depend d where d.classid='pg_class'::regclass
       and d.objid=c.oid and d.deptype='e')
@@ -112,7 +117,7 @@ findings(check_name,object_identity) as (
   union all
   select 'client_writable_schemas',r.role_name || ':' || n.nspname
     from pg_namespace n cross join client_roles r
-    where n.nspname in ('public','content_safety','storage')
+    where n.nspname in ('public','content_safety','storage','heiro_security','heiro_business','media_backup')
       and has_schema_privilege(r.role_name,n.oid,'CREATE')
   union all
   select 'client_tables_without_rls',r.role_name || ':' || t.identity
@@ -129,7 +134,7 @@ findings(check_name,object_identity) as (
         or has_any_column_privilege(r.role_name,t.oid,'SELECT'))
   union all
   select 'private_review_relations_accessible',r.role_name || ':' || t.identity
-    from relations t cross join client_roles r where t.nspname='content_safety'
+    from relations t cross join client_roles r where t.nspname in ('content_safety','heiro_security','heiro_business','media_backup')
       and (has_table_privilege(r.role_name,t.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
         or has_any_column_privilege(r.role_name,t.oid,'SELECT,INSERT,UPDATE,REFERENCES'))
   union all

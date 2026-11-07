@@ -98,11 +98,14 @@ class _LegacyVaultCompanionScreenState
   }
 
   Future<void> _scrollToBottom() async {
-    await Future.delayed(const Duration(milliseconds: 80));
-    if (!_scroll.hasClients) return;
-    _scroll.animateTo(
-      _scroll.position.maxScrollExtent + 400,
-      duration: const Duration(milliseconds: 250),
+    // Wait for the new bubble's layout, then stop at the real content boundary.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_scroll.hasClients) return;
+    final target = _scroll.position.maxScrollExtent;
+    if ((target - _scroll.offset).abs() < 1) return;
+    await _scroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 180),
       curve: Curves.easeOut,
     );
   }
@@ -151,9 +154,9 @@ class _LegacyVaultCompanionScreenState
       _controller.clear();
     });
 
-    _focus.requestFocus();
-    await _scrollToBottom();
+    unawaited(_scrollToBottom());
 
+    var followReply = true;
     try {
       final headers = _authHeadersOrEmpty();
 
@@ -208,6 +211,7 @@ class _LegacyVaultCompanionScreenState
       }
 
       if (!mounted) return;
+      followReply = _scroll.hasClients && _scroll.position.extentAfter < 80;
       setState(() {
         final idx = _msgs.lastIndexWhere(
           (m) => m.role == _Role.assistant && m.isTyping,
@@ -221,6 +225,7 @@ class _LegacyVaultCompanionScreenState
     } on FunctionException catch (e) {
       final msg = (e.details ?? e.toString()).toString();
       if (!mounted) return;
+      followReply = _scroll.hasClients && _scroll.position.extentAfter < 80;
       setState(() {
         final idx = _msgs.lastIndexWhere(
           (m) => m.role == _Role.assistant && m.isTyping,
@@ -234,6 +239,7 @@ class _LegacyVaultCompanionScreenState
       });
     } on TimeoutException {
       if (!mounted) return;
+      followReply = _scroll.hasClients && _scroll.position.extentAfter < 80;
       setState(() {
         final idx = _msgs.lastIndexWhere(
           (m) => m.role == _Role.assistant && m.isTyping,
@@ -248,6 +254,7 @@ class _LegacyVaultCompanionScreenState
       });
     } catch (e) {
       if (!mounted) return;
+      followReply = _scroll.hasClients && _scroll.position.extentAfter < 80;
       setState(() {
         final idx = _msgs.lastIndexWhere(
           (m) => m.role == _Role.assistant && m.isTyping,
@@ -260,9 +267,10 @@ class _LegacyVaultCompanionScreenState
         }
       });
     } finally {
-      if (mounted) setState(() => _sending = false);
-      _focus.requestFocus();
-      await _scrollToBottom();
+      if (mounted) {
+        setState(() => _sending = false);
+        if (followReply) await _scrollToBottom();
+      }
     }
   }
 
@@ -404,8 +412,10 @@ class _LegacyVaultCompanionScreenState
                   child: TextField(
                     focusNode: _focus,
                     controller: _controller,
-                    enabled: _accepted && !_sending,
+                    enabled: _accepted,
                     textInputAction: TextInputAction.send,
+                    onEditingComplete:
+                        () {}, // Sending must not dismiss the keyboard.
                     onSubmitted: (_) => _send(),
                     decoration: InputDecoration(
                       hintText: _accepted ? 'Ask a question…' : 'Loading…',

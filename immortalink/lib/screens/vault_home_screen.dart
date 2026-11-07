@@ -26,6 +26,7 @@ import '../utils/image_upload_optimizer.dart';
 import '../utils/media_upload_policy.dart';
 import '../utils/vault_media_upload.dart';
 import '../widgets/vault_media.dart';
+import '../widgets/vault_media_gallery.dart';
 import '../utils/web_audio_recorder.dart';
 import '../widgets/logo_watermark.dart';
 import '../widgets/heiro_surface.dart';
@@ -1148,14 +1149,23 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
-  void _openHighlightsGallery() {
+  void _openHighlightsGallery([int initialIndex = 0]) {
     if (_featuredPhotos.isEmpty) return;
+    if (_readOnly) {
+      openVaultMediaGallery(
+        context,
+        _featuredPhotos.map((item) => item['url'] ?? '').toList(),
+        initialIndex: initialIndex,
+        cachedOnly: true,
+      );
+      return;
+    }
 
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        final pc = PageController();
-        int idx = 0;
+        final pc = PageController(initialPage: initialIndex);
+        int idx = initialIndex;
 
         final maxH = MediaQuery.of(ctx).size.height * 0.85;
         final maxW = MediaQuery.of(ctx).size.width * 0.95;
@@ -2364,6 +2374,33 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
     }
   }
 
+  String? _editingMemoryId;
+  final Set<String> _pendingSharingChecks = {};
+
+  Future<void> _checkSharingAfterMediaEdit(
+    String memoryId,
+    String? userId,
+  ) async {
+    if (!contentScreeningControlsEnabled ||
+        !mounted ||
+        userId == null ||
+        _client.auth.currentUser?.id != userId)
+      return;
+    if (_editingMemoryId == memoryId) {
+      _pendingSharingChecks.add(memoryId);
+      return;
+    }
+    await showMemorySharingStatus(
+      context,
+      kind: 'memory',
+      targetId: memoryId,
+      client: _client,
+      expectedUserId: userId,
+      requestAfterSave: true,
+      onlyIfNeedsRequest: true,
+    );
+  }
+
   bool _selectingMemoryMedia = false;
   Future<void> _uploadMemoryPhoto(String memoryId) async {
     if (_selectingMemoryMedia) return;
@@ -2391,6 +2428,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       if (count > 0) {
         await _refreshVault();
         _toast('$count media items added to memory.');
+        await _checkSharingAfterMediaEdit(memoryId, userId);
       }
     } catch (e) {
       _connection.report(e);
@@ -2401,6 +2439,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _deleteMemoryPhoto(_MemPhoto p) async {
+    final sharingUserId = _client.auth.currentUser?.id;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2425,6 +2464,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       await _client.from('memory_photos').delete().eq('id', p.id);
       await _loadMemoryPhotosForVault();
       _toast('Media deleted.');
+      await _checkSharingAfterMediaEdit(p.memoryId, sharingUserId);
     } catch (e) {
       _connection.report(e);
       _toast(publicErrorMessage(e));
@@ -2843,6 +2883,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
       await _loadMemoryVoiceForVault();
       _toast('Voice added to memory.');
+      await _checkSharingAfterMediaEdit(memoryId, userId);
     } catch (e) {
       _connection.report(e);
       await _handleUploadError(e, 'Add voice failed');
@@ -2923,6 +2964,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
 
           await _loadMemoryVoiceForVault();
           _toast('Voice added to memory.');
+          await _checkSharingAfterMediaEdit(memoryId, userId);
         } catch (e) {
           _connection.report(e);
           await _handleUploadError(e, 'Add voice failed');
@@ -2932,6 +2974,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _deleteMemoryVoice(String memoryId, _VoiceNote v) async {
+    final sharingUserId = _client.auth.currentUser?.id;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2966,6 +3009,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         memoryId: memoryId,
       );
       _toast('Voice note deleted.');
+      await _checkSharingAfterMediaEdit(memoryId, sharingUserId);
     } catch (e) {
       _connection.report(e);
       _toast(publicErrorMessage(e));
@@ -2973,6 +3017,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
   }
 
   Future<void> _renameMemoryVoice(String memoryId, _VoiceNote v) async {
+    final sharingUserId = _client.auth.currentUser?.id;
     final newTitle = await _promptRename(
       title: 'Rename voice note',
       initial: v.title,
@@ -2987,6 +3032,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           .eq('id', v.id);
       await _loadMemoryVoiceForVault();
       _toast('Renamed.');
+      await _checkSharingAfterMediaEdit(memoryId, sharingUserId);
     } catch (e) {
       _connection.report(e);
       _toast(publicErrorMessage(e));
@@ -3435,7 +3481,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
                   final photo = _featuredPhotos[index];
                   return InkWell(
                     borderRadius: BorderRadius.circular(18),
-                    onTap: _readOnly ? null : _openHighlightsGallery,
+                    onTap: () => _openHighlightsGallery(index),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(18),
                       child: VaultMedia.network(
@@ -3494,6 +3540,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           targetId: id,
           client: _client,
           requestAfterSave: true,
+          onlyIfNeedsRequest: true,
         );
       }
     } catch (e) {
@@ -3777,10 +3824,19 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
               itemCount: media.length,
               itemBuilder: (_, index) => ClipRRect(
                 borderRadius: BorderRadius.circular(14),
-                child: VaultMedia.network(
-                  media[index]['url'] ?? '',
-                  cachedOnly: _readOnly,
-                  fit: BoxFit.cover,
+                child: InkWell(
+                  key: ValueKey('vault-media-$index'),
+                  onTap: () => openVaultMediaGallery(
+                    context,
+                    media.map((item) => item['url'] ?? '').toList(),
+                    initialIndex: index,
+                    cachedOnly: _readOnly,
+                  ),
+                  child: VaultMedia.network(
+                    media[index]['url'] ?? '',
+                    cachedOnly: _readOnly,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
             ),
@@ -3872,6 +3928,8 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
         peopleController.text.trim().isNotEmpty ||
         locationController.text.trim().isNotEmpty;
 
+    final sharingUserId = _client.auth.currentUser?.id;
+    _editingMemoryId = memoryId;
     final result = await showDialog<Map<String, String>>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -4184,7 +4242,13 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
       ),
     );
 
-    if (result == null) return;
+    _editingMemoryId = null;
+    final mediaChanged = _pendingSharingChecks.remove(memoryId);
+    if (result == null) {
+      if (mediaChanged)
+        await _checkSharingAfterMediaEdit(memoryId, sharingUserId);
+      return;
+    }
 
     final newPromptText = (result['prompt_text'] ?? '').trim();
     final newBody = (result['body'] ?? '').trim();
@@ -4237,6 +4301,7 @@ class _VaultHomeScreenState extends State<VaultHomeScreen> {
           targetId: memoryId,
           client: _client,
           requestAfterSave: true,
+          onlyIfNeedsRequest: true,
         );
       }
     } on PostgrestException catch (e) {

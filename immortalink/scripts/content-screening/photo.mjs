@@ -6,7 +6,7 @@ sharp.cache(false);
 sharp.concurrency(1);
 
 export const PHOTO_LIMITS = Object.freeze({ inputBytes: 12 * 1024 * 1024,
-  pixels: 24_000_000, edge: 2048, outputBytes: 2 * 1024 * 1024, timeoutSeconds: 4 });
+  pixels: 24_000_000, edge: 1024, outputBytes: 512 * 1024, timeoutSeconds: 4 });
 const formats = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' };
 const bad = () => new Error('PHOTO_PREPARATION_FAILED');
 
@@ -26,7 +26,7 @@ export async function preparePhoto(bytes, mime) {
     // and output one opaque JPEG. Do not silently inspect only an animation frame.
     const output = await image.rotate().resize(PHOTO_LIMITS.edge, PHOTO_LIMITS.edge,
       { fit: 'inside', withoutEnlargement: true }).flatten({ background: '#ffffff' })
-      .toColourspace('srgb').jpeg({ quality: 85, chromaSubsampling: '4:4:4' })
+      .toColourspace('srgb').jpeg({ quality: 75, chromaSubsampling: '4:2:0' })
       .timeout({ seconds: PHOTO_LIMITS.timeoutSeconds }).toBuffer();
     if (!output.length || output.length > PHOTO_LIMITS.outputBytes) throw bad();
     return { bytes: new Uint8Array(output), mime: 'image/jpeg' };

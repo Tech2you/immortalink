@@ -1,0 +1,71 @@
+Heiro AI chat grounding and stability — 2026-11-01
+
+Scope
+- User requested AI-only fixes for chat jumping and the grandparents story
+  question incorrectly returning the viewer's relationship to the profile.
+- Existing build 47 media changes were retained without editing them.
+- No database migration, billing, storage, family tree, upload, account, or
+  App Store/TestFlight changes were made in this task.
+
+Changes
+- Relationship shortcut matches explicit viewer-to-profile questions only.
+  Story questions mentioning relatives go through grounded source retrieval.
+- Relationship context uses confirmed graph links, not family roles/slots.
+  Bounded recorded-relative counts distinguish the profile from the viewer.
+  Missing, failed and truncated graph results are handled conservatively.
+- Prompts define my/your perspective and prohibit invented relationships,
+  favourites, events and emotions. Source text is treated as untrusted data.
+- Empty profiles return a specific missing-information answer without a model
+  call. Zero recorded relatives means no linked profiles, not nonexistence.
+- Icebreaker suggestions require source evidence. Missing-data responses are
+  concise instead of returning a generic list of topics.
+- Both AI chat screens keep the keyboard and next-message draft intact while
+  waiting, scroll only to the real boundary, and respect reading older messages.
+- Current gpt-4o-mini model, 220-token answer cap, bounded retrieval and paid
+  usage/consent/access checks remain in place. Timeout timers are cleared.
+
+Verification
+- 434 Flutter tests passed with the existing phone purchase configuration.
+- Separate default/unconfigured purchase safeguard: 1 passed.
+- 32 backend handler, grounding and graph checks passed with fake data and
+  model responses; 5 additional cost and consent checks passed.
+- Deno type check and focused Flutter analysis passed; git diff --check passed.
+- Tests cover the exact Bremner example, live/legacy/self paths, missing links,
+  access/consent/quota guards, keyboard Send, pending replies, drafts and scroll.
+- These checks validate routing and prompt context, not every possible model
+  response. Final physical-device interaction remains for the user to confirm.
+- Baseline SHA-256 comparison of 420 existing source/test files shows only
+  the two AI screens and vault_ai_chat/index.ts changed during this task.
+- New files are AI grounding helpers/tests, a handler harness, the chat widget
+  regression test, and this checkpoint.
+- Initial broad test runs used incomplete Apple configuration and failed
+  configuration-dependent tests; the final matching configuration passed.
+
+Delivery
+- vault_ai_chat deployed from version 88 to ACTIVE version 89, verify_jwt=true.
+- All five deployed files were read back and match local sources exactly.
+- Live unauthenticated POST returns 401; OPTIONS returns 200, confirming the
+  function starts. No paid live AI evaluation performed.
+- Signed iOS 1.0.0 (48) release build succeeded and codesign verification passed.
+- Installed in place on the connected iPhone; device inventory confirms build 48.
+- Launch attempt was blocked because the phone was locked. User must unlock
+  and open Heiro for the final physical interaction check. No uninstall occurred.
+
+Evidence and rollback
+- /private/tmp/heiro48-configured-tests.log
+- /private/tmp/heiro48-default-config.log
+- /private/tmp/heiro48-chat-tests.log
+- /private/tmp/heiro48-handler-tests.log
+- /private/tmp/heiro48-budget-tests.log
+- /private/tmp/heiro48-deno-check.log
+- /private/tmp/heiro48-analyze.log
+- /private/tmp/heiro48-build.log
+- /private/tmp/heiro48-install.json
+- /private/tmp/heiro48-installed-apps.json
+- /private/tmp/heiro48-launch.log
+- /private/tmp/heiro48-baseline.json
+- /private/tmp/heiro48-source-before/ contains pre-task AI source copies.
+- /private/tmp/heiro48-live-before/ contains the pre-deploy function source.
+  Backup text files contain an added trailing newline from capture only.
+- Temporary evidence is local and may be removed by macOS. No credentials or
+  private memory contents are recorded here.

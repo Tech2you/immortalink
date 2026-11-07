@@ -105,31 +105,63 @@ class _RecentPhotoState extends State<RecentPhoto> {
       if (widget.cachedOnly || ConnectionStatus.instance.offline) {
         throw http.ClientException('Offline');
       }
-      final response = await client
-          .send(http.Request('GET', Uri.parse(widget.url)))
-          .timeout(const Duration(seconds: 8));
-      if (response.statusCode != 200) {
-        if (epoch == _cache.generation &&
-            [401, 403, 404, 410].contains(response.statusCode)) {
-          await _cache.remove(key);
-        }
-        throw StateError('Photo unavailable (${response.statusCode})');
+      final local = await _cache
+          .readEntry(key)
+          .timeout(
+            const Duration(milliseconds: 200),
+            onTimeout: () =>
+                null, // Slow/full disks must not delay online photos.
+          );
+      if (!mounted || request != _request || epoch != _cache.generation) return;
+      final get = http.Request('GET', Uri.parse(widget.url));
+      final tag = local?.entityTag;
+      if (tag != null) get.headers['If-None-Match'] = tag;
+      var response = await client.send(get).timeout(const Duration(seconds: 8));
+      // A 304 only authorizes the exact bytes whose validator we sent. Older
+      // cache entries have no validator and must still receive a full response.
+      if (response.statusCode == 304 && tag == null) {
+        await response.stream.drain<void>().timeout(const Duration(seconds: 8));
+        response = await client
+            .send(http.Request('GET', Uri.parse(widget.url)))
+            .timeout(const Duration(seconds: 8));
       }
-      final builder = BytesBuilder(copy: false);
-      await for (final chunk in response.stream.timeout(
-        const Duration(seconds: 8),
-      )) {
-        builder.add(chunk);
-        if (builder.length > 20 * 1024 * 1024) {
-          onlineOnly = true;
-          throw StateError('Photo is too large for offline viewing');
+      if (response.statusCode == 304 && tag != null) {
+        await response.stream.drain<void>().timeout(const Duration(seconds: 8));
+        bytes = local!.bytes;
+      } else {
+        if (response.statusCode != 200) {
+          if (epoch == _cache.generation &&
+              [401, 403, 404, 410].contains(response.statusCode)) {
+            await _cache.remove(key);
+          }
+          throw StateError('Photo unavailable (${response.statusCode})');
         }
+        final builder = BytesBuilder(copy: false);
+        await for (final chunk in response.stream.timeout(
+          const Duration(seconds: 8),
+        )) {
+          builder.add(chunk);
+          if (builder.length > 20 * 1024 * 1024) {
+            onlineOnly = true;
+            throw StateError('Photo is too large for offline viewing');
+          }
+        }
+        bytes = builder.takeBytes();
+        // Only store decodable images, not a successful HTML/error response.
+        final codec = await ui.instantiateImageCodec(bytes, targetWidth: 1);
+        codec.dispose();
+        // Disk persistence is optional; don't hold an already downloaded image
+        // behind other cache writes. The cache rejects writes after account changes.
+        unawaited(
+          _cache.put(
+            key,
+            bytes,
+            epoch: epoch,
+            kind: 'photo',
+            entityTag: response.headers['etag'],
+          ),
+        );
       }
-      bytes = builder.takeBytes();
-      // Only store decodable images, not a successful HTML/error response.
-      final codec = await ui.instantiateImageCodec(bytes, targetWidth: 1);
-      codec.dispose();
-      await _cache.put(key, bytes, epoch: epoch, kind: 'photo');
     } on http.ClientException catch (e) {
       error = e;
       if (epoch == _cache.generation) bytes = await _cache.read(key);

@@ -5,8 +5,7 @@ enum LegalDestination { privacy, terms, support }
 
 Uri legalUrl(LegalDestination destination) => Uri.parse(switch (destination) {
   LegalDestination.privacy => 'https://heiro.app/privacy.html',
-  LegalDestination.terms =>
-    'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/',
+  LegalDestination.terms => 'https://heiro.app/terms.html',
   LegalDestination.support =>
     'mailto:linebreakers@outlook.com?subject=Heiro%20support',
 });
@@ -45,18 +44,35 @@ class LegalLinks extends StatelessWidget {
   const LegalLinks({super.key});
 
   @override
-  Widget build(BuildContext context) => Wrap(
-    alignment: WrapAlignment.center,
-    spacing: 8,
-    children: [
-      TextButton(
-        onPressed: () => openLegalLink(context, LegalDestination.privacy),
-        child: const Text('Privacy Policy'),
-      ),
-      TextButton(
-        onPressed: () => openLegalLink(context, LegalDestination.terms),
-        child: const Text('Terms of Use'),
-      ),
-    ],
+  Widget build(BuildContext context) => SingleChildScrollView(
+    primary: false,
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          children: [
+            TextButton(
+              onPressed: () => openLegalLink(context, LegalDestination.privacy),
+              child: const Text('Privacy Policy'),
+            ),
+            TextButton(
+              onPressed: () => openLegalLink(context, LegalDestination.terms),
+              child: const Text('Terms of Use'),
+            ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            'Keep original copies. Storage and recovery have limits; see the '
+            'Terms of Use. Your consumer rights remain protected.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      ],
+    ),
   );
 }

@@ -2,8 +2,9 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { hasAiProcessingConsent } from "../_shared/ai_processing_consent.ts";
 import { MAX_AUDIO_BYTES, validateAudio } from "./audio_validation.ts";
 import { runTranscriptionJob, TranscriptionError } from "./transcription_job.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
 
+import { reserveBudget, AiBudgetError } from "../_shared/ai_budget.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -130,8 +131,10 @@ async function transcribeWithOpenAI({
   apiKey,
   audioBytes,
   storagePath,
+  reservation,
 }: {
   apiKey: string;
+  reservation: Awaited<ReturnType<typeof reserveBudget>>;
   audioBytes: Uint8Array;
   storagePath: string;
 }): Promise<string> {
@@ -142,19 +145,12 @@ async function transcribeWithOpenAI({
   const file = new File([new Uint8Array(audioBytes)], filename, { type: mime });
   form.append("file", file);
 
-  const resp = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+  const data = await reservation.run(() => fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
     signal: AbortSignal.timeout(30000),
-  });
-
-  if (!resp.ok) {
-    await resp.text().catch(() => "");
-    throw new Error(`OpenAI transcription failed ${resp.status}`);
-  }
-
-  const data = await resp.json().catch(() => ({}));
+  }));
   return textClean((data?.text ?? "").toString());
 }
 
@@ -170,6 +166,7 @@ async function verifiedTranscription({ admin, userClient, userId, apiKey, storag
   catch { throw new TranscriptionError(422, "AUDIO_INVALID", "The recording is saved. Transcription needs a valid recording no longer than two minutes."); }
   const token = crypto.randomUUID();
   const scope = familyId || vaultId;
+  let reservation: Awaited<ReturnType<typeof reserveBudget>> | undefined;
   return await runTranscriptionJob({
     claim: async () => {
       const { data, error } = await admin.rpc("claim_voice_transcription", {
@@ -178,14 +175,18 @@ async function verifiedTranscription({ admin, userClient, userId, apiKey, storag
       if (error) throw new TranscriptionError(503, "TRANSCRIPTION_UNAVAILABLE", "The recording is saved. Transcription is temporarily unavailable.");
       return data;
     },
-    consume: () => consumeVoiceTranscriptionUsage({ userClient, familyId, vaultId, seconds: audio.seconds }),
-    transcribe: () => transcribeWithOpenAI({ apiKey, audioBytes, storagePath }),
+    consume: async () => {
+      reservation = await reserveBudget(admin, 'transcription');
+      return consumeVoiceTranscriptionUsage({ userClient, familyId, vaultId, seconds: audio.seconds });
+    },
+    transcribe: () => transcribeWithOpenAI({ apiKey, audioBytes, storagePath, reservation:reservation! }),
     finish: async (status, transcript) => {
       const { error } = await admin.from("voice_transcription_jobs").update({ status, transcript: transcript ?? null })
         .eq("scope_id", scope).eq("content_hash", audio.hash).eq("token", token);
       if (error) throw new Error("Could not save transcription result");
     },
     release: async () => {
+      if(reservation) await reservation.cancelUnstarted();
       const { error } = await admin.rpc("release_voice_transcription", {
         p_scope: scope, p_hash: audio.hash, p_token: token,
       });
@@ -346,72 +347,23 @@ serve(async (req) => {
       .eq("id", memoryVoiceNoteId).eq("path", storagePath);
     if (saveError) throw new Error("Could not save voice transcript");
 
-    // 3) Rebuild the complete memory context so a new voice note never
-    // replaces the written memory or an earlier voice note.
-    const { data: memory, error: memoryErr } = await admin
-      .from("memories")
-      .select("prompt_text, body, memory_date_label, people, location, mood")
-      .eq("id", memoryId)
-      .eq("vault_id", vaultId)
-      .maybeSingle();
-    if (memoryErr) return json(500, { error: memoryErr.message });
-
-    const { data: allVoiceNotes, error: notesErr } = await admin
-      .from("memory_voice_notes")
-      .select("title, transcript, created_at")
-      .eq("vault_id", vaultId)
-      .eq("memory_id", memoryId)
-      .order("created_at", { ascending: true });
-    if (notesErr) return json(500, { error: notesErr.message });
-
-    const voiceContext = (allVoiceNotes || [])
-      .map((note: any, index: number) => {
-        const noteTranscript = (note?.transcript || "").toString().trim();
-        if (!noteTranscript) return "";
-        const noteTitle = (note?.title || "Voice note").toString().trim();
-        return `Voice note ${index + 1} (${noteTitle}):\n${noteTranscript}`;
-      })
-      .filter(Boolean);
-
-    const fullText = [
-      memory?.prompt_text ? `Title: ${memory.prompt_text}` : "",
-      memory?.body ? `Memory: ${memory.body}` : "",
-      memory?.memory_date_label ? `When: ${memory.memory_date_label}` : "",
-      memory?.people ? `People: ${memory.people}` : "",
-      memory?.location ? `Location: ${memory.location}` : "",
-      memory?.mood ? `Mood: ${memory.mood}` : "",
-      ...voiceContext,
-    ].filter(Boolean).join("\n");
-    const chunks = chunkText(fullText, 900);
-
-    // Clean old chunks for this memory before inserting the complete rebuild.
-    await admin
-      .from("memory_chunks")
-      .delete()
-      .eq("vault_id", vaultId)
-      .eq("memory_id", memoryId);
-
-    const payloadChunks = chunks.map((t, i) => ({
-      vault_id: vaultId,
-      memory_id: memoryId,
-      chunk_index: i,
-      chunk_text: t,
-    }));
-
-    if (payloadChunks.length) {
-      const { error: cErr } = await admin.from("memory_chunks").insert(payloadChunks);
-      if (cErr) return json(500, { error: `memory_chunks insert failed: ${cErr.message}` });
-    }
+    // Atomically rebuild from saved text and all recordings. Caller access was
+    // checked above; only this server client can invoke the index writer.
+    const {data:indexed,error:indexError}=await admin.rpc('rebuild_memory_index',{
+      p_actor:u.user.id,p_vault:vaultId,p_memory:memoryId,
+    });
+    if(indexError) return json(503,{error:'The transcript is saved. Please refresh its memory index later.'});
 
     return json(200, {
       ok: true,
       memory_voice_note_id: memoryVoiceNoteId,
       memory_id: memoryId,
-      chunk_count: payloadChunks.length,
+      chunk_count: indexed?.chunk_count ?? 0,
     });
   } catch (e) {
+    if (e instanceof AiBudgetError) return json(429,{code:'AI_DAILY_SAFETY_LIMIT',error:e.message});
     if (e instanceof TranscriptionError) return json(e.status, { code: e.code, error: e.message });
-    console.error("index_voice_note failed:", e);
+    console.error("index_voice_note failed without a confirmed result");
     return json(500, { error: "Voice note indexing failed." });
   }
 });

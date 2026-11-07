@@ -91,7 +91,7 @@ window.addEventListener('pagehide',()=>{clearMedia();screening?.clear();});
   setTimeout(clearSession,session.expiresInMs);
   if(session.screeningReview===true){
     screening=initScreeningReview({api,status,element,onSelect:()=>{generation++;current=null;clearMedia();}});
-    screening.refresh().catch((e)=>status(e.message));
+    await screening.refresh();
   }
   await queue();status('Private review session ready.');
   const health=await api('/api/health');$('#health').textContent=health.needs_attention?'Alert delivery needs attention. Check the queue directly.':'Alert health checked.';

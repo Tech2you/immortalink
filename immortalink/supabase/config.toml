@@ -43,3 +43,7 @@ verify_jwt = false
 # consumed by a service-only RPC, never by a caller-supplied recipient or payload.
 [functions.send_screening_delivery]
 verify_jwt = false
+
+# One-use database dispatch authority; no client-supplied source or destination.
+[functions.media_backup_worker]
+verify_jwt = false

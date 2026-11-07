@@ -1,0 +1,57 @@
+{
+  "date": "2026-11-06",
+  "appId": "6802720270",
+  "appVersion": "1.0",
+  "mainDescription": "Your family's stories deserve a place together.\n\nHeiro brings photos, written memories and voice notes into family spaces you can return to and add to over time.\n\nSAVE THE DETAILS THAT MATTER\nCapture everyday moments, favourite stories and familiar voices. Add photos and recordings to a memory so the story stays with the moment.\n\nBUILD YOUR FAMILY TREE\nCreate a family tree and invite relatives to join. Choose which memories appear in your family feed.\n\nREMEMBER TOGETHER\nCreate shared legacy profiles for loved ones. Family members can contribute their own memories, photos and recordings to the same profile.\n\nEXPLORE MEMORIES WITH OPTIONAL AI\nAsk questions about saved memories and use voice transcription with your permission. Relevant content is sent to OpenAI only after you enable AI processing. AI features have usage limits and may make mistakes. You can keep saving and reading memories without enabling them.\n\nCHOOSE THE SPACE YOUR FAMILY NEEDS\nStart with Free Family and 500 MB of shared storage. Each active Heiro Family contribution provides 5 GB, and each Heiro Legacy contribution provides 25 GB. Multiple family members can subscribe, and their active contributions combine into shared family storage. Paid storage replaces the free 500 MB allowance. Monthly and annual options are available. Renewals maintain the contributed space; they do not add more storage each month.\n\nSTAY IN CONTROL\nReport a specific memory or member, block a member, manage Apple subscriptions and request account deletion from the app. Contributions to shared legacy profiles remain with the family after a contributor deletes their account, as described in our Privacy Policy.\n\nSUBSCRIPTIONS\nPrices are shown in the app before purchase. Payment is charged to your Apple Account at confirmation. Subscriptions renew automatically unless cancelled at least 24 hours before the current period ends. Your account is charged for renewal within 24 hours before the end of the current period. Manage or cancel your subscription in your Apple Account settings. Cancellation stops future renewal; paid access continues until the end of the current period. Deleting a Heiro account does not cancel an Apple subscription.\n\nPrivacy Policy: https://heiro.app/privacy.html\nTerms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/",
+  "appReviewNotes": "DEMO ACCESS\nThe supplied account is a separate, email-confirmed Heiro login. No inbox access or one-time code is needed. It opens the fictional Morgan Family only and has no access to real customer families. All sample profiles, stories, photo and audio are demonstration content. The account starts on Free Family; no paid entitlement has been fabricated.\n\nWALKTHROUGH\n1. Sign in, then open Alex Morgan under Your Vault. Scroll to Sunday in the garden to view the sample photo and play the original eight-second test tone (four beeps, no speech). You can create your own voice note using Record voice.\n2. Tap Family tree in the vault header. Open Grandma Evelyn to inspect the shared legacy profile and Her favourite Sundays memory.\n3. Use Write a memory, Add media or Record voice to create a disposable contribution.\n4. Open Settings > Subscription to view Family storage. Each active Heiro Family subscription contributes 5 GB and each Heiro Legacy subscription contributes 25 GB. Multiple members can subscribe; active storage, AI-answer and transcription allowances add together for that Heiro family. Paid storage replaces the free 500 MB allowance. Renewals maintain capacity rather than adding storage each month. This is separate from Apple Family Sharing. Product IDs retain the original everroots prefix after the Heiro rename.\n5. AI features are optional and require a separate OpenAI data-permission decision. They have usage limits; ordinary memory storage and reading do not require AI permission.\n6. Settings provides account deletion and Apple subscription management. Deleting a Heiro account does not cancel an Apple subscription. Contributions to shared legacy profiles may remain with the family as explained in the Privacy Policy.\n\nSupport and review contact are provided below. This version is being prepared for review; release is manual.",
+  "subscriptions": [
+    {
+      "name": "Heiro Family Monthly",
+      "description": "Adds 5 GB to shared family storage. Billed monthly.",
+      "reviewNotes": "Heiro Family is an optional auto-renewing contribution, billed monthly. Each active subscription provides 5 GB to the purchaser's Heiro family. Multiple family members can subscribe; their active storage and monthly AI-answer and transcription allowances add together for the family. Paid storage replaces the free 500 MB allowance. Renewals maintain the contributed space; they do not add more storage each month. Entitlements are applied only after Apple transaction validation. This is sharing within Heiro, not Apple Family Sharing. Each Apple Account can hold one subscription in the Heiro Plans group. Basic invitations and Free Family remain available without purchase. AI and transcription are optional, require separate permission and have usage limits. Manage or cancel through Apple. Cancellation stops renewal; paid access continues until expiry. Deleting a Heiro account does not cancel its Apple subscription.",
+      "southAfricanPrice": 119.99,
+      "status": "Ready for Review",
+      "url": "https://appstoreconnect.apple.com/apps/6802720270/distribution/subscriptions/6806165607"
+    },
+    {
+      "name": "Heiro Family Annual",
+      "description": "Adds 5 GB to shared family storage. Billed annually.",
+      "reviewNotes": "Heiro Family is an optional auto-renewing contribution, billed annually. Each active subscription provides 5 GB to the purchaser's Heiro family. Multiple family members can subscribe; their active storage and monthly AI-answer and transcription allowances add together for the family. Paid storage replaces the free 500 MB allowance. Renewals maintain the contributed space; they do not add more storage each month. Entitlements are applied only after Apple transaction validation. This is sharing within Heiro, not Apple Family Sharing. Each Apple Account can hold one subscription in the Heiro Plans group. Basic invitations and Free Family remain available without purchase. AI and transcription are optional, require separate permission and have usage limits. Manage or cancel through Apple. Cancellation stops renewal; paid access continues until expiry. Deleting a Heiro account does not cancel its Apple subscription.",
+      "southAfricanPrice": 1199.99,
+      "status": "Ready for Review",
+      "url": "https://appstoreconnect.apple.com/apps/6802720270/distribution/subscriptions/6806163679"
+    },
+    {
+      "name": "Heiro Legacy Monthly",
+      "description": "Adds 25 GB to shared family storage. Billed monthly.",
+      "reviewNotes": "Heiro Legacy is an optional auto-renewing contribution, billed monthly. Each active subscription provides 25 GB to the purchaser's Heiro family. Multiple family members can subscribe; their active storage and monthly AI-answer and transcription allowances add together for the family. Paid storage replaces the free 500 MB allowance. Renewals maintain the contributed space; they do not add more storage each month. Entitlements are applied only after Apple transaction validation. This is sharing within Heiro, not Apple Family Sharing. Each Apple Account can hold one subscription in the Heiro Plans group. Basic invitations and Free Family remain available without purchase. AI and transcription are optional, require separate permission and have usage limits. Manage or cancel through Apple. Cancellation stops renewal; paid access continues until expiry. Deleting a Heiro account does not cancel its Apple subscription.",
+      "southAfricanPrice": 199.99,
+      "status": "Ready for Review",
+      "url": "https://appstoreconnect.apple.com/apps/6802720270/distribution/subscriptions/6805965740"
+    },
+    {
+      "name": "Heiro Legacy Annual",
+      "description": "Adds 25 GB to shared family storage. Billed annually.",
+      "reviewNotes": "Heiro Legacy is an optional auto-renewing contribution, billed annually. Each active subscription provides 25 GB to the purchaser's Heiro family. Multiple family members can subscribe; their active storage and monthly AI-answer and transcription allowances add together for the family. Paid storage replaces the free 500 MB allowance. Renewals maintain the contributed space; they do not add more storage each month. Entitlements are applied only after Apple transaction validation. This is sharing within Heiro, not Apple Family Sharing. Each Apple Account can hold one subscription in the Heiro Plans group. Basic invitations and Free Family remain available without purchase. AI and transcription are optional, require separate permission and have usage limits. Manage or cancel through Apple. Cancellation stops renewal; paid access continues until expiry. Deleting a Heiro account does not cancel its Apple subscription.",
+      "southAfricanPrice": 1799.99,
+      "status": "Ready for Review",
+      "url": "https://appstoreconnect.apple.com/apps/6802720270/distribution/subscriptions/6805961899"
+    }
+  ],
+  "verification": {
+    "mainDescriptionSaved": true,
+    "reviewNotesSaved": true,
+    "draftItems": 6,
+    "subscriptionItems": 4
+  },
+  "unchanged": {
+    "prices": true,
+    "selectedBuild": "32",
+    "releaseMode": "manual"
+  },
+  "pending": [
+    "Select and verify the final release build",
+    "Replace subscription review screenshots that still show the old storage offer"
+  ],
+  "submitted": false
+}

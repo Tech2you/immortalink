@@ -1,0 +1,71 @@
+Heiro media loading and previews — build 47 — 1 November 2026
+
+Requested
+- Review ScreenRecording_11-01-2026 10-39-42_1.MP4.
+- Improve family-feed photo loading.
+- Remove only the legacy composer About shortcut; retain the About tab.
+- Open highlight and Media photos/videos when tapped.
+- Preserve existing working features; local iPhone delivery.
+
+Implementation
+- Feed carousels prepare one adjacent viewport instead of waiting for a swipe.
+  A 20-item regression test verifies this does not mount the entire album.
+- RecentPhoto reads account-scoped saved bytes and their ETag together, sends
+  If-None-Match to the current URL, and reuses bytes only after HTTP 304.
+  HTTP 200 replaces bytes/validator; 401/403/404/410 discard the cache entry.
+  Old cache entries without validators retain normal download behavior.
+  Disk lookup has a 200ms ceiling; persistence no longer delays first display.
+  Offline expiry, size limits, account-change guards and quiet placeholders remain.
+- New read-only gallery supplies selected-index paging, pinch zoom and close.
+  Videos reuse the existing player. Cache/account changes disable gallery paging.
+- Legacy highlights gain tap-to-open; their long-press deletion remains.
+  Legacy Media gains preview taps beneath the existing delete controls.
+- Own/member Media grids open previews. Existing own/member highlight galleries
+  start at the tapped item; own-highlight delete controls remain intact.
+- Cached own-vault highlights can be viewed without enabling offline edits.
+- Legacy composer retains Write memory/Add media; bottom About tab stays.
+
+Verification
+- Full configured Flutter regression suite: 430 passed, no failures.
+- Separate inert-default Apple configuration test: 1 passed.
+- Focused tests cover conditional downloads, revocation/deletion, account switch,
+  old cache compatibility, delayed disk writes, offline display, video playback,
+  selected-index previews, large text, deletion controls and all three vault types.
+- Gallery singleton access test isolated from prior tests' fake-async clocks;
+  initial harness hangs resolved before the final complete regression run.
+- Focused analyzer (10 changed/new component and test files): no issues.
+  Screen analysis: no errors; pre-existing unused/deprecation diagnostics remain.
+- git diff --check passed.
+- Protected billing service/config, relationship service/tree, upload picker/batch,
+  and legacy-allowance widget hashes match pre-change copies.
+- iOS release build 1.0.0 (47) succeeded; bundle version checked independently.
+- codesign --verify --deep --strict succeeded with Mac certificate access.
+- No backend, pricing, stored media, TestFlight or App Store draft changes.
+
+Delivery state
+- Initial install failed with CoreDevice 4016; user deferred installation.
+- User later reconnected and replied ready. First resumed connection reset;
+  a refreshed device check showed paired availability, and installation using
+  the iPhone UDID succeeded in place without uninstalling the app.
+- Independently read installed app: com.everroots.app, version 1.0.0, build 47.
+- Heiro successfully launched on the iPhone after installation.
+- Pending user acceptance: feed swiping, highlight/Media photo/video opening,
+  and retained About tab with the extra legacy composer shortcut removed.
+- Performance improvement is locally verified behavior, not a measured live-phone
+  speed benchmark. First uncached photos still depend on network speed; existing
+  cache entries acquire validators on their next successful full download.
+
+Recovery / evidence
+- Pre-change git HEAD: 3a90fcd (working tree initially clean).
+- Source copies/protected hashes: /private/tmp/heiro-before-build47
+- Previous signed app: /private/tmp/heiro-build46-before-media-fix.app
+- New app: build/ios/iphoneos/Runner.app
+- Logs: /private/tmp/heiro47-full-final.log, heiro47-default-config.log,
+  heiro47-final-analyze.log, heiro47-build.log, heiro47-install.log/.json
+- Successful delivery evidence: /private/tmp/heiro47-install-connected.json,
+  /private/tmp/heiro47-installed-apps.json, /private/tmp/heiro47-launch-resumed.json.
+- Video contact sheet: /private/tmp/heiro47-video-sheet.png (24 frames, 82.33s).
+- Current Storage validator implementation checked against:
+  https://github.com/supabase/storage/blob/master/src/storage/renderer/asset.ts
+  https://supabase.com/docs/guides/storage/cdn/smart-cdn
+- Reviewed current Supabase changelog; no backend upgrade required for this change.

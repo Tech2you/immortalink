@@ -3,7 +3,7 @@ import { checkedObject } from './backend.mjs';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const hash = /^[a-f0-9]{64}$/;
-export const PHOTO_RESPONSE_BYTES = 2 * 1024 * 1024;
+export const PHOTO_RESPONSE_BYTES = 512 * 1024;
 export const photoDigest = bytes => createHash('sha256').update(bytes).digest('hex');
 export function validPhotoWork(work) {
   const job = work?.job;
@@ -12,7 +12,7 @@ export function validPhotoWork(work) {
     job && typeof job === 'object' && !Array.isArray(job) &&
     Object.keys(job).every(k => ['id', 'lease_token', 'revision'].includes(k)) &&
     uuid.test(job.id) && uuid.test(job.lease_token) && hash.test(job.revision) &&
-    Number.isInteger(work.image_index) && work.image_index >= 0 && work.image_index < 4;
+    Number.isInteger(work.image_index) && work.image_index >= 0 && work.image_index < 20;
 }
 export function validPreparedPhoto(image) {
   return image?.bytes instanceof Uint8Array && image.bytes.length > 3 &&

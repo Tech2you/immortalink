@@ -39,7 +39,7 @@ test('internal transport is default-off, requires a separate secret and rejects 
   }
   assert.equal((await handler(request(undefined, { 'content-type': 'text/plain' }))).status, 400);
   assert.equal((await handler(new Request('https://example.invalid', { headers: { 'x-heiro-screening-worker': token } }))).status, 405);
-  for (const body of [{ job, image_index: 4 }, { job, image_index: 0, url: 'https://private' }, { job: {} }]) {
+  for (const body of [{ job, image_index: 20 }, { job, image_index: 0, url: 'https://private' }, { job: {} }]) {
     assert.equal((await handler(request(body))).status, 400);
   }
   assert.equal((await handler(request({ secret: 'x'.repeat(2048) }))).status, 503);
@@ -56,6 +56,8 @@ test('authenticated child response survives owned-buffer cleanup and replay cann
   assert.equal((await handler(request())).status, 503);
   assert.deepEqual(f.counts(), { claims: 2, downloads: 1, finishes: 1 });
 });
+
+
 
 test('one decoder per handler isolate; a second concurrent request is rejected before claiming', { timeout: 2000 }, async () => {
   const f = handlerFixture(); let release, entered;
@@ -85,7 +87,7 @@ test('parent sends one fixed-route request with only the lease and ordinal and v
 test('non-success responses and tampered metadata never retry or return bytes', async () => {
   for (const change of [h => { h['content-type'] = 'text/plain'; }, h => { h['x-heiro-photo-revision'] = 'b'.repeat(64); },
     h => { h['x-heiro-photo-ticket'] = 'bad'; }, h => { h['x-heiro-photo-sha256'] = 'b'.repeat(64); },
-    h => { h['content-length'] = '2097153'; }, h => { h['content-length'] = '-1'; }, null]) {
+    h => { h['content-length'] = '524289'; }, h => { h['content-length'] = '-1'; }, null]) {
     let calls = 0;
     const prepare = createRemotePhotoPreparer({ ...options, fetcher: async () => {
       calls++; const h = headers(); change?.(h);
@@ -98,7 +100,7 @@ test('non-success responses and tampered metadata never retry or return bytes', 
 test('streamed over-limit body is rejected even when declared size lies', async () => {
   let cancelled = false;
   const prepare = createRemotePhotoPreparer({ ...options, fetcher: async () => new Response(new ReadableStream({
-    start(c) { c.enqueue(new Uint8Array(2097153)); }, cancel() { cancelled = true; },
+    start(c) { c.enqueue(new Uint8Array(524289)); }, cancel() { cancelled = true; },
   }), { headers: { ...headers(), 'content-length': '8' } }) });
   await assert.rejects(prepare(job, 0), /PHOTO_TRANSPORT_UNAVAILABLE/); assert(cancelled);
 });

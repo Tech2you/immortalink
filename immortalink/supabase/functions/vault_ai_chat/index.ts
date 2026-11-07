@@ -6,17 +6,17 @@
 // ✅ Forces correct “speaker” perspective: AI speaks as vault owner (“I/me”), viewer is “you”
 // ✅ Strict grounding + labeled Era context
 //
-// FIXES:
-// - vaults SELECT now ONLY uses real columns (id, owner_id, family_id, name, display_name)
-// - slot_key mapping supports parent_left/right and child_left/right
-// - relationship questions return deterministic answer (no hallucination)
-// - ✅ NEW: relationship works even when viewer slot_key is NULL (family root) by using owner slot_key
+// Kinship uses confirmed graph links only; story questions keep their original topic.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { resolveRelationshipFromGraph, type RelationshipRow } from "./relationship_graph.ts";
+import { isRelationshipQuestion, familyContext, emptyVaultAnswer, GROUNDING_RULES } from "./conversation_grounding.ts";
 import { hasAiProcessingConsent } from "../_shared/ai_processing_consent.ts";
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.116.0";
 import { boundedEmbeddingCandidates, MAX_QUESTION_CHARACTERS } from "../_shared/ai_cost_limits.ts";
+
+import { budgetedJson, AiBudgetError } from "../_shared/ai_budget.ts";
+const budgetClient = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {auth:{persistSession:false,autoRefreshToken:false}});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -94,21 +94,16 @@ async function rankContextByMeaning(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
-    const response = await fetch("https://api.openai.com/v1/embeddings", {
+    const embeddingBody = {model:"text-embedding-3-small",input:[question,...candidates]};
+    const payload = await budgetedJson(budgetClient(), 'embedding', embeddingBody, () => fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
-      body: JSON.stringify({
-        model: "text-embedding-3-small",
-        input: [question, ...candidates],
-      }),
-    });
-    if (!response.ok) return candidates.slice(0, maximum);
-
-    const payload = await response.json();
+      body: JSON.stringify(embeddingBody),
+    }));
     const vectors = Array.isArray(payload?.data)
       ? payload.data.map((row: any) => row?.embedding as number[])
       : [];
@@ -132,107 +127,17 @@ async function rankContextByMeaning(
 }
 
 async function withTimeout<T>(p: PromiseLike<T>, ms: number, label: string): Promise<T> {
-  const res = await Promise.race([
-    p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
-    ),
-  ]);
-  return res as T;
-}
-
-/** Detect “relationship” questions so we can answer deterministically. */
-function isRelationshipQuestion(qRaw: string): boolean {
-  const q = (qRaw || "").toLowerCase();
-  return (
-    q.includes("how are we related") ||
-    q.includes("who am i to you") ||
-    q.includes("who are you to me") ||
-    q.includes("are you my") ||
-    q.includes("am i your") ||
-    q.includes("relationship") ||
-    q.includes("related") ||
-    q.includes("dad") ||
-    q.includes("father") ||
-    q.includes("mom") ||
-    q.includes("mother") ||
-    q.includes("sibling") ||
-    q.includes("brother") ||
-    q.includes("sister") ||
-    q.includes("uncle") ||
-    q.includes("aunt") ||
-    q.includes("niece") ||
-    q.includes("nephew") ||
-    q.includes("cousin") ||
-    q.includes("grand") ||
-    q.includes("grandson") ||
-    q.includes("grandchild") ||
-    q.includes("great grandson") ||
-    q.includes("great-grandson") ||
-    q.includes("great granddaughter") ||
-    q.includes("great-granddaughter")
-  );
-}
-
-/**
- * Relation from an absolute family-tree slot_key (as used in your FamilyTreeScreen constants).
- * Interpreted as: "this person's relationship to the FAMILY ROOT".
- *
- * We reuse this mapping to infer relationships even when the viewer is the family root (slot_key null).
- */
-function relationToRootFromSlotKey(slotKeyRaw: string): string {
-  const slotKey = (slotKeyRaw || "").toLowerCase().trim();
-  if (!slotKey) return "unknown";
-
-  // common legacy slots
-  if (slotKey === "parent_left" || slotKey === "parent_right") return "parent";
-  if (slotKey === "child_left" || slotKey === "child_right") return "child";
-
-  if (slotKey === "mother" || slotKey === "father") return "parent";
-  if (slotKey.startsWith("child_")) return "child";
-
-  if (slotKey.startsWith("grandchild_")) return "grandchild";
-  if (slotKey.startsWith("greatgrandchild_") || slotKey.startsWith("great_grandchild_")) return "great-grandchild";
-  if (slotKey === "greatgrandchild_left" || slotKey === "greatgrandchild_right") return "great-grandchild";
-
-  if (
-    slotKey === "maternal_gm" ||
-    slotKey === "maternal_gf" ||
-    slotKey === "paternal_gm" ||
-    slotKey === "paternal_gf"
-  ) return "grandparent";
-
-  if (
-    slotKey === "maternal_ggm" ||
-    slotKey === "maternal_ggf" ||
-    slotKey === "paternal_ggm" ||
-    slotKey === "paternal_ggf"
-  ) return "great-grandparent";
-
-  if (slotKey === "spouse_1" || slotKey.startsWith("spouse_")) return "spouse";
-  if (slotKey.startsWith("sibling_")) return "sibling";
-
-  return "unknown";
-}
-
-/** Invert relation. */
-function invertRelation(viewerRel: string): string {
-  const r = (viewerRel || "").toLowerCase().trim();
-
-  if (r === "owner") return "owner";
-  if (r === "parent") return "child";
-  if (r === "child") return "parent";
-
-  if (r === "grandparent") return "grandchild";
-  if (r === "grandchild") return "grandparent";
-
-  if (r === "great-grandparent") return "great-grandchild";
-  if (r === "great-grandchild") return "great-grandparent";
-
-  if (r === "sibling") return "sibling";
-  if (r === "spouse") return "spouse";
-
-  return "family member";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function prettyRel(r: string): string {
@@ -273,18 +178,14 @@ function icebreakerRelationshipLine({
   if (viewerToOwner === "unknown") {
     return `The viewer is allowed to access ${displayName}'s vault, but the exact relationship is unknown.`;
   }
-  return `The viewer is ${prettyRel(viewerToOwner)} to ${displayName}. From ${displayName}'s perspective, the viewer is their ${prettyRel(ownerToViewer)}.`;
+  return `The viewer is ${prettyRel(viewerToOwner)} to ${displayName}. ${displayName} is the viewer's ${prettyRel(ownerToViewer)}.`;
 }
 
 function fallbackIcebreakers(displayName: string, relationshipLine: string): string[] {
-  const subject = displayName || "this person";
-  const relationshipHint = relationshipLine.toLowerCase().includes("unknown")
-    ? "as a family member"
-    : "through your family connection";
   return [
-    `What story about ${subject}'s life would you most like to hear ${relationshipHint}?`,
-    `What tradition or family habit would help you understand ${subject} better?`,
-    `What childhood, school, work, or travel memory should we ask ${subject} about first?`,
+    "What details are saved about you?",
+    "Can you share a story that is recorded here?",
+    "How are we related?",
   ];
 }
 
@@ -353,7 +254,7 @@ CRITICAL:
 - If you need missing info, ask what they want to know about ME, or suggest what to add ABOUT ME.
 
 RELATIONSHIP RULE:
-- Do NOT mention relationship/roles/slot_key unless the user explicitly asked a relationship question.
+- Use recorded family links when a question asks about relatives. Do not recite the viewer-to-profile relationship unless the viewer asks how the two of you are related.
 
 GROUNDING:
 - Only answer personal facts that are present in Vault context.
@@ -367,19 +268,10 @@ GROUNDING:
   For example, exams, grades and studying are academic experiences; jobs and
   qualifications are career experiences. Do not say a broad topic is missing
   when the context contains a directly related concrete fact.
-- If the vault context doesn't contain the answer:
-  1) Say: "I'm not sure yet from what's saved here."
-  2) Offer 2–4 example topics ABOUT ME you could talk about next (choose only generic ones unless context supports specific ones):
-     - where I lived
-     - what I did for work/study
-     - my personality/values
-     - my family stories / big life lessons
-  3) Ask ONE follow-up question that is ancestor-focused:
-     "What would you like to know about my life next?"
-  4) Optionally suggest: "If you add a memory/voice note about <topic>, I can answer better."
+${GROUNDING_RULES}
 
 STYLE:
-- 1–3 short sentences, then one follow-up question.
+- 1–3 short sentences. A follow-up question is optional and must stay on the requested topic.
 - Do not dump multiple paragraphs.
 - Do not say "From the vault:" unless asked "how do you know?"
 - If the relevant memory includes a Mood, gently reflect that emotional character
@@ -395,12 +287,13 @@ ${context || "(no saved memories found)"}
 User question:
 ${question}
 
-Viewer context (do NOT mention unless asked about relationship):
+Confirmed family context (use only when relevant to the question):
 ${viewerContextLine}
 `;
 
   const body = {
     model: "gpt-4o-mini",
+    service_tier: "default",
     temperature: 0.35,
     max_tokens: 220,
     messages: [
@@ -413,7 +306,7 @@ ${viewerContextLine}
   const timeout = setTimeout(() => controller.abort(), 12_000);
 
   try {
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    const data = await budgetedJson(budgetClient(), "chat", body, () => fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -421,20 +314,14 @@ ${viewerContextLine}
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-      const errTxt = await resp.text().catch(() => "");
-      return { ok: false, error: `OpenAI error ${resp.status}: ${errTxt}` };
-    }
-
-    const data = await resp.json();
+    }));
     const answer = data?.choices?.[0]?.message?.content?.toString() ?? "";
     return {
       ok: true,
       answer: answer.trim() || "I’m not sure yet — add more memories to this vault.",
     };
   } catch (e: any) {
+    if(e instanceof AiBudgetError) throw e;
     return { ok: false, error: `OpenAI request failed: ${e?.message ?? String(e)}` };
   } finally {
     clearTimeout(timeout);
@@ -470,7 +357,8 @@ GROUNDING:
 - Use only the authorized memory excerpts provided.
 - You may reference a memory topic, but do not reveal unsupported details or combine details from unrelated memories.
 - Do not invent facts, dates, names, locations, emotions, or relationships.
-- If memory context is sparse, ask more general family-history questions.
+- If memory context is sparse, ask what is saved about the profile. Do not presuppose a favourite, emotion, life event or a relative not mentioned in the excerpts.
+- Prefer questions the provided excerpts can actually answer; a fact about study does not establish a favourite study memory.
 
 STYLE:
 - Return JSON only: {"icebreakers":["question 1","question 2","question 3"]}
@@ -490,6 +378,7 @@ ${memoryContext || "(No saved memory excerpts were available.)"}
 
   const body = {
     model: "gpt-4o-mini",
+    service_tier: "default",
     temperature: 0.78,
     max_tokens: 260,
     messages: [
@@ -502,7 +391,7 @@ ${memoryContext || "(No saved memory excerpts were available.)"}
   const timeout = setTimeout(() => controller.abort(), 12_000);
 
   try {
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    const data = await budgetedJson(budgetClient(), "chat", body, () => fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -510,18 +399,7 @@ ${memoryContext || "(No saved memory excerpts were available.)"}
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-      const errTxt = await resp.text().catch(() => "");
-      return {
-        ok: false,
-        icebreakers: fallbackIcebreakers(displayName, relationshipLine),
-        error: `OpenAI error ${resp.status}: ${errTxt}`,
-      };
-    }
-
-    const data = await resp.json();
+    }));
     const raw = data?.choices?.[0]?.message?.content?.toString() ?? "";
     return {
       ok: true,
@@ -712,10 +590,8 @@ serve(async (req) => {
     const question = textClean(payload?.question || payload?.prompt || payload?.message || "");
     const mode = textClean(payload?.mode || payload?.intent || "").toLowerCase();
     const wantsIcebreakers = mode === "icebreaker" || mode === "icebreakers";
-    const displayNameFromClient = textClean(payload?.displayName || payload?.display_name || "");
     const requestedFamilyId = textClean(payload?.familyId || payload?.family_id || "");
 
-    const viewerDisplayName = textClean(payload?.viewerDisplayName || payload?.viewer_display_name || "");
 
     const isLegacyChat = !vaultId && !!legacyMemberId;
 
@@ -805,141 +681,49 @@ serve(async (req) => {
         "this person";
     }
 
-    const displayName = displayNameFromClient || ownerDisplayName;
+    const displayName = ownerDisplayName;
 
     const isOwnerAsking = !isLegacyChat && !!vaultOwnerUserId && viewerUserId === vaultOwnerUserId;
 
-    // =========================
-    // Relationship resolution (robust)
-    // =========================
-    let viewerRole = isOwnerAsking ? "owner" : "visitor";
-    let viewerSlotKey = "";
-    let ownerSlotKey = "";
-
+    // Read existing, caller-authorized links; never infer kinship from UI slots.
     let viewerToOwner = isOwnerAsking ? "owner" : "unknown";
-    let ownerToViewer = isOwnerAsking ? "owner" : "family member";
-    let resolvedByGraph = false;
-
-    if (!isOwnerAsking && familyId) {
+    let ownerToViewer = isOwnerAsking ? "owner" : "unknown";
+    let viewerVaultId = isOwnerAsking ? vaultId : "";
+    let graphRows: RelationshipRow[] | null = null;
+    if (familyId) {
       try {
-        const { data: viewerVault } = await withTimeout(
-          supabase
-            .from("vaults")
-            .select("id")
-            .eq("owner_id", viewerUserId)
-            .maybeSingle(),
-          3_000,
-          "DB(viewer vault)"
-        );
-
-        const viewerVaultId = textClean((viewerVault as any)?.id || "");
-        if (viewerVaultId) {
-          const { data: graphRows, error: graphErr } = await withTimeout(
-            supabase
-              .from("family_relationships")
-              .select(
-                "parent_type, parent_id, child_type, child_id, relationship_kind",
-              )
-              .eq("family_id", familyId),
-            4_000,
-            "DB(family relationship graph)"
-          );
-
-          if (!graphErr && Array.isArray(graphRows)) {
-            const graphRelation = resolveRelationshipFromGraph(
-              viewerVaultId,
-              isLegacyChat ? legacyMemberId : vaultId,
-              graphRows as RelationshipRow[],
-              isLegacyChat ? "legacy" : "vault",
-            );
-            if (graphRelation) {
-              viewerToOwner = graphRelation.viewerToOwner;
-              ownerToViewer = graphRelation.ownerToViewer;
-              resolvedByGraph = true;
+        const [viewerResult, graphResult] = await Promise.all([
+          isOwnerAsking
+            ? Promise.resolve({ data: { id: vaultId }, error: null })
+            : withTimeout(supabase.from("vaults").select("id")
+                .eq("owner_id", viewerUserId).maybeSingle(), 3_000, "DB(viewer vault)"),
+          withTimeout(supabase.from("family_relationships")
+            .select("parent_type, parent_id, child_type, child_id, relationship_kind")
+            .eq("family_id", familyId), 4_000, "DB(family relationship graph)"),
+        ]);
+        if (!viewerResult.error) viewerVaultId = textClean(viewerResult.data?.id || "");
+        if (!graphResult.error && Array.isArray(graphResult.data) && graphResult.data.length < 1000) {
+          graphRows = graphResult.data as RelationshipRow[];
+          if (viewerVaultId) {
+            const relation = resolveRelationshipFromGraph(viewerVaultId,
+              isLegacyChat ? legacyMemberId : vaultId, graphRows,
+              isLegacyChat ? "legacy" : "vault");
+            if (relation) {
+              viewerToOwner = relation.viewerToOwner;
+              ownerToViewer = relation.ownerToViewer;
             }
           }
         }
       } catch (_) {
-        // Keep the proven slot-key resolver below as a compatibility fallback.
-      }
-
-      try {
-        // Fetch BOTH member rows in one query (viewer + vault owner)
-        const { data: rows, error: fmErr } = await withTimeout(
-          supabase
-            .from("family_members")
-            .select("user_id, role, slot_key")
-            .eq("family_id", familyId)
-            .in(
-              "user_id",
-              isLegacyChat ? [viewerUserId] : [viewerUserId, vaultOwnerUserId],
-            ),
-          3_000,
-          "DB(family_members)"
-        );
-
-        if (!fmErr && Array.isArray(rows)) {
-          for (const r of rows) {
-            const uid = textClean((r as any).user_id || "");
-            if (uid === viewerUserId) {
-              viewerRole = textClean((r as any).role || viewerRole) || viewerRole;
-              viewerSlotKey = textClean((r as any).slot_key || "");
-            }
-            if (!isLegacyChat && uid === vaultOwnerUserId) {
-              ownerSlotKey = textClean((r as any).slot_key || "");
-            }
-          }
-        }
-      } catch (_) {
-        // ignore MVP
-      }
-      if (isLegacyChat) {
-        ownerSlotKey = textClean((legacyRow as any)?.slot_key || "");
-      }
-
-      // ✅ Key logic:
-      // If viewer has slot_key -> assume owner is FAMILY ROOT (slot_key null) OR we can't infer; still use viewer slot for best-effort.
-      // If viewer slot_key is NULL (viewer is family root) -> infer viewer↔owner from OWNER slot_key.
-      //
-      // This fixes your screenshot: viewer is root (slot null), owner is child_2 → viewerToOwner = parent.
-      if (!resolvedByGraph && !viewerSlotKey && ownerSlotKey) {
-        // owner relation to viewer(root)
-        const ownerToViewerRel = relationToRootFromSlotKey(ownerSlotKey); // e.g. child
-        viewerToOwner = invertRelation(ownerToViewerRel);               // e.g. parent
-        ownerToViewer = invertRelation(viewerToOwner);                  // e.g. child
-      } else if (!resolvedByGraph && viewerSlotKey && !ownerSlotKey) {
-        // owner is root, viewer has slot
-        viewerToOwner = relationToRootFromSlotKey(viewerSlotKey);
-        ownerToViewer = invertRelation(viewerToOwner);
-      } else if (!resolvedByGraph && viewerSlotKey && ownerSlotKey) {
-        // both have slots → MVP: only confidently detect siblings/spouse if obvious; else unknown
-        const vRel = relationToRootFromSlotKey(viewerSlotKey);
-        const oRel = relationToRootFromSlotKey(ownerSlotKey);
-
-        if (vRel === "child" && oRel === "child") {
-          viewerToOwner = "sibling";
-          ownerToViewer = "sibling";
-        } else if (vRel === "spouse" || oRel === "spouse") {
-          // not perfect, but avoids "unknown" for spouse slot
-          viewerToOwner = "spouse";
-          ownerToViewer = "spouse";
-        } else {
-          viewerToOwner = "unknown";
-          ownerToViewer = "family member";
-        }
-      } else if (!resolvedByGraph) {
-        viewerToOwner = "unknown";
-        ownerToViewer = "family member";
+        // Failed/unknown is not evidence that a relative does not exist.
       }
     }
-
-    const whoLine = viewerDisplayName
-      ? `Viewer name: ${viewerDisplayName}`
-      : "Viewer name: (not provided)";
-
-    const viewerContextLine = isOwnerAsking
-      ? `The person asking is the VAULT OWNER.\n${whoLine}`
-      : `The person asking is the viewer/visitor.\nRelationship (viewer → owner): ${prettyRel(viewerToOwner)}\nRelationship (owner → viewer): ${prettyRel(ownerToViewer)}\nSlot key (viewer): ${viewerSlotKey || "(null)"}\nSlot key (owner): ${ownerSlotKey || "(null)"}\nRole (viewer): ${viewerRole}\n${whoLine}`;
+    const viewerContextLine = (isOwnerAsking
+      ? "The person asking owns this profile."
+      : `Relationship (viewer to profile): ${viewerToOwner}. Relationship (profile to viewer): ${ownerToViewer}.`) +
+      "\n" + familyContext(
+        `${isLegacyChat ? "legacy" : "vault"}:${isLegacyChat ? legacyMemberId : vaultId}`,
+        viewerVaultId ? `vault:${viewerVaultId}` : null, graphRows);
 
     if (wantsIcebreakers) {
       const relationshipLine = icebreakerRelationshipLine({
@@ -1120,6 +904,12 @@ serve(async (req) => {
       }
     }
 
+    if (!contextParts.length) {
+      return json({ answer: emptyVaultAnswer(question,
+        `${isLegacyChat ? "legacy" : "vault"}:${isLegacyChat ? legacyMemberId : vaultId}`,
+        viewerVaultId ? `vault:${viewerVaultId}` : null, graphRows) }, 200);
+    }
+
     const quotaError = await consumeAiUsage({
       supabase,
       familyId,
@@ -1150,7 +940,8 @@ serve(async (req) => {
 
     return json({ answer: ai.answer }, 200);
   } catch (e: any) {
-    console.error("vault_ai_chat fatal:", e);
+    if(e instanceof AiBudgetError) return json({error:e.message,code:"AI_DAILY_SAFETY_LIMIT"},429);
+    console.error("vault_ai_chat failed without a confirmed result");
     return json({ error: "AI chat failed. Please try again." }, 500);
   }
 });

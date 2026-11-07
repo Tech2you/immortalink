@@ -26,7 +26,7 @@ test('JPEG, PNG and WebP decode to bounded opaque JPEG without metadata', async 
 test('large still images resize without cropping or enlarging small pictures', async () => {
   const output = await preparePhoto(await create(4096, 2048).png().toBuffer(), 'image/png');
   const meta = await sharp(output.bytes).metadata();
-  assert.equal(meta.width, 2048); assert.equal(meta.height, 1024);
+  assert.equal(meta.width, 1024); assert.equal(meta.height, 512);
 });
 
 test('truncated, mismatched, oversized, active and unsupported inputs fail closed', async () => {

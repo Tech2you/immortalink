@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../widgets/logo_watermark.dart';
 import '../widgets/vault_media.dart';
+import '../widgets/vault_media_gallery.dart';
 import 'relationship_tree_screen.dart';
 import 'vault_companion_screen.dart';
 
@@ -877,14 +878,14 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
     }
   }
 
-  void _openHighlightsGallery() {
+  void _openHighlightsGallery([int initialIndex = 0]) {
     if (_featuredPhotos.isEmpty) return;
 
     showDialog<void>(
       context: context,
       builder: (ctx) {
-        final pc = PageController();
-        int idx = 0;
+        final pc = PageController(initialPage: initialIndex);
+        int idx = initialIndex;
 
         final maxH = MediaQuery.of(ctx).size.height * 0.85;
         final maxW = MediaQuery.of(ctx).size.width * 0.95;
@@ -1953,7 +1954,7 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                   final photo = _featuredPhotos[index];
                   return InkWell(
                     borderRadius: BorderRadius.circular(18),
-                    onTap: _openHighlightsGallery,
+                    onTap: () => _openHighlightsGallery(index),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(18),
                       child: VaultMedia.network(
@@ -2272,9 +2273,17 @@ class _VaultReadOnlyScreenState extends State<VaultReadOnlyScreen> {
                 borderRadius: BorderRadius.circular(14),
                 child: Container(
                   color: Colors.black.withValues(alpha: 0.04),
-                  child: VaultMedia.network(
-                    uniquePhotos[index]['url'] ?? '',
-                    fit: BoxFit.contain,
+                  child: InkWell(
+                    key: ValueKey('member-media-$index'),
+                    onTap: () => openVaultMediaGallery(
+                      context,
+                      uniquePhotos.map((item) => item['url'] ?? '').toList(),
+                      initialIndex: index,
+                    ),
+                    child: VaultMedia.network(
+                      uniquePhotos[index]['url'] ?? '',
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
               ),

@@ -11,6 +11,7 @@ import '../widgets/ai_processing_consent.dart';
 import '../services/recent_cache.dart';
 import '../services/vault_snapshot.dart';
 import '../widgets/vault_media.dart';
+import '../widgets/vault_media_gallery.dart';
 import '../utils/vault_media_upload.dart';
 import 'dart:typed_data';
 
@@ -1226,6 +1227,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           targetId: memoryId,
           client: _supabase,
           requestAfterSave: true,
+          onlyIfNeedsRequest: true,
         );
       }
     } on PostgrestException catch (e) {
@@ -1239,6 +1241,8 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     final memoryId = (memory['id'] ?? '').toString();
     if (memoryId.isEmpty) return;
 
+    final sharingUserId = _supabase.auth.currentUser?.id;
+    _editingMemoryId = memoryId;
     final result = await _showLegacyMemoryEditor(
       title: 'Edit memory',
       actionLabel: 'Save changes',
@@ -1252,7 +1256,13 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       initialLocation: (memory['location'] ?? '').toString(),
     );
 
-    if (result == null) return;
+    _editingMemoryId = null;
+    final mediaChanged = _pendingSharingChecks.remove(memoryId);
+    if (result == null) {
+      if (mediaChanged)
+        await _checkSharingAfterMediaEdit(memoryId, sharingUserId);
+      return;
+    }
 
     final promptText = result.promptText.trim();
     final body = result.body.trim();
@@ -1304,6 +1314,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
           targetId: memoryId,
           client: _supabase,
           requestAfterSave: true,
+          onlyIfNeedsRequest: true,
         );
       }
     } on PostgrestException catch (e) {
@@ -2012,6 +2023,33 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     }
   }
 
+  String? _editingMemoryId;
+  final Set<String> _pendingSharingChecks = {};
+
+  Future<void> _checkSharingAfterMediaEdit(
+    String memoryId,
+    String? userId,
+  ) async {
+    if (!contentScreeningControlsEnabled ||
+        !mounted ||
+        userId == null ||
+        _supabase.auth.currentUser?.id != userId)
+      return;
+    if (_editingMemoryId == memoryId) {
+      _pendingSharingChecks.add(memoryId);
+      return;
+    }
+    await showMemorySharingStatus(
+      context,
+      kind: 'legacy_memory',
+      targetId: memoryId,
+      client: _supabase,
+      expectedUserId: userId,
+      requestAfterSave: true,
+      onlyIfNeedsRequest: true,
+    );
+  }
+
   bool _selectingMemoryMedia = false;
   MemoryMediaTarget _memoryMediaTarget(String memoryId) =>
       MemoryMediaTarget.legacy(
@@ -2043,6 +2081,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
       if (count > 0) {
         await _loadMemoryPhotos();
         _toast('$count media items added to memory.');
+        await _checkSharingAfterMediaEdit(memoryId, userId);
       }
     } on PostgrestException catch (e) {
       await _handleUploadError(e, 'Add media failed');
@@ -2174,6 +2213,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     String memoryId,
     Map<String, String> photo,
   ) async {
+    final sharingUserId = _supabase.auth.currentUser?.id;
     try {
       final id = (photo['id'] ?? '').trim();
       final path = (photo['path'] ?? '').trim();
@@ -2194,6 +2234,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
       await _loadMemoryPhotos();
       _toast('Media deleted.');
+      await _checkSharingAfterMediaEdit(memoryId, sharingUserId);
     } on PostgrestException catch (e) {
       _toast('Delete failed: ${e.message}');
     } catch (e) {
@@ -2205,6 +2246,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
     String memoryId,
     _LegacyVoiceNote note,
   ) async {
+    final sharingUserId = _supabase.auth.currentUser?.id;
     try {
       final key = 'legacy_voice:${note.id}';
       if (_playingVoiceKey == key) {
@@ -2226,6 +2268,7 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
 
       await _loadMemoryVoice();
       _toast('Voice note deleted.');
+      await _checkSharingAfterMediaEdit(memoryId, sharingUserId);
     } on PostgrestException catch (e) {
       _toast('Delete failed: ${e.message}');
     } catch (e) {
@@ -2416,11 +2459,6 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                 avatar: const Icon(Icons.photo_camera_outlined, size: 18),
                 label: const Text('Add media'),
                 onPressed: _uploadingPhoto ? null : _uploadPhoto,
-              ),
-              ActionChip(
-                avatar: const Icon(Icons.person_outline, size: 18),
-                label: const Text('About'),
-                onPressed: () => setState(() => _selectedLegacySection = 1),
               ),
             ],
           ),
@@ -2624,7 +2662,15 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                           ? Container(
                               color: Colors.black.withValues(alpha: 0.05),
                             )
-                          : VaultMedia.network(url, fit: BoxFit.cover),
+                          : InkWell(
+                              key: ValueKey('legacy-media-$index'),
+                              onTap: () => openVaultMediaGallery(
+                                context,
+                                media.map((item) => item['url'] ?? '').toList(),
+                                initialIndex: index,
+                              ),
+                              child: VaultMedia.network(url, fit: BoxFit.cover),
+                            ),
                       Positioned(
                         top: 8,
                         right: 8,
@@ -2736,8 +2782,14 @@ class _LegacyVaultScreenState extends State<LegacyVaultScreen> {
                   final photo = _photos[index];
                   final url = (photo['url'] ?? '').trim();
                   return InkWell(
+                    key: ValueKey('legacy-highlight-$index'),
                     borderRadius: BorderRadius.circular(18),
                     onLongPress: () => _deletePhoto(photo),
+                    onTap: () => openVaultMediaGallery(
+                      context,
+                      _photos.map((item) => item['url'] ?? '').toList(),
+                      initialIndex: index,
+                    ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(18),
                       child: url.isEmpty

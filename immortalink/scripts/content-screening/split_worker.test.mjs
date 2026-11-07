@@ -31,7 +31,7 @@ const sql = {
   finish_content_screening_photo: a => ['finish_content_screening_photo($1,$2,$3)', [a.p_ticket, a.p_bytes, a.p_sha256]],
 };
 
-test('local DB, checked Storage, separate photo HTTP requests and one aggregate mock classifier', {
+test('local DB, checked Storage, separate photo HTTP requests and individually reserved mock classifications', {
   skip: !process.env.PGLITE_MODULE, timeout: 120000,
 }, async t => {
   const wasm = await createWasmPhotoPreparer(await readFile(new URL(import.meta.resolve('@imagemagick/magick-wasm/magick.wasm'))));
@@ -40,6 +40,7 @@ test('local DB, checked Storage, separate photo HTTP requests and one aggregate 
     'delete-during-provider', 'manifest-tampered', 'child-failed', 'budget-exhausted']) {
     await t.test(scenario, async t => {
       const db = await reviewFixture(); t.after(() => db.close());
+      await db.exec(await readFile(new URL('../../supabase/migrations/20261105195157_content_screening_single_image_requests.sql',import.meta.url),'utf8'));
       await db.exec('create or replace function everroot_limit_bigint(uuid,text) returns bigint language sql as $$select 1073741824::bigint$$');
       const count = scenario.startsWith('four-') ? 4 : scenario === 'text-only' ? 0 : 1;
       for (let i = 1; i < count; i++) {
@@ -92,7 +93,8 @@ test('local DB, checked Storage, separate photo HTTP requests and one aggregate 
         prepareImage: async (...args) => { const image = await prepareImage(...args); remote.push(image.bytes); return image; },
         fetcher: async (url, init) => {
           providerCalls++; assert.equal(url, 'https://api.openai.com/v1/moderations');
-          const payload = JSON.parse(init.body); assert.equal(payload.input.length, count + 1);
+          const payload = JSON.parse(init.body); assert.equal(payload.input.filter(x=>x.type==='image_url').length, count ? 1 : 0);
+          assert.equal(payload.input.filter(x=>x.type==='text').length, providerCalls === 1 ? 1 : 0);
           for (const item of payload.input.filter(i => i.type === 'image_url')) {
             const bytes = Buffer.from(item.image_url.url.split(',')[1], 'base64');
             const metadata = await sharp(bytes).metadata(); assert.equal(metadata.exif, undefined); assert.equal(metadata.xmp, undefined);
@@ -107,7 +109,7 @@ test('local DB, checked Storage, separate photo HTTP requests and one aggregate 
       assert.equal(result.state === 'clear', succeeds, diagnostic); assert.equal(await clear(db), succeeds);
       assert.equal((await asUser(db, viewer, 'select id from memories where id=$1', [memory])).rows.length, succeeds ? 1 : 0);
       assert.equal((await asUser(db, viewer, 'select * from memory_photos where memory_id=$1', [memory])).rows.length, succeeds ? count : 0);
-      assert.equal(providerCalls, dispatches ? 1 : 0, diagnostic);
+      assert.equal(providerCalls, dispatches ? Math.max(1,count) : 0, diagnostic);
       if (scenario === 'flagged') assert.equal(result.state, 'review');
       assert.equal(childCalls, scenario === 'budget-exhausted' ? 0 : count);
       assert.equal(downloads, ['child-failed', 'budget-exhausted'].includes(scenario) ? 0 : count);

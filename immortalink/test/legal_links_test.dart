@@ -9,7 +9,8 @@ void main() {
       expect(legalUrl(LegalDestination.privacy).scheme, 'https');
       expect(legalUrl(LegalDestination.privacy).host, 'heiro.app');
       expect(legalUrl(LegalDestination.privacy).path, '/privacy.html');
-      expect(legalUrl(LegalDestination.terms).host, 'www.apple.com');
+      expect(legalUrl(LegalDestination.terms).host, 'heiro.app');
+      expect(legalUrl(LegalDestination.terms).path, '/terms.html');
       expect(
         legalUrl(LegalDestination.support).path,
         'linebreakers@outlook.com',

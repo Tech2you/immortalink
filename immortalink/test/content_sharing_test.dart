@@ -66,6 +66,7 @@ Future<void> open(
   SharingBackend backend, {
   bool initial = false,
   bool enabled = true,
+  bool onlyIfNeedsRequest = false,
   String kind = 'memory',
   double scale = 1,
 }) async {
@@ -89,6 +90,7 @@ Future<void> open(
               client: backend,
               requestAfterSave: initial,
               enabled: enabled,
+              onlyIfNeedsRequest: onlyIfNeedsRequest,
             ),
             child: const Text('Open'),
           ),
@@ -104,6 +106,32 @@ Future<void> open(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets(
+    'recording-only share needs no OpenAI permission and refresh stops on close',
+    (tester) async {
+      final backend = SharingBackend()
+        ..statusResult = sharing('ready_no_check', true);
+      await open(tester, backend, initial: true);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(backend.calls, contains('request_content_screening'));
+      expect(
+        backend.calls,
+        isNot(contains('get_content_screening_permission')),
+      );
+      backend.statusResult = sharing('shared');
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      expect(
+        find.text('Available to family members with access.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+      final calls = backend.calls.length;
+      await tester.pump(const Duration(seconds: 30));
+      expect(backend.calls.length, calls);
+    },
+  );
   setUpAll(() async {
     const fontPath = String.fromEnvironment('SCREENING_TEST_FONT');
     if (fontPath.isNotEmpty) {
@@ -392,16 +420,44 @@ void main() {
     });
   }
 
+  for (final name in ['disabled', 'archive', 'not_requested', 'shared']) {
+    testWidgets('media edit does not prompt when status is $name', (
+      tester,
+    ) async {
+      final backend = SharingBackend()..statusResult = sharing(name);
+      await open(tester, backend, initial: true, onlyIfNeedsRequest: true);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(backend.calls, ['get_content_sharing_status']);
+    });
+  }
+
+  testWidgets('media edit rechecks shared content without uploading it again', (
+    tester,
+  ) async {
+    final backend = SharingBackend()
+      ..permission = state(allowed: true, revision: '1');
+    await open(tester, backend, initial: true, onlyIfNeedsRequest: true);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    expect(
+      backend.calls.where((name) => name == 'request_content_screening').length,
+      1,
+    );
+    expect(
+      find.text('Saved. Waiting for safety checks before sharing.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+  });
+
   test(
     'production callers retain off switch and create requests only after attachment saves',
     () {
       final composer = File(
         'lib/screens/create_memory_screen.dart',
       ).readAsStringSync();
-      expect(
-        composer,
-        contains('_shareToFamilyFeed && !contentScreeningControlsEnabled'),
-      );
+      expect(composer, contains('if (_shareToFamilyFeed) {'));
       expect(
         composer.indexOf('await _uploadVoice(userId, memoryId)'),
         lessThan(composer.indexOf('await showMemorySharingStatus(')),

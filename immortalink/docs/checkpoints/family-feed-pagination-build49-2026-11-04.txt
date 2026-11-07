@@ -1,0 +1,88 @@
+Heiro family feed paging — 2026-11-04
+
+Scope
+- User approved expanding the newest-memory feed carefully, with fast loading
+  and preserved access controls. This task implements 30 newest shared memories,
+  ten at a time, within the existing 30-day window. Vault contents are untouched.
+- No database migration, Edge Function deployment, dependency upgrade, purchase
+  configuration change, TestFlight upload or App Store draft edit was performed.
+- Existing uncommitted media, AI and other work was preserved.
+
+Changes
+- The feed constructs posts near the viewport instead of constructing every
+  loaded post at once. Photo requests begin when those posts are built; existing
+  adjacent-photo prefetching and authenticated photo revalidation are retained.
+- Initial metadata is limited to ten results plus one lookahead per vault batch.
+  Scrolling requests the next ten, with a manual fallback and a ceiling of 30.
+- Date filtering runs in the query. Ordering uses creation time and UUID, with a
+  stable snapshot upper bound and cursor to avoid offset duplicates during edits.
+- Large-family vault batches have at most three memory requests in flight.
+  Avatar signing is limited to authors in the requested page.
+- Duplicate continuation requests are suppressed. Refreshes supersede pending
+  continuation results. Same-family full refreshes coalesce; membership-change
+  refresh intent survives intervening media events in the debounce interval.
+- Transient continuation failures keep existing posts and offer explicit retry.
+  Authorization denials clear content. Cache invalidation and account/family
+  guards reject late responses. Membership and hidden-vault scope are rechecked
+  on every page. Existing own-vault and About exclusions remain.
+- No privileged server credential or public media bucket was introduced. The
+  cursor is validated before entering a filter expression; it grants no access.
+  Client page limits are performance controls, not a replacement for server RLS.
+
+Verification
+- 441 Flutter tests passed with the existing phone purchase configuration.
+- Separate unconfigured-purchases safeguard passed: 1 additional test.
+- Seven new tests cover large-family page merging, stable timestamp ties,
+  insertion/deletion, date/sharing/scope exclusions, cursor validation, bounded
+  requests, lazy photo construction, retry behaviour and the actual feed screen.
+- Real-screen checks cover 10/20/30 paging, repeated taps, transient failures,
+  stale continuations after refresh, missing membership, authorization denials,
+  access-cache invalidation and absence of feed database writes.
+- 37 local database security tests passed against the existing migrations:
+  family membership access, personal-memory reporting, family content safety,
+  media-reference authorization and the launch access audit.
+- Read-only live metadata checks confirmed RLS on memories, photo/voice metadata,
+  vaults, memberships and hidden-vault preferences. Relevant storage buckets are
+  private. The existing feed index covers vault, sharing flag and creation time.
+- Static analysis found no errors or warnings. Eighteen existing informational
+  style/deprecation notices remain in the feed screen; new files are clean.
+- git diff --check passed. SHA-256 comparison of 497 pre-task files found only
+  lib/screens/vaults_screen.dart changed in source/tests, plus two generated iOS
+  Flutter build-configuration files updated by the release build.
+- Earlier test attempts failed due to fixture parsing and fake socket cleanup;
+  the final full run passed. No production code was weakened to pass those checks.
+- These are scoped regression and access checks, not proof that the entire app
+  has no vulnerabilities. No physical-device latency measurement was made.
+
+Delivery
+- Signed iOS release 1.0.0 (49) built successfully; signature verification passed
+  using the Mac signing services. The restricted-shell trust check needed those
+  services, not a change to the signature or entitlements.
+- Installation was deferred at the user's request, then resumed when the user
+  replied ready. Device inventory confirmed the paired iPhone was available and
+  still running build 48. The saved build 49 signature was checked again.
+- Build 49 installed in place successfully. A separate device inventory confirms
+  Heiro 1.0.0 (49), and launching com.everroots.app succeeded. No uninstall or
+  account change was performed. Final scrolling/media interaction is for the
+  user to confirm; successful launch does not establish a measured load speed.
+
+Evidence and rollback
+- /private/tmp/heiro49-full-tests.log
+- /private/tmp/heiro49-default-config.log
+- /private/tmp/heiro49-security.log
+- /private/tmp/heiro49-analyze.log
+- /private/tmp/heiro49-build.log
+- /private/tmp/heiro49-codesign.log
+- /private/tmp/heiro49-devices.json
+- /private/tmp/heiro49-install-ready-devices.json
+- /private/tmp/heiro49-before-install-apps.json
+- /private/tmp/heiro49-install.json
+- /private/tmp/heiro49-installed-apps.json
+- /private/tmp/heiro49-launch.json
+- /private/tmp/heiro49-baseline.json
+- /private/tmp/heiro49-scope-check.json
+- /private/tmp/heiro49-before/lib/screens/vaults_screen.dart
+- /private/tmp/heiro49-before/Runner48.app (previous signed local build)
+- build/ios/iphoneos/Runner.app (new build 49)
+- Temporary evidence/backups are local and may be removed by macOS. No secrets
+  or private family-memory contents are included in this checkpoint.

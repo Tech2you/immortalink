@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 
 const origin = 'https://vbzyvaylfdhwowdbodmk.supabase.co';
 const rpcNames = new Set(['claim_content_screening', 'prepare_content_screening', 'finish_content_screening',
-  'claim_content_screening_photo', 'finish_content_screening_photo']);
+  'claim_content_screening_photo', 'finish_content_screening_photo',
+  'claim_screening_run', 'finish_screening_run']);
 const buckets = new Set(['vault_photos', 'memory_photos', 'legacy_memory_photos']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const mimes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const failure = () => new Error('SCREENING_BACKEND_UNAVAILABLE');
-export const TRANSFER_LIMITS = Object.freeze({ photoBytes: 12 * 1024 * 1024, jsonBytes: 128 * 1024, timeoutMs: 15000 });
+export const TRANSFER_LIMITS = Object.freeze({ photoBytes: 12 * 1024 * 1024, jsonBytes: 512 * 1024, timeoutMs: 15000 });
 
 export function checkedObject(item) {
   if (!item || !uuid.test(item.id) || !buckets.has(item.bucket) || typeof item.path !== 'string' ||
@@ -16,9 +18,10 @@ export function checkedObject(item) {
       typeof item.updated_at !== 'string' || !Number.isFinite(Date.parse(item.updated_at)) ||
       !mimes.has(item.metadata?.mimetype) || !Number.isSafeInteger(Number(item.metadata?.size)) ||
       Number(item.metadata.size) < 1 || Number(item.metadata.size) > TRANSFER_LIMITS.photoBytes ||
-      typeof item.metadata?.eTag !== 'string' || !/^[a-f0-9]{32}$/i.test(item.metadata.eTag)) throw failure();
+      typeof item.metadata?.eTag !== 'string' || !/^(?:[a-f0-9]{32}|"[a-f0-9]{32}")$/i.test(item.metadata.eTag)) throw failure();
   return { path: `/storage/v1/object/authenticated/${item.bucket}/${item.path.split('/').map(encodeURIComponent).join('/')}`,
-    bytes: Number(item.metadata.size), mime: item.metadata.mimetype, digest: item.metadata.eTag.toLowerCase() };
+    bytes: Number(item.metadata.size), mime: item.metadata.mimetype,
+    digest: item.metadata.eTag.replaceAll('"', '').toLowerCase() };
 }
 
 async function bounded(response, maximum) {

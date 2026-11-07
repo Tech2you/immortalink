@@ -11,6 +11,8 @@ const response = (body = data, overrides = {}) => new Response(body, { headers: 
   'content-type': 'image/png', 'content-length': String(data.length), ...overrides } });
 const backend = fetcher => createScreeningBackend({ serviceKey: 'test-service-key', fetcher });
 
+
+
 test('fixed private Storage endpoint checks version, size, MIME and digest without exposing URLs', async () => {
   let calls = 0;
   const client = backend(async (url, options) => {
@@ -35,6 +37,17 @@ test('path tricks, unsupported buckets and missing server version metadata never
     const client = backend(async () => assert.fail('No download allowed'));
     assert.throws(() => checkedObject({ ...item(), ...change }));
     await assert.rejects(client.download({ ...item(), ...change }), { message: 'SCREENING_BACKEND_UNAVAILABLE' });
+  }
+});
+
+test('accepts actual quoted Supabase ETags but rejects weak and malformed metadata', async () => {
+  const photo = item(); photo.metadata.eTag = `"${digest}"`;
+  assert.deepEqual(await backend(async (_, options) => {
+    assert.equal(options.headers['If-Match'], `"${digest}"`);
+    return response();
+  }).download(photo), data);
+  for (const eTag of [`W/"${digest}"`, `"${digest}`, `${digest}"`, `"${digest}-2"`, `${digest}\r\n`]) {
+    assert.throws(() => checkedObject({...photo, metadata:{...photo.metadata, eTag}}));
   }
 });
 

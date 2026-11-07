@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -11,6 +13,7 @@ Future<void> showMemorySharingStatus(
   SupabaseClient? client,
   String? expectedUserId,
   bool requestAfterSave = false,
+  bool onlyIfNeedsRequest = false,
   bool enabled = contentScreeningControlsEnabled,
 }) async {
   if (!enabled || !context.mounted) return;
@@ -19,15 +22,27 @@ Future<void> showMemorySharingStatus(
   if (userId == null || (expectedUserId != null && expectedUserId != userId)) {
     return;
   }
+  final service = ContentSharingService(
+    client: backend,
+    expectedUserId: userId,
+    enabled: enabled,
+  );
+  if (onlyIfNeedsRequest) {
+    try {
+      final status = await service.status(kind, targetId);
+      if (!context.mounted || !service.sameAccount || !status.canRequest)
+        return;
+    } catch (_) {
+      if (!context.mounted || !service.sameAccount) return;
+      // A status failure must not undo the successful media edit. The dialog
+      // offers a bounded retry without saving or uploading the media again.
+    }
+  }
   await showDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (_) => _SharingDialog(
-      service: ContentSharingService(
-        client: backend,
-        expectedUserId: userId,
-        enabled: enabled,
-      ),
+      service: service,
       kind: kind,
       targetId: targetId,
       requestAfterSave: requestAfterSave,
@@ -57,6 +72,34 @@ class _SharingDialogState extends State<_SharingDialog> {
   bool _permissionOpen = false;
   String? _error;
   bool _declined = false;
+  Timer? _refresh;
+  int _automaticChecks = 0;
+
+  void _scheduleRefresh() {
+    _refresh?.cancel();
+    if (!mounted ||
+        _automaticChecks >= 10 ||
+        !widget.service.sameAccount ||
+        (_status?.state != ContentSharingState.queued &&
+            _status?.state != ContentSharingState.checking)) {
+      return;
+    }
+    _refresh = Timer(const Duration(seconds: 3), () {
+      if (!mounted || _busy || !widget.service.sameAccount) return;
+      if (WidgetsBinding.instance.lifecycleState != null &&
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+        return;
+      }
+      _automaticChecks++;
+      unawaited(_load());
+    });
+  }
+
+  @override
+  void dispose() {
+    _refresh?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -70,6 +113,7 @@ class _SharingDialogState extends State<_SharingDialog> {
 
   Future<void> _load({bool initial = false}) async {
     if (!mounted) return;
+    _refresh?.cancel();
     setState(() {
       _busy = true;
       _error = null;
@@ -97,22 +141,26 @@ class _SharingDialogState extends State<_SharingDialog> {
         _status?.canRequest == true) {
       await _request();
     }
+    _scheduleRefresh();
   }
 
   Future<void> _request() async {
     if (_busy || _status?.canRequest != true) return;
+    _refresh?.cancel();
     setState(() {
       _busy = true;
       _error = null;
       _permissionOpen = true;
     });
     try {
-      final allowed = await requestContentScreeningPermission(
-        context,
-        client: widget.service.client,
-        expectedUserId: widget.service.expectedUserId,
-        enabled: widget.service.enabled,
-      );
+      final allowed =
+          _status?.state == ContentSharingState.readyNoCheck ||
+          await requestContentScreeningPermission(
+            context,
+            client: widget.service.client,
+            expectedUserId: widget.service.expectedUserId,
+            enabled: widget.service.enabled,
+          );
       if (!mounted) return;
       setState(() => _permissionOpen = false);
       if (!widget.service.sameAccount) throw StateError('Account changed');
@@ -139,6 +187,7 @@ class _SharingDialogState extends State<_SharingDialog> {
           _busy = false;
           _permissionOpen = false;
         });
+        _scheduleRefresh();
       }
     }
   }

@@ -139,7 +139,7 @@ void main() {
       final backend = ScreeningBackend();
       final results = await open(tester, backend);
       expect(
-        find.textContaining('Private drafts and existing archives'),
+        find.textContaining('Private drafts and untouched archives'),
         findsOneWidget,
       );
       expect(find.textContaining('voice recordings or videos'), findsOneWidget);
@@ -436,7 +436,7 @@ void main() {
 
   test('app and migration use the same policy and setter contract', () {
     final migration = File(
-      'supabase/migrations/20261023110215_content_screening_permission.sql',
+      'supabase/migrations/20261105172337_content_screening_launch_compatibility.sql',
     ).readAsStringSync();
     expect(migration, contains("'$contentScreeningPolicyVersion'"));
     expect(migration, contains('p_expected_user_id uuid'));

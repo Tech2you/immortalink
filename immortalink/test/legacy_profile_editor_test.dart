@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 // ignore: depend_on_referenced_packages
 import 'package:http/testing.dart';
 import 'package:immortalink/screens/legacy_vault_screen.dart';
+import 'package:immortalink/widgets/vault_media_gallery.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
@@ -21,6 +22,7 @@ void main() {
   Map<String, dynamic>? saved;
   var loads = 0;
   List<Map<String, dynamic>> memories = [];
+  List<Map<String, dynamic>> photos = [];
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -37,6 +39,29 @@ void main() {
       url: 'http://localhost:54321',
       anonKey: 'test-key',
       httpClient: MockClient((request) async {
+        if (request.url.path.endsWith('/legacy_member_photos')) {
+          return http.Response(
+            jsonEncode(photos),
+            200,
+            request: request,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (request.url.path.endsWith('/object/sign/vault_photos')) {
+          final paths = (jsonDecode(request.body) as Map)['paths'] as List;
+          return http.Response(
+            jsonEncode([
+              for (final path in paths)
+                {
+                  'path': path,
+                  'signedURL': '/object/sign/vault_photos/$path?token=test',
+                },
+            ]),
+            200,
+            request: request,
+            headers: {'content-type': 'application/json'},
+          );
+        }
         if (request.url.path.endsWith('/legacy_memories')) {
           return http.Response(
             jsonEncode(memories),
@@ -78,6 +103,7 @@ void main() {
     };
     saved = null;
     memories = [];
+    photos = [];
   });
 
   tearDownAll(() async => Supabase.instance.dispose());
@@ -118,6 +144,56 @@ void main() {
     expect(loads, greaterThan(before));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'legacy highlights and Media open the tapped photo; About remains a tab',
+    (tester) async {
+      photos = [
+        {'id': 'one', 'path': 'legacy/one.jpg'},
+        {'id': 'two', 'path': 'legacy/two.jpg'},
+      ];
+      await open(tester);
+      expect(find.widgetWithText(ActionChip, 'About'), findsNothing);
+      expect(find.widgetWithText(ActionChip, 'Write memory'), findsOneWidget);
+      expect(find.widgetWithText(ActionChip, 'Add media'), findsOneWidget);
+      final second = find.byKey(const ValueKey('legacy-highlight-1'));
+      await tester.ensureVisible(second);
+      await tester.tap(second);
+      await tester.pumpAndSettle();
+      expect(find.byType(VaultMediaGallery), findsOneWidget);
+      expect(find.text('2 / 2'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close media'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('About').first);
+      await tester.tap(find.text('About').first);
+      await tester.pumpAndSettle();
+      expect(find.text('About them'), findsWidgets);
+      await tester.ensureVisible(find.text('Media').first);
+      await tester.tap(find.text('Media').first);
+      await tester.pumpAndSettle();
+      final grid = find.byKey(const ValueKey('legacy-media-0'));
+      await tester.ensureVisible(grid);
+      final remove = find
+          .descendant(
+            of: find.byType(GridView),
+            matching: find.byIcon(Icons.delete_outline),
+          )
+          .first;
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      expect(find.text('Delete media?'), findsOneWidget);
+      expect(find.byType(VaultMediaGallery), findsNothing);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await tester.tap(grid);
+      await tester.pumpAndSettle();
+      expect(find.text('1 / 2'), findsOneWidget);
+      expect(saved, isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'new legacy memory offers camera and cancellation keeps the editor',

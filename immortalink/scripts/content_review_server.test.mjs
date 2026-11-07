@@ -8,6 +8,14 @@ const version='a'.repeat(32);
 const snapshot={ report:{id,kind:'legacy_memory',status:'open',reason:'privacy',details:'<script>alert(1)</script>'},available:true,fields:{Memory:'Example'},scopeNote:'Current memory',revision:version,
   media:[{id:mediaId,kind:'image',bucket:'vault_photos',path:'private/photo.png',stamp:'now'}] };
 const png=Buffer.from([137,80,78,71,13,10,26,10]);
+test('successful void review acknowledgement accepts a real 204 without a body stream',async()=>{
+  const backend=makeBackend('fixture-key',async(url,options)=>{
+    assert.ok(url.endsWith('/rest/v1/rpc/ack_screening_review_media'));
+    assert.equal(options.method,'POST');
+    return new Response(null,{status:204});
+  });
+  assert.equal(await backend.request('/rest/v1/rpc/ack_screening_review_media',{}),null);
+});
 async function fixture(){
   const calls=[];let time=0;
   const backend={request:async(path,body)=>{calls.push({path,body});

@@ -30,7 +30,7 @@ function mock(overrides = {}) {
       calls.push({ name, args });
       if (overrides.rpc) return overrides.rpc(name, args, input);
       if (name === 'claim_content_screening') return { id, lease_token: lease, revision };
-      if (name === 'prepare_content_screening') return args.p_authorize ? { code: 'DISPATCH_RESERVED', revision } : input;
+      if (name === 'prepare_content_screening') return args.p_authorize ? { code: 'DISPATCH_RESERVED', revision, requests_reserved: Math.max(1, Math.ceil(Array.from(input.text).length / 4000), input.images.length) } : input;
       return { state: 'clear' };
     },
     async download() { downloads++; const bytes = Buffer.from(photo); originals.push(bytes); return bytes; },
@@ -75,10 +75,10 @@ test('one leased memory uses one request after normalization and authorization, 
   assert(m.originals.every(x => x.every(v => v === 0))); assert(m.normalized.every(x => x.every(v => v === 0)));
 });
 
-test('four photos share one reservation and provider call; text-only needs no image processor', async () => {
+test('four photos share one whole-batch reservation and four provider calls; text-only needs no image processor', async () => {
   const m = mock(); m.input.images = Array.from({ length: 4 }, (_, i) => ({ ...m.input.images[0], path: `family/vault/photo-${i}.png` }));
   assert.equal((await processScreeningJob(m.options)).state, 'clear');
-  assert.deepEqual(m.counts(), { downloads: 4, provider: 1 });
+  assert.deepEqual(m.counts(), { downloads: 4, provider: 4 });
   assert.equal(m.calls.filter(c => c.args?.p_authorize === true).length, 1);
   const text = mock(); text.input.images = []; text.options.normalize = async () => assert.fail('No decode needed');
   assert.equal((await processScreeningJob(text.options)).state, 'clear');
@@ -88,11 +88,11 @@ test('four photos share one reservation and provider call; text-only needs no im
 test('invalid or duplicate source references and source-byte limits stop before any download', async () => {
   for (const change of [
     s => { s.images.push(s.images[0]); }, s => { s.images[0].path = '../../secret'; },
-    s => { s.images = Array(5).fill(s.images[0]); }, s => { s.text = 'x'.repeat(20001); },
+    s => { s.images = Array(21).fill(s.images[0]); }, s => { s.text = 'x'.repeat(60001); },
     s => { s.images = null; }, s => { s.revision = 'b'.repeat(64); },
     s => { delete s.processing_reserved; }, s => { s.processing_reserved = false; },
     s => { s.images = Array.from({ length: 3 }, (_, i) => ({ ...s.images[0], path: `family/vault/${i}.png`,
-      metadata: { ...s.images[0].metadata, size: 12 * 1024 * 1024 } })); },
+      metadata: { ...s.images[0].metadata, size: 12 * 1024 * 1024 + 1 } })); },
   ]) {
     const m = mock(); change(m.input);
     assert.equal((await processScreeningJob(m.options)).state, 'pending');
@@ -128,7 +128,7 @@ test('provider clear is never returned when finish is stale, expired, missing or
   for (const finish of [{ state: 'stale' }, { code: 'LEASE_UNAVAILABLE' }, null, 'throw']) {
     const m = mock({ rpc: async (name, args, input) => {
       if (name === 'claim_content_screening') return { id, lease_token: lease, revision };
-      if (name === 'prepare_content_screening') return args.p_authorize ? { code: 'DISPATCH_RESERVED', revision } : input;
+      if (name === 'prepare_content_screening') return args.p_authorize ? { code: 'DISPATCH_RESERVED', revision, requests_reserved: Math.max(1, Math.ceil(Array.from(input.text).length / 4000), input.images.length) } : input;
       if (finish === 'throw') throw new Error('private commit error');
       return finish;
     } });
@@ -141,7 +141,7 @@ test('provider errors and flags reach finish as pending or review, never clear',
   for (const state of ['pending', 'review']) {
     const m = mock({ rpc: async (name, args, input) => {
       if (name === 'claim_content_screening') return { id, lease_token: lease, revision };
-      if (name === 'prepare_content_screening') return args.p_authorize ? { code: 'DISPATCH_RESERVED', revision } : input;
+      if (name === 'prepare_content_screening') return args.p_authorize ? { code: 'DISPATCH_RESERVED', revision, requests_reserved: Math.max(1, Math.ceil(Array.from(input.text).length / 4000), input.images.length) } : input;
       assert.equal(args.p_outcome, state); return { state: state === 'pending' ? 'queued' : 'review' };
     } });
     m.options.fetcher = async () => state === 'review' ? new Response(JSON.stringify(safeBody(true))) : new Response('secret', { status: 500 });

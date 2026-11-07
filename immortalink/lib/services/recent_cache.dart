@@ -4,6 +4,13 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'offline_disk.dart';
 
+/// Bytes and their server validator must be read together, before another write.
+class RecentCacheEntry {
+  const RecentCacheEntry(this.bytes, this.entityTag);
+  final Uint8List bytes;
+  final String? entityTag;
+}
+
 /// Device-private, disposable cache. Never used to authorize an online action.
 class RecentCache extends ChangeNotifier {
   RecentCache({
@@ -165,6 +172,7 @@ class RecentCache extends ChangeNotifier {
     required String kind,
     String? title,
     String? familyId,
+    String? entityTag,
   }) => _serial(() async {
     if (_user == null || epoch != generation || bytes.length > maxBytes) return;
     try {
@@ -178,6 +186,7 @@ class RecentCache extends ChangeNotifier {
         'kind': kind,
         'title': title,
         'familyId': familyId,
+        'entityTag': entityTag,
       };
       await _prune();
     } catch (_) {
@@ -185,7 +194,9 @@ class RecentCache extends ChangeNotifier {
     }
   });
 
-  Future<Uint8List?> read(String key) {
+  Future<Uint8List?> read(String key) async => (await readEntry(key))?.bytes;
+
+  Future<RecentCacheEntry?> readEntry(String key) {
     final epoch = generation;
     return _serial(() async {
       if (_user == null || epoch != generation) return null;
@@ -198,7 +209,17 @@ class RecentCache extends ChangeNotifier {
         if (epoch != generation) return null;
         entry['used'] = _clock().millisecondsSinceEpoch;
         await _saveIndex();
-        return epoch == generation ? bytes : null;
+        if (epoch != generation || bytes == null) return null;
+        final tag = entry['entityTag'];
+        return RecentCacheEntry(
+          bytes,
+          tag is String &&
+                  tag.isNotEmpty &&
+                  tag.length <= 1024 &&
+                  !tag.contains(RegExp(r'[\r\n]'))
+              ? tag
+              : null,
+        );
       } catch (_) {
         return null;
       }
